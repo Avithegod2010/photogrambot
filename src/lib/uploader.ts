@@ -14,8 +14,9 @@ import {
   kvSet,
   type QueueRow,
 } from "./db";
-import { getBotToken, getChannelId, loadPrefs, getDeviceId } from "./settings";
+import { getBotToken, getChannelId, loadPrefs, getDeviceId, getAiApiKey, DEFAULT_AI_PROMPT } from "./settings";
 import { sendDocument, sendPhoto, TelegramError, TgMessage } from "./telegram";
+import { captionImageWithGemini } from "./ai";
 import { buildCaption, buildPreviewCaption } from "./caption";
 import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
@@ -298,21 +299,54 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     let previewMessage: TgMessage | null = null;
     let previewFileId: string | null = null;
     let previewMessageId: number | null = null;
+    let previewLocalUri: string | null = null;
     if (prefs.uploadPreviews) {
       try {
         const preview = await generatePreview(item.local_uri, prefs.previewTargetKB);
         if (preview) {
+          previewLocalUri = preview.uri;
           previewMessage = await sendPhoto(channelId, preview.uri, {
             caption: buildPreviewCaption(hash, preview.size),
             filename: `preview_${item.filename.replace(/\.[^.]+$/, "")}.jpg`,
           });
           previewFileId = previewMessage.photo?.[previewMessage.photo.length - 1]?.file_id ?? null;
           previewMessageId = previewMessage.message_id;
-          try { new File(preview.uri).delete(); } catch {}
         }
       } catch {
         previewMessage = null;
       }
+    }
+
+    let aiDescription: string | null = null;
+    let aiOnlyPreviewUri: string | null = null;
+    if (prefs.aiCaptions) {
+      try {
+        const apiKey = await getAiApiKey();
+        if (apiKey) {
+          let aiUri = previewLocalUri;
+          if (!aiUri) {
+            const tiny = await generatePreview(item.local_uri, 100);
+            if (tiny) {
+              aiUri = tiny.uri;
+              aiOnlyPreviewUri = tiny.uri;
+            }
+          }
+          if (aiUri) {
+            aiDescription = await captionImageWithGemini({
+              apiKey,
+              model: prefs.aiModel || "gemini-2.5-flash",
+              prompt: prefs.aiPrompt || DEFAULT_AI_PROMPT,
+              imageUri: aiUri,
+            });
+          }
+        }
+      } catch {}
+    }
+    if (aiOnlyPreviewUri) {
+      try { new File(aiOnlyPreviewUri).delete(); } catch {}
+    }
+    if (previewLocalUri) {
+      try { new File(previewLocalUri).delete(); } catch {}
     }
 
     const caption = buildCaption({
@@ -331,6 +365,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       device: deviceId,
       deviceName: null,
       hash,
+      aiDescription,
     });
 
     const controller = new AbortController();
@@ -368,6 +403,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       latitude: metaFull?.gps?.lat ?? null,
       longitude: metaFull?.gps?.lon ?? null,
       exif: metaFull?.technical ? JSON.stringify(metaFull.technical) : null,
+      ai_caption: aiDescription,
       error: null,
     });
     await updateQueueItem(item.id, { state: "done", error: null });
