@@ -26,7 +26,8 @@ import {
 import { MapScreen } from "./src/screens/MapScreen";
 import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
 import { pollUpdates } from "./src/lib/updates";
-import { scanRecentAndEnqueue } from "./src/lib/sync";
+import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
+import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
 import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
@@ -169,6 +170,13 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [step, locked]);
 
+  const autoSyncEnabled = useSettingsStore((s) => s.prefs.autoSync);
+  useEffect(() => {
+    if (step !== "ready" || locked) return;
+    if (autoSyncEnabled) void startCameraWatch();
+    else stopCameraWatch();
+  }, [autoSyncEnabled, step, locked]);
+
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
@@ -191,12 +199,17 @@ async function bootstrapBackgroundTasks(): Promise<void> {
       await pollUpdates();
     } catch {}
     if (prefs.autoSync) {
-      const since = Math.max(
-        prefs.lastFullSyncAt,
-        Date.now() - prefs.autoSyncIntervalHours * 3600 * 1000
-      );
-      const enqueued = await scanRecentAndEnqueue(since);
-      if (enqueued > 0) void processQueue();
+      if (await canAutoSyncNow(prefs)) {
+        const since = Math.max(
+          prefs.lastFullSyncAt,
+          Date.now() - prefs.autoSyncIntervalHours * 3600 * 1000
+        );
+        const enqueued = await scanRecentAndEnqueue(since);
+        if (enqueued > 0) void processQueue();
+      }
+      void startCameraWatch();
+    } else {
+      stopCameraWatch();
     }
     if (prefs.dbAutoBackup) {
       const lastBackup = await kvGet("last_auto_backup");

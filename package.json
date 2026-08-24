@@ -1,5 +1,5 @@
 {
-  "name": "photogram",
+  "name": "photogrambot",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
@@ -16,6 +16,7 @@
     "expo-image-picker": "~57.0.13",
     "expo-local-authentication": "~57.0.2",
     "expo-media-library": "~57.0.4",
+    "expo-network": "~57.0.1",
     "expo-secure-store": "~57.0.1",
     "expo-sharing": "~57.0.15",
     "expo-sqlite": "~57.0.1",

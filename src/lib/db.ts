@@ -59,6 +59,7 @@ export interface QueueRow {
   upload_type: string;
   state: "pending" | "running" | "done" | "failed" | "skipped" | "duplicate";
   retries: number;
+  next_attempt_at: number | null;
   error: string | null;
   created_at: number;
 }
@@ -154,6 +155,9 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["latitude", "REAL"],
     ["longitude", "REAL"],
     ["exif", "TEXT"],
+  ]);
+  await addColumnsIfMissing(db, "upload_queue", [
+    ["next_attempt_at", "INTEGER"],
   ]);
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS hash_cache (
@@ -571,11 +575,20 @@ export async function enqueueUpload(item: {
 export async function nextQueueBatch(limit: number): Promise<QueueRow[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<any>(
-    `SELECT * FROM upload_queue WHERE state = 'pending'
-     ORDER BY taken_at ASC, created_at ASC LIMIT ?`,
-    [limit]
+    `SELECT * FROM upload_queue
+     WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+     ORDER BY CASE WHEN upload_type = 'manual' THEN 0 ELSE 1 END, taken_at ASC, created_at ASC
+     LIMIT ?`,
+    [Date.now(), limit]
   );
   return rows.map((r) => r as QueueRow);
+}
+
+export async function recoverStaleRunning(): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    "UPDATE upload_queue SET state = 'pending', error = NULL WHERE state = 'running'"
+  );
 }
 
 export async function updateQueueItem(id: number, patch: Partial<QueueRow>): Promise<void> {
@@ -590,7 +603,7 @@ export async function updateQueueItem(id: number, patch: Partial<QueueRow>): Pro
 export async function requeueFailed(): Promise<void> {
   const d = await getDb();
   await d.runAsync(
-    "UPDATE upload_queue SET state = 'pending', retries = 0 WHERE state IN ('failed')"
+    "UPDATE upload_queue SET state = 'pending', retries = 0, next_attempt_at = NULL WHERE state IN ('failed')"
   );
 }
 
