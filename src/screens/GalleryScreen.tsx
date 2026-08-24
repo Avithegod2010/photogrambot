@@ -21,7 +21,7 @@ import { useSetupStore } from "../store/useSetupStore";
 import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
-import { groupPhotosByDate } from "../lib/format";
+import { groupPhotosByDate, formatBytes } from "../lib/format";
 import { getUploadedLocalIds } from "../lib/db";
 import { enqueueUploads, processQueue } from "../lib/uploader";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
@@ -37,7 +37,7 @@ const COLUMNS = 3;
 export function GalleryScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { photos, loading, loadingMore, hasMore, loadInitial, loadMore, refresh, refreshMeta } =
+  const { photos, loading, loadingMore, hasMore, loadInitial, loadMore, refresh, refreshMeta, stats } =
     useLibraryStore();
   const { channelId, channelTitle } = useSetupStore();
   const { progress, start, cancel, subscribe } = useUploadStore();
@@ -153,6 +153,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         {photo.status === "failed" || photo.status === "skipped_too_large" ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.errorContainer }]}>
             <Text style={{ color: theme.colors.error, fontSize: 11, fontWeight: "800" }}>!</Text>
+          </View>
+        ) : null}
+        {photo.status === "uploaded" ? (
+          <View style={[styles.cloudBadge, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Text style={[styles.cloudBadgeText, { color: theme.colors.onPrimaryContainer }]}>✓</Text>
           </View>
         ) : null}
         {selected ? (
@@ -289,7 +294,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
           }
           contentContainerStyle={{ paddingBottom: 120 }}
-          ListHeaderComponent={!searchResults ? <MemoriesCarousel navigation={navigation} /> : null}
+          ListHeaderComponent={
+            !searchResults ? (
+              <View>
+                <OverviewCard theme={theme} stats={stats} />
+                <MemoriesCarousel navigation={navigation} />
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
             <View>
               <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
@@ -430,6 +442,52 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
+    </View>
+  );
+}
+
+function OverviewCard({
+  theme,
+  stats,
+}: {
+  theme: ReturnType<typeof useTheme>;
+  stats: { total: number; uploaded: number; pending: number; failed: number; totalBytes: number };
+}) {
+  const [open, setOpen] = useState(true);
+  const tiles = [
+    { label: "Photos", value: String(stats.total) },
+    { label: "Backed up", value: String(stats.uploaded) },
+    { label: "Pending", value: String(stats.pending + stats.failed) },
+    { label: "Size", value: formatBytes(stats.totalBytes) },
+  ];
+  return (
+    <View style={[styles.overviewCard, { backgroundColor: theme.colors.surfaceContainer }]}>
+      <Pressable style={styles.overviewHeader} onPress={() => setOpen((v) => !v)}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 15 }}>
+            Library overview
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 1 }}>
+            {stats.uploaded} of {stats.total} backed up to your channel
+          </Text>
+        </View>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{open ? "⌃" : "⌄"}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.overviewGrid}>
+          {tiles.map((t) => (
+            <View
+              key={t.label}
+              style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest }]}
+            >
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>
+                {t.value}
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5 }}>{t.label}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -826,6 +884,46 @@ const styles = StyleSheet.create({
     height: 20,
     alignItems: "center",
     justifyContent: "center",
+  },
+  cloudBadge: {
+    position: "absolute",
+    bottom: 4,
+    right: 4,
+    borderRadius: 999,
+    width: 15,
+    height: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cloudBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
+  },
+  overviewCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  overviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  overviewGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  overviewTile: {
+    flexGrow: 1,
+    minWidth: "45%",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   favIcon: {
     color: "#FF8FA3",
