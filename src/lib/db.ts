@@ -678,6 +678,31 @@ export async function getStats(): Promise<{
   };
 }
 
+export async function getPhotosByUploadStatus(
+  which: "uploaded" | "local"
+): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const cond = which === "uploaded" ? "status = 'uploaded'" : "status != 'uploaded'";
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE ${cond} AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at DESC`
+  );
+  return rows.map(rowToPhoto);
+}
+
+export async function getLibraryCounts(): Promise<{ local: number; cloud: number }> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<any>(`
+    SELECT
+      SUM(CASE WHEN status != 'uploaded' THEN 1 ELSE 0 END) AS local,
+      SUM(CASE WHEN status = 'uploaded' THEN 1 ELSE 0 END) AS cloud
+    FROM photos
+    WHERE id NOT IN (SELECT photo_id FROM trash)
+  `);
+  return { local: row?.local ?? 0, cloud: row?.cloud ?? 0 };
+}
+
 export interface PeriodGroup {
   key: string;
   label: string;

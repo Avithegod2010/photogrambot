@@ -13,7 +13,7 @@ import { useLibraryStore } from "./src/store/useLibraryStore";
 import { useTheme } from "./src/useTheme";
 import { SetupScreen } from "./src/screens/SetupScreen";
 import { GalleryScreen } from "./src/screens/GalleryScreen";
-import { CollectionsScreen, AlbumScreen } from "./src/screens/CollectionsScreen";
+import { CollectionsScreen, AlbumScreen, LibraryScreen } from "./src/screens/CollectionsScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ViewerScreen } from "./src/screens/ViewerScreen";
 import { FolderSyncScreen } from "./src/screens/FolderSyncScreen";
@@ -110,6 +110,7 @@ function Root({ locked }: { locked: boolean }) {
             options={{ presentation: "fullScreenModal", animation: "fade" }}
           />
           <Stack.Screen name="Album" component={AlbumScreen} />
+          <Stack.Screen name="Library" component={LibraryScreen} />
           <Stack.Screen name="FolderSync" component={FolderSyncScreen} />
           <Stack.Screen name="Map" component={MapScreen} options={{ presentation: "fullScreenModal" }} />
           <Stack.Screen name="Years" component={(props: any) => <PeriodScreen {...props} mode="years" />} />

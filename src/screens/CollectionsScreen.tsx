@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -10,10 +10,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { TelegramImage } from "../components/TelegramImage";
+import { getLibraryCounts, getPhotosByUploadStatus, type PhotoRow } from "../lib/db";
+import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
 
 export function CollectionsScreen({ navigation }: { navigation: any }) {
@@ -23,6 +25,13 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [tab, setTab] = useState<"albums" | "trash">("albums");
   const [newAlbumVisible, setNewAlbumVisible] = useState(false);
   const [albumName, setAlbumName] = useState("");
+  const [counts, setCounts] = useState({ local: 0, cloud: 0 });
+
+  useFocusEffect(
+    useCallback(() => {
+      void getLibraryCounts().then(setCounts);
+    }, [])
+  );
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
 
@@ -62,6 +71,34 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
       {tab === "albums" ? (
         <ScrollView contentContainerStyle={styles.scroll}>
+          <SectionLabel text="Library" theme={theme} />
+          <View style={styles.albumGrid}>
+            <Pressable
+              style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+              onPress={() => navigation.navigate("Library", { filter: "local", title: "Local" })}
+            >
+              <View style={styles.albumTilePlaceholder}>
+                <Text style={{ fontSize: 30 }}>📱</Text>
+              </View>
+              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Local</Text>
+              <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
+                {counts.local} not backed up
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+              onPress={() => navigation.navigate("Library", { filter: "cloud", title: "Cloud" })}
+            >
+              <View style={styles.albumTilePlaceholder}>
+                <Text style={{ fontSize: 30 }}>☁</Text>
+              </View>
+              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Cloud</Text>
+              <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
+                {counts.cloud} backed up
+              </Text>
+            </Pressable>
+          </View>
+
           <SectionLabel text="Smart collections" theme={theme} />
           <View style={styles.albumGrid}>
             <Pressable
@@ -332,6 +369,96 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   );
 }
 
+export function LibraryScreen({ route, navigation }: { route: any; navigation: any }) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const filter: "local" | "cloud" = route.params?.filter === "cloud" ? "cloud" : "local";
+  const title: string = route.params?.title ?? (filter === "cloud" ? "Cloud" : "Local");
+  const [photos, setPhotos] = useState<PhotoRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      setLoading(true);
+      void getPhotosByUploadStatus(filter === "cloud" ? "uploaded" : "local").then((rows) => {
+        if (!alive) return;
+        setPhotos(rows);
+        setLoading(false);
+      });
+      return () => {
+        alive = false;
+      };
+    }, [filter])
+  );
+
+  const tile = (Dimensions.get("window").width - 4) / 3;
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
+        </Pressable>
+        <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, paddingRight: 12 }}>
+          {photos.length}
+        </Text>
+      </View>
+      {loading ? null : (
+        <FlatList
+          data={photos}
+          numColumns={3}
+          keyExtractor={(p) => p.id}
+          contentContainerStyle={{ padding: 2, paddingBottom: 40 }}
+          renderItem={({ item }) => {
+            const thumb = resolvePhotoThumb(item);
+            return (
+              <Pressable
+                style={{ width: tile, height: tile, padding: 1 }}
+                onPress={() =>
+                  navigation.navigate("Viewer", { photos, index: photos.indexOf(item) })
+                }
+              >
+                <TelegramImage
+                  fileId={thumb.fileId}
+                  localUri={thumb.localUri}
+                  style={{ width: "100%", height: "100%" }}
+                />
+                {item.status === "uploaded" ? (
+                  <View
+                    style={[styles.cloudBadge, { backgroundColor: theme.colors.primaryContainer }]}
+                  >
+                    <Text
+                      style={{
+                        color: theme.colors.onPrimaryContainer,
+                        fontSize: 9,
+                        fontWeight: "800",
+                        lineHeight: 11,
+                      }}
+                    >
+                      ✓
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={
+            <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant, padding: 24 }]}>
+              {filter === "cloud"
+                ? "Nothing backed up yet. Tap ＋ in the gallery to start."
+                : "All caught up — every photo here is backed up to your channel."}
+            </Text>
+          }
+        />
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -447,6 +574,16 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 20,
     height: 20,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cloudBadge: {
+    position: "absolute",
+    bottom: 4,
+    right: 4,
+    width: 15,
+    height: 15,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
