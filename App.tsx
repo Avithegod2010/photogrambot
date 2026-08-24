@@ -28,6 +28,10 @@ import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
+import {
+  registerBackgroundSync,
+  unregisterBackgroundSync,
+} from "./src/lib/background";
 import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
@@ -173,8 +177,13 @@ export default function App() {
   const autoSyncEnabled = useSettingsStore((s) => s.prefs.autoSync);
   useEffect(() => {
     if (step !== "ready" || locked) return;
-    if (autoSyncEnabled) void startCameraWatch();
-    else stopCameraWatch();
+    if (autoSyncEnabled) {
+      void startCameraWatch();
+      void registerBackgroundSync();
+    } else {
+      stopCameraWatch();
+      void unregisterBackgroundSync();
+    }
   }, [autoSyncEnabled, step, locked]);
 
   return (
@@ -208,8 +217,10 @@ async function bootstrapBackgroundTasks(): Promise<void> {
         if (enqueued > 0) void processQueue();
       }
       void startCameraWatch();
+      void registerBackgroundSync();
     } else {
       stopCameraWatch();
+      void unregisterBackgroundSync();
     }
     if (prefs.dbAutoBackup) {
       const lastBackup = await kvGet("last_auto_backup");

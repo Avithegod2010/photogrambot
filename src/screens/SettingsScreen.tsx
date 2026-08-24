@@ -17,6 +17,7 @@ import { useUploadStore } from "../store/useUploadStore";
 import { Button, Card, SectionLabel, ToggleRow, Dialog } from "../components/ui";
 import { formatBytes } from "../lib/format";
 import { runSyncNow } from "../lib/sync";
+import { getBackgroundSyncInfo } from "../lib/background";
 import {
   uploadBackupToChannel,
   restoreFromChannelPinned,
@@ -40,11 +41,20 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [restoreDialog, setRestoreDialog] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
+  const [bgSync, setBgSync] = useState<{ available: boolean; registered: boolean } | null>(null);
 
   useEffect(() => {
     void refreshMeta();
     return subscribe();
   }, []);
+
+  useEffect(() => {
+    if (!prefs.autoSync) {
+      setBgSync(null);
+      return;
+    }
+    void getBackgroundSyncInfo().then(setBgSync);
+  }, [prefs.autoSync]);
 
   async function onSyncNow() {
     setSyncing(true);
@@ -191,6 +201,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               onChange={(v) => void update({ autoSync: v })}
               theme={theme}
           />
+          {prefs.autoSync && bgSync ? (
+            <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant }]}>
+              {bgSync.registered
+                ? "Background sync scheduled — Android runs it when battery + network allow"
+                : bgSync.available
+                  ? "Background sync will be scheduled on next app start"
+                  : "Background sync unavailable on this device"}
+            </Text>
+          ) : null}
           <ToggleRow
             title="Auto-sync on Wi-Fi only"
             subtitle="Skip background sync on mobile data"
