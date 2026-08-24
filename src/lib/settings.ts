@@ -5,6 +5,7 @@ const TOKEN_KEY = "pb_bot_token";
 const CHANNEL_KEY = "pb_channel_id";
 const DEVICE_KEY = "pb_device_id";
 const AI_KEY = "pb_ai_api_key";
+const BACKUP_PASS_KEY = "pb_backup_pass";
 
 export type UploadQuality = "document" | "photo";
 export type ThemeMode = "dark" | "amoled" | "light";
@@ -33,6 +34,7 @@ export interface Prefs {
   aiModel: string;
   aiPrompt: string;
   includeVideos: boolean;
+  dbBackupEncrypt: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -59,6 +61,7 @@ export const defaultPrefs: Prefs = {
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
   includeVideos: false,
+  dbBackupEncrypt: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",
@@ -123,6 +126,22 @@ export async function setAiApiKey(key: string | null): Promise<void> {
     await SecureStore.deleteItemAsync(AI_KEY);
   } else {
     await SecureStore.setItemAsync(AI_KEY, key.trim());
+  }
+}
+
+export async function getBackupPassphrase(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(BACKUP_PASS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setBackupPassphrase(pass: string | null): Promise<void> {
+  if (pass === null || pass === "") {
+    await SecureStore.deleteItemAsync(BACKUP_PASS_KEY);
+  } else {
+    await SecureStore.setItemAsync(BACKUP_PASS_KEY, pass);
   }
 }
 

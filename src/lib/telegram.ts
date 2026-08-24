@@ -276,10 +276,10 @@ async function sendFileViaTask(
   }
 }
 
-function parseTgResult(body: string, status: number): TgMessage {
-  let json: TgApiResult<TgMessage> | null = null;
+function parseTgResult<T>(body: string, status: number): T {
+  let json: TgApiResult<T> | null = null;
   try {
-    json = JSON.parse(body) as TgApiResult<TgMessage>;
+    json = JSON.parse(body) as TgApiResult<T>;
   } catch {}
   if (!json) throw new TelegramError(status || 0, `Invalid Telegram response (HTTP ${status})`);
   if (!json.ok) {
@@ -290,7 +290,7 @@ function parseTgResult(body: string, status: number): TgMessage {
       typeof ra === "number" ? ra : undefined
     );
   }
-  return json.result as TgMessage;
+  return json.result as T;
 }
 
 async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
@@ -300,7 +300,65 @@ async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
     method: "POST",
     body: form,
   });
-  return parseTgResult(await res.text(), res.status);
+  return parseTgResult<TgMessage>(await res.text(), res.status);
+}
+
+export async function createForumTopic(
+  chatId: string | number,
+  name: string
+): Promise<{ message_thread_id: number; name: string } | null> {
+  try {
+    return await call<{ message_thread_id: number; name: string }>("createForumTopic", {
+      chat_id: chatId,
+      name: name.slice(0, 128),
+    });
+  } catch {
+    return null;
+  }
+}
+
+export interface MediaGroupItem {
+  uri: string;
+  caption?: string;
+  filename?: string;
+}
+
+export async function sendMediaGroup(
+  chatId: string | number,
+  items: MediaGroupItem[],
+  options: { messageThreadId?: number } = {}
+): Promise<TgMessage[] | null> {
+  if (items.length === 0) return [];
+  const token = await getBotToken();
+  if (!token) throw new TelegramError(401, "Bot token not configured");
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  if (options.messageThreadId) {
+    form.append("message_thread_id", String(options.messageThreadId));
+  }
+  const media = items.map((it, i) => ({
+    type: "photo",
+    media: `attach://file${i}`,
+    ...(it.caption ? { caption: it.caption, parse_mode: "HTML" } : {}),
+  }));
+  form.append("media", JSON.stringify(media));
+  items.forEach((it, i) => {
+    form.append(`file${i}`, {
+      uri: it.uri,
+      name: it.filename ?? `photo_${i}.jpg`,
+      type: "image/jpeg",
+    } as any);
+  });
+  try {
+    const res = await fetch(`${API_BASE}/bot${token}/sendMediaGroup`, {
+      method: "POST",
+      body: form,
+    });
+    return parseTgResult<TgMessage[]>(await res.text(), res.status);
+  } catch (e) {
+    if (e instanceof TelegramError) throw e;
+    return null;
+  }
 }
 
 export async function deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {

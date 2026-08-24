@@ -44,6 +44,18 @@ const config: ExpoConfig = {
     },
     permissions: ["READ_MEDIA_IMAGES", "READ_EXTERNAL_STORAGE"],
     predictiveBackGestureEnabled: false,
+    intentFilters: [
+      {
+        action: "android.intent.action.SEND",
+        category: ["android.intent.category.DEFAULT"],
+        data: [{ mimeType: "image/*" }, { mimeType: "video/*" }],
+      },
+      {
+        action: "android.intent.action.SEND_MULTIPLE",
+        category: ["android.intent.category.DEFAULT"],
+        data: [{ mimeType: "image/*" }, { mimeType: "video/*" }],
+      },
+    ],
   },
   web: {
     favicon: "./assets/favicon.png",

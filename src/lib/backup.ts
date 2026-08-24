@@ -11,8 +11,11 @@ import {
   getChannelId,
   setBotToken,
   setChannelId,
+  loadPrefs,
+  getBackupPassphrase,
 } from "./settings";
 import { getChatPinnedMessage, downloadFile, getFile } from "./telegram";
+import { encryptText, decryptText, isEncryptedBackup } from "./secretbox";
 
 const BACKUP_FILENAME = "photogrambot-backup.json";
 const KV_BACKUP_MESSAGE_ID = "backup_message_id";
@@ -27,11 +30,31 @@ export function localBackupPath(): string {
   return `${backupDir().uri}${BACKUP_FILENAME}`;
 }
 
-export async function exportToLocalFile(): Promise<string> {
+async function serializeBackup(): Promise<string> {
   const json = await exportAllData();
+  const prefs = await loadPrefs();
+  if (!prefs.dbBackupEncrypt) return json;
+  const passphrase = await getBackupPassphrase();
+  if (!passphrase) {
+    throw new Error("Backup encryption is on but no passphrase is set — add one in Settings");
+  }
+  return encryptText(json, passphrase);
+}
+
+async function deserializeBackup(text: string): Promise<string> {
+  if (!isEncryptedBackup(text)) return text;
+  const passphrase = await getBackupPassphrase();
+  if (!passphrase) {
+    throw new Error("This backup is encrypted — enter its passphrase in Settings first");
+  }
+  return decryptText(text, passphrase);
+}
+
+export async function exportToLocalFile(): Promise<string> {
+  const payload = await serializeBackup();
   const file = new File(localBackupPath());
   if (file.exists) file.delete();
-  file.write(json);
+  file.write(payload);
   return file.uri;
 }
 
@@ -48,7 +71,7 @@ export async function shareLocalBackup(): Promise<void> {
 export async function importFromLocalFile(replace: boolean): Promise<number> {
   const file = new File(localBackupPath());
   if (!file.exists) throw new Error("No local backup file found");
-  const json = await file.text();
+  const json = await deserializeBackup(await file.text());
   const token = await getBotToken();
   const channelId = await getChannelId();
   const count = await importAllData(json, replace);
@@ -57,7 +80,8 @@ export async function importFromLocalFile(replace: boolean): Promise<number> {
   return count;
 }
 
-export async function importFromJsonString(json: string, replace: boolean): Promise<number> {
+export async function importFromJsonString(raw: string, replace: boolean): Promise<number> {
+  const json = await deserializeBackup(raw);
   const data = JSON.parse(json);
   if (data.format !== "photogrambot-backup") throw new Error("Not a PhotogramBot backup file");
   const savedToken = await getBotToken();
@@ -72,16 +96,17 @@ export async function uploadBackupToChannel(): Promise<boolean> {
   const channelId = await getChannelId();
   if (!channelId) return false;
   const { sendDocument, pinChatMessage, unpinChatMessage } = await import("./telegram");
-  const json = await exportAllData();
+  const payload = await serializeBackup();
+  const prefs = await loadPrefs();
   const tmp = new File(Paths.cache, BACKUP_FILENAME);
   if (tmp.exists) tmp.delete();
-  tmp.write(json);
+  tmp.write(payload);
   const oldMessageId = await kvGet(KV_BACKUP_MESSAGE_ID);
   if (oldMessageId) {
     await unpinChatMessage(channelId, parseInt(oldMessageId, 10));
   }
   const message = await sendDocument(channelId, tmp.uri, {
-    caption: `#db_backup #app:photogrambot ${new Date().toISOString()}`,
+    caption: `#db_backup #app:photogrambot${prefs.dbBackupEncrypt ? " #encrypted" : ""} ${new Date().toISOString()}`,
     filename: BACKUP_FILENAME,
     mime: "application/json",
   });

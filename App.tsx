@@ -28,6 +28,8 @@ import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
+import { getSharedMedia } from "./modules/share-intent";
+import { ShareTargetSheet } from "./src/components/ShareTargetSheet";
 import {
   registerBackgroundSync,
   unregisterBackgroundSync,
@@ -137,6 +139,20 @@ export default function App() {
   const appLock = useSettingsStore((s) => s.prefs.appLock);
   const [locked, setLocked] = useState(appLock);
   const [initialized, setInitialized] = useState(false);
+  const [sharedUris, setSharedUris] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (step !== "ready" || locked) return;
+    const check = () => {
+      const { uris } = getSharedMedia();
+      if (uris.length > 0) setSharedUris(uris);
+    };
+    check();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") check();
+    });
+    return () => sub.remove();
+  }, [step, locked]);
 
   useEffect(() => {
     globalUnlock = () => setLocked(false);
@@ -192,6 +208,9 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         <Root locked={locked} />
+        {sharedUris.length > 0 ? (
+          <ShareTargetSheet uris={sharedUris} onClose={() => setSharedUris([])} />
+        ) : null}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

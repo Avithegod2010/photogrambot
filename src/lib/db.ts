@@ -41,6 +41,7 @@ export interface AlbumRow {
   id: number;
   name: string;
   created_at: number;
+  locked?: number | null;
 }
 
 export interface TrashRow {
@@ -164,6 +165,9 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
+  ]);
+  await addColumnsIfMissing(db, "albums", [
+    ["locked", "INTEGER"],
   ]);
   await migrateFtsSchema(db);
   await db.execAsync(`
@@ -562,6 +566,11 @@ export async function getPhotoAlbums(photoId: string): Promise<AlbumRow[]> {
     [photoId]
   );
   return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at }));
+}
+
+export async function setAlbumLocked(id: number, locked: boolean): Promise<void> {
+  const d = await getDb();
+  await d.runAsync("UPDATE albums SET locked = ? WHERE id = ?", [locked ? 1 : 0, id]);
 }
 
 export async function enqueueUpload(item: {

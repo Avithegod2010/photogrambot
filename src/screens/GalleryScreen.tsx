@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import * as MediaLibrary from "expo-media-library";
+import { File } from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSetupStore } from "../store/useSetupStore";
@@ -26,6 +27,8 @@ import { getUploadedLocalIds } from "../lib/db";
 import { enqueueUploads, processQueue } from "../lib/uploader";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
+import { getCachedTelegramFile } from "../lib/media";
+import { shareMedia } from "../../modules/share-intent";
 import { Button, Dialog, TextField } from "../components/ui";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
@@ -102,8 +105,41 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     setSearchResults(results);
   }
 
-  async function trashSelected() {
-    const ids = Array.from(selection);
+  async function shareSelected() {
+    const items = (searchResults ?? photos).filter((p) => selection.has(p.id));
+    if (items.length === 0) return;
+    try {
+      const uris: string[] = [];
+      let allImages = true;
+      for (const p of items.slice(0, 20)) {
+        if (p.local_uri && p.local_uri.startsWith("file://")) {
+          try {
+            if (new File(p.local_uri).exists) {
+              uris.push(p.local_uri);
+              if (p.mime && !p.mime.startsWith("image/")) allImages = false;
+              continue;
+            }
+          } catch {}
+        }
+        const fid = p.remote_file_id ?? p.preview_file_id ?? p.thumb_file_id;
+        if (!fid) continue;
+        const ext = p.filename.includes(".")
+          ? p.filename.split(".").pop()!.toLowerCase()
+          : "jpg";
+        uris.push(await getCachedTelegramFile(fid, ext));
+        if (p.mime && !p.mime.startsWith("image/")) allImages = false;
+      }
+      if (uris.length === 0) {
+        Alert.alert("Nothing to share", "Could not prepare the selected photos.");
+        return;
+      }
+      shareMedia(uris, allImages ? "image/*" : "*/*");
+    } catch (e: any) {
+      Alert.alert("Share failed", e?.message ?? "Could not share the selection.");
+    }
+  }
+
+  async function trashSelected() {    const ids = Array.from(selection);
     Alert.alert(
       `Move ${ids.length} photo${ids.length === 1 ? "" : "s"} to trash?`,
       "You can restore them from Collections → Trash, or delete from Telegram permanently later.",
@@ -311,9 +347,25 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           }
           renderItem={({ item }) => (
             <View>
-              <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
-                {item.label}
-              </Text>
+              <View style={styles.dateHeaderRow}>
+                <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                  {item.label}
+                </Text>
+                {selectionMode ? (
+                  <Pressable
+                    onPress={() =>
+                      useLibraryStore
+                        .getState()
+                        .selectAll([...selection, ...item.data.map((p) => p.id)])
+                    }
+                    hitSlop={8}
+                  >
+                    <Text style={{ color: theme.colors.primary, fontSize: 12, fontWeight: "600" }}>
+                      Select all
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
               <SectionGrid
                 photos={item.data}
                 staggered={staggered && !searchResults}
@@ -358,6 +410,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             style={styles.selAction}
           >
             <Text style={{ color: theme.colors.primary }}>All</Text>
+          </Pressable>
+          <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
+            <Text style={{ color: theme.colors.primary }}>Share</Text>
           </Pressable>
           <Pressable onPress={() => setAlbumDialogVisible(true)} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Album</Text>
@@ -892,9 +947,14 @@ const styles = StyleSheet.create({
   dateHeader: {
     fontSize: 13,
     fontWeight: "600",
-    paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 6,
+  },
+  dateHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
   },
   grid: {
     flexDirection: "row",
