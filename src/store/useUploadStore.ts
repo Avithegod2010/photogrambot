@@ -24,6 +24,9 @@ export const useUploadStore = create<UploadState>((set) => ({
     failed: 0,
     skipped: 0,
     duplicates: 0,
+    sentBytes: 0,
+    totalBytes: 0,
+    percent: null,
   },
   start: async () => {
     if (!isProcessing()) void processQueue();

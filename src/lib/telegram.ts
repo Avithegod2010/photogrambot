@@ -1,3 +1,4 @@
+import { File, Paths, UploadType } from "expo-file-system";
 import { getBotToken, getChannelId } from "./settings";
 
 const API_BASE = "https://api.telegram.org";
@@ -7,6 +8,7 @@ export interface TgApiResult<T> {
   result?: T;
   error_code?: number;
   description?: string;
+  parameters?: { retry_after?: number };
 }
 
 export interface TgPhotoSize {
@@ -51,9 +53,11 @@ export interface TgUser {
 
 export class TelegramError extends Error {
   code: number;
-  constructor(code: number, description: string) {
+  retryAfter?: number;
+  constructor(code: number, description: string, retryAfter?: number) {
     super(description);
     this.code = code;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -67,7 +71,12 @@ async function call<T>(method: string, params?: Record<string, unknown>): Promis
   });
   const json = (await res.json()) as TgApiResult<T>;
   if (!json.ok) {
-    throw new TelegramError(json.error_code ?? 0, json.description ?? "Unknown Telegram error");
+    const ra = json.parameters?.retry_after;
+    throw new TelegramError(
+      json.error_code ?? 0,
+      json.description ?? "Unknown Telegram error",
+      typeof ra === "number" ? ra : undefined
+    );
   }
   return json.result as T;
 }
@@ -106,62 +115,138 @@ export async function unpinChatMessage(chatId: string | number, messageId: numbe
   }
 }
 
+export interface FileSendOptions {
+  caption?: string;
+  replyToMessageId?: number;
+  filename?: string;
+  mime?: string;
+  messageThreadId?: number;
+  onProgress?: (sentBytes: number, totalBytes: number) => void;
+  signal?: AbortSignal;
+}
+
 export async function sendPhoto(
   chatId: string | number,
   fileUri: string,
-  options: {
-    caption?: string;
-    replyToMessageId?: number;
-    filename?: string;
-  } = {}
+  options: FileSendOptions = {}
 ): Promise<TgMessage> {
-  const form = new FormData();
-  form.append("chat_id", String(chatId));
+  const params: Record<string, string> = { chat_id: String(chatId) };
   if (options.caption) {
-    form.append("caption", options.caption);
-    form.append("parse_mode", "HTML");
+    params.caption = options.caption;
+    params.parse_mode = "HTML";
   }
   if (options.replyToMessageId) {
-    form.append("reply_parameters", JSON.stringify({ message_id: options.replyToMessageId }));
+    params.reply_parameters = JSON.stringify({ message_id: options.replyToMessageId });
   }
-  form.append("photo", {
-    uri: fileUri,
-    name: options.filename ?? "preview.jpg",
-    type: "image/jpeg",
-  } as any);
-  return uploadForm("sendPhoto", form);
+  return sendFileViaTask(chatId, "sendPhoto", "photo", fileUri, params, {
+    filename: options.filename ?? "preview.jpg",
+    mime: "image/jpeg",
+    onProgress: options.onProgress,
+    signal: options.signal,
+  });
 }
 
 export async function sendDocument(
   chatId: string | number,
   fileUri: string,
-  options: {
-    caption?: string;
-    filename?: string;
-    mime?: string;
-    replyToMessageId?: number;
-    messageThreadId?: number;
-  } = {}
+  options: FileSendOptions = {}
 ): Promise<TgMessage> {
-  const form = new FormData();
-  form.append("chat_id", String(chatId));
+  const params: Record<string, string> = {
+    chat_id: String(chatId),
+    disable_content_type_detection: "true",
+  };
   if (options.caption) {
-    form.append("caption", options.caption);
-    form.append("parse_mode", "HTML");
+    params.caption = options.caption;
+    params.parse_mode = "HTML";
   }
-  form.append("disable_content_type_detection", "true");
   if (options.replyToMessageId) {
-    form.append("reply_parameters", JSON.stringify({ message_id: options.replyToMessageId }));
+    params.reply_parameters = JSON.stringify({ message_id: options.replyToMessageId });
   }
   if (options.messageThreadId) {
-    form.append("message_thread_id", String(options.messageThreadId));
+    params.message_thread_id = String(options.messageThreadId);
   }
-  form.append("document", {
-    uri: fileUri,
-    name: options.filename ?? "photo.jpg",
-    type: options.mime ?? "application/octet-stream",
-  } as any);
-  return uploadForm("sendDocument", form);
+  return sendFileViaTask(chatId, "sendDocument", "document", fileUri, params, {
+    filename: options.filename ?? "photo.jpg",
+    mime: options.mime ?? "application/octet-stream",
+    onProgress: options.onProgress,
+    signal: options.signal,
+  });
+}
+
+async function sendFileViaTask(
+  chatId: string | number,
+  method: string,
+  fieldName: string,
+  fileUri: string,
+  params: Record<string, string>,
+  file: { filename: string; mime: string; onProgress?: (s: number, t: number) => void; signal?: AbortSignal }
+): Promise<TgMessage> {
+  const token = await getBotToken();
+  if (!token) throw new TelegramError(401, "Bot token not configured");
+  let gotBytes = false;
+  let staged: File | null = null;
+  let uploadUri = fileUri;
+  try {
+    const src = new File(fileUri);
+    if (src.name !== file.filename) {
+      // Multipart part names come from the file itself — stage an exactly-named
+      // copy in cache so Telegram shows the right document name.
+      const dest = new File(Paths.cache, `pb_upload_${Date.now()}_${file.filename}`);
+      if (!dest.exists) {
+        src.copy(dest);
+        staged = dest;
+        uploadUri = dest.uri;
+      }
+    }
+    const task = new File(uploadUri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
+      uploadType: UploadType.MULTIPART,
+      fieldName,
+      mimeType: file.mime,
+      parameters: params,
+      onProgress: file.onProgress
+        ? (d) => {
+            gotBytes = true;
+            file.onProgress!(d.bytesSent, d.totalBytes);
+          }
+        : undefined,
+      signal: file.signal,
+    });
+    try {
+      const result = await task.uploadAsync();
+      return parseTgResult(result.body, result.status);
+    } finally {
+      task.release();
+    }
+  } catch (e) {
+    if (e instanceof TelegramError) throw e;
+    if (gotBytes || file.signal?.aborted) throw e;
+    // Local read failure (e.g. unreadable content:// URI) — fall back to FormData fetch.
+    const form = new FormData();
+    for (const [k, v] of Object.entries(params)) form.append(k, v);
+    form.append(fieldName, { uri: fileUri, name: file.filename, type: file.mime } as any);
+    return uploadForm(method, form);
+  } finally {
+    if (staged) {
+      try { staged.delete(); } catch {}
+    }
+  }
+}
+
+function parseTgResult(body: string, status: number): TgMessage {
+  let json: TgApiResult<TgMessage> | null = null;
+  try {
+    json = JSON.parse(body) as TgApiResult<TgMessage>;
+  } catch {}
+  if (!json) throw new TelegramError(status || 0, `Invalid Telegram response (HTTP ${status})`);
+  if (!json.ok) {
+    const ra = json.parameters?.retry_after;
+    throw new TelegramError(
+      json.error_code ?? status,
+      json.description ?? "Upload failed",
+      typeof ra === "number" ? ra : undefined
+    );
+  }
+  return json.result as TgMessage;
 }
 
 async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
@@ -171,11 +256,7 @@ async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
     method: "POST",
     body: form,
   });
-  const json = (await res.json()) as TgApiResult<TgMessage>;
-  if (!json.ok) {
-    throw new TelegramError(json.error_code ?? 0, json.description ?? "Upload failed");
-  }
-  return json.result as TgMessage;
+  return parseTgResult(await res.text(), res.status);
 }
 
 export async function deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {

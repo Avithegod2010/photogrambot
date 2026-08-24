@@ -258,6 +258,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: "600", fontSize: 13 }}>
               Backing up {progress.current}/{progress.total}
+              {progress.percent !== null ? ` — ${progress.percent}%` : ""}
             </Text>
             <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 11 }} numberOfLines={1}>
               {progress.currentFile ?? "Preparing…"} — tap to cancel

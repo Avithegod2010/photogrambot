@@ -179,16 +179,17 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
           {progress.running ? (
             <Text style={[styles.statusText, { color: theme.colors.primary }]}>
-              Uploading {progress.current}/{progress.total}…
+              Uploading {progress.current}/{progress.total}
+              {progress.percent !== null ? ` — ${progress.percent}%` : ""}…
             </Text>
           ) : null}
           <View style={styles.divider} />
-          <ToggleRow
-            title="Auto sync"
-            subtitle="Automatically back up new photos when the app opens"
-            value={prefs.autoSync}
-            onChange={(v) => void update({ autoSync: v })}
-            theme={theme}
+            <ToggleRow
+              title="Auto sync"
+              subtitle="Back up new photos as you take them (respects Wi-Fi-only)"
+              value={prefs.autoSync}
+              onChange={(v) => void update({ autoSync: v })}
+              theme={theme}
           />
           <ToggleRow
             title="Auto-sync on Wi-Fi only"

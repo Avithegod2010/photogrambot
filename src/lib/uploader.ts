@@ -9,19 +9,26 @@ import {
   getPhotoByHash,
   getPhotoByLocalId,
   getQueueCounts,
+  recoverStaleRunning,
   kvGet,
   kvSet,
   type QueueRow,
 } from "./db";
 import { getBotToken, getChannelId, loadPrefs, getDeviceId } from "./settings";
-import { sendDocument, sendPhoto, TgMessage } from "./telegram";
+import { sendDocument, sendPhoto, TelegramError, TgMessage } from "./telegram";
 import { buildCaption, buildPreviewCaption } from "./caption";
 import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_RETRIES = 5;
+const UPLOAD_CONCURRENCY = 2;
+const PROGRESS_EMIT_MS = 250;
+const PERMANENT_CODES = new Set([400, 404, 413]);
 let processing = false;
 let cancelRequested = false;
+
+const activeCancels = new Set<() => void>();
 
 export interface UploadProgress {
   running: boolean;
@@ -32,6 +39,9 @@ export interface UploadProgress {
   failed: number;
   skipped: number;
   duplicates: number;
+  sentBytes: number;
+  totalBytes: number;
+  percent: number | null;
 }
 
 type ProgressListener = (p: UploadProgress) => void;
@@ -45,6 +55,9 @@ let progress: UploadProgress = {
   failed: 0,
   skipped: 0,
   duplicates: 0,
+  sentBytes: 0,
+  totalBytes: 0,
+  percent: null,
 };
 
 export function onUploadProgress(listener: ProgressListener): () => void {
@@ -64,6 +77,11 @@ export function getUploadProgress(): UploadProgress {
 
 export function requestCancelUpload(): void {
   cancelRequested = true;
+  for (const cancel of [...activeCancels]) {
+    try {
+      cancel();
+    } catch {}
+  }
 }
 
 export interface LocalAssetRef {
@@ -132,38 +150,84 @@ export async function processQueue(): Promise<void> {
   processing = true;
   cancelRequested = false;
   try {
-    let totalProcessed = 0;
+    await recoverStaleRunning();
+    let discovered = 0;
+    let started = 0;
     let first = true;
     for (;;) {
       if (cancelRequested) break;
-      const batch = await nextQueueBatch(10);
+      const batch = await nextQueueBatch(UPLOAD_CONCURRENCY * 5);
       if (batch.length === 0) break;
       if (first) {
-        setProgress({ running: true, current: 0, total: batch.length, done: 0, failed: 0, skipped: 0, duplicates: 0, currentFile: null });
+        setProgress({
+          running: true,
+          current: 0,
+          total: batch.length,
+          done: 0,
+          failed: 0,
+          skipped: 0,
+          duplicates: 0,
+          currentFile: null,
+          sentBytes: 0,
+          totalBytes: 0,
+          percent: null,
+        });
         first = false;
       }
-      for (const item of batch) {
-        if (cancelRequested) break;
-        totalProcessed++;
-        setProgress({ current: totalProcessed, currentFile: item.filename });
-        await uploadQueueItem(item);
-        const counts = await getQueueCounts();
-        setProgress({
-          done: counts.done ?? 0,
-          failed: counts.failed ?? 0,
-          skipped: counts.skipped ?? 0,
-          duplicates: counts.duplicate ?? 0,
-        });
-      }
+      discovered += batch.length;
+      setProgress({ total: discovered });
+      let index = 0;
+      const workers = Array.from(
+        { length: Math.min(UPLOAD_CONCURRENCY, batch.length) },
+        async () => {
+          for (;;) {
+            if (cancelRequested) return;
+            const i = index++;
+            if (i >= batch.length) return;
+            const item = batch[i];
+            started++;
+            setProgress({ current: started, currentFile: item.filename });
+            await uploadQueueItem(item);
+            const counts = await getQueueCounts();
+            setProgress({
+              done: counts.done ?? 0,
+              failed: counts.failed ?? 0,
+              skipped: counts.skipped ?? 0,
+              duplicates: counts.duplicate ?? 0,
+            });
+          }
+        }
+      );
+      await Promise.all(workers);
     }
   } finally {
     processing = false;
-    setProgress({ running: false, currentFile: null });
+    setProgress({ running: false, currentFile: null, sentBytes: 0, totalBytes: 0, percent: null });
   }
 }
 
 export function isProcessing(): boolean {
   return processing;
+}
+
+let lastProgressEmitAt = 0;
+
+function emitFileProgress(sentBytes: number, totalBytes: number): void {
+  const now = Date.now();
+  if (totalBytes <= 0 || now - lastProgressEmitAt < PROGRESS_EMIT_MS) return;
+  lastProgressEmitAt = now;
+  setProgress({
+    sentBytes,
+    totalBytes,
+    percent: Math.min(99, Math.round((sentBytes / totalBytes) * 100)),
+  });
+}
+
+function computeBackoffMs(e: unknown, retries: number): number {
+  const retryAfter = e instanceof TelegramError ? e.retryAfter : undefined;
+  if (retryAfter && retryAfter > 0) return (retryAfter + 1) * 1000;
+  const base = Math.min(30_000 * 2 ** retries, 30 * 60_000);
+  return base + Math.floor(Math.random() * 5_000);
 }
 
 async function uploadQueueItem(item: QueueRow): Promise<void> {
@@ -269,11 +333,21 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       hash,
     });
 
-    const message = await sendDocument(channelId, item.local_uri, {
-      caption,
-      filename: item.filename,
-      mime,
-    });
+    const controller = new AbortController();
+    const cancelFn = () => controller.abort();
+    activeCancels.add(cancelFn);
+    let message: TgMessage;
+    try {
+      message = await sendDocument(channelId, item.local_uri, {
+        caption,
+        filename: item.filename,
+        mime,
+        onProgress: emitFileProgress,
+        signal: controller.signal,
+      });
+    } finally {
+      activeCancels.delete(cancelFn);
+    }
 
     const doc = message.document;
     await updatePhoto(photoId, {
@@ -299,16 +373,25 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     await updateQueueItem(item.id, { state: "done", error: null });
   } catch (e: any) {
     const message = e?.message ?? "Upload failed";
+    if (cancelRequested) {
+      // User cancelled — put the item back without burning a retry.
+      await updateQueueItem(item.id, { state: "pending", error: "Cancelled" });
+      return;
+    }
     const retries = item.retries + 1;
-    if (retries >= 3 || /413|429|entity too large/i.test(message)) {
-      await updateQueueItem(item.id, {
-        state: "failed",
-        retries,
-        error: message,
-      });
+    const permanent =
+      (e instanceof TelegramError && PERMANENT_CODES.has(e.code)) ||
+      /entity too large/i.test(message);
+    if (permanent || retries >= MAX_RETRIES) {
+      await updateQueueItem(item.id, { state: "failed", retries, error: message });
       await updatePhoto(photoId, { status: "failed", error: message });
     } else {
-      await updateQueueItem(item.id, { state: "pending", retries, error: message });
+      await updateQueueItem(item.id, {
+        state: "pending",
+        retries,
+        error: message,
+        next_attempt_at: Date.now() + computeBackoffMs(e, retries),
+      });
     }
   }
 }

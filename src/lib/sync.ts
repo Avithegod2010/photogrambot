@@ -1,5 +1,6 @@
 import * as MediaLibrary from "expo-media-library";
-import { loadPrefs, savePrefs } from "./settings";
+import * as Network from "expo-network";
+import { loadPrefs, savePrefs, type Prefs } from "./settings";
 import { enqueueUploads, processQueue } from "./uploader";
 
 export interface DeviceFolder {
@@ -16,6 +17,24 @@ export async function ensurePermissions(): Promise<boolean> {
 export async function hasPermissions(): Promise<boolean> {
   const { status } = await MediaLibrary.getPermissionsAsync();
   return status === "granted";
+}
+
+export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
+  const p = prefs ?? (await loadPrefs());
+  try {
+    const state = await Network.getNetworkStateAsync();
+    if (!state.isConnected) return false;
+    if (
+      p.autoSyncWifiOnly &&
+      state.type !== Network.NetworkStateType.WIFI &&
+      state.type !== Network.NetworkStateType.ETHERNET
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function listDeviceFolders(): Promise<DeviceFolder[]> {
