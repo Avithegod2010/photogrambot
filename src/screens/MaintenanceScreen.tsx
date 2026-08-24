@@ -13,6 +13,11 @@ import {
 } from "../lib/maintenance";
 import { getAllUploadedPhotoIds, type PhotoRow } from "../lib/db";
 import { formatBytes } from "../lib/format";
+import {
+  restoreAllToDevice,
+  requestCancelRestore,
+  type RestoreProgress,
+} from "../lib/restore";
 
 export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -24,6 +29,36 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [integrityRunning, setIntegrityRunning] = useState(false);
   const [integrity, setIntegrity] = useState<IntegrityProgress | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [restoreRunning, setRestoreRunning] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
+  const [restoreResult, setRestoreResult] = useState<string | null>(null);
+
+  function confirmRestore() {
+    Alert.alert(
+      "Restore originals to this device?",
+      `Downloads up to ${stats.uploaded} backed-up photo(s) from your channel into this device's gallery. Photos already on the device are skipped. Keep the app open while it runs.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Restore", onPress: () => void runRestore() },
+      ]
+    );
+  }
+
+  async function runRestore() {
+    setRestoreRunning(true);
+    setRestoreResult(null);
+    setRestoreProgress({ done: 0, total: 0, currentFile: null, saved: 0, skipped: 0, failed: 0 });
+    try {
+      const result = await restoreAllToDevice(setRestoreProgress);
+      setRestoreResult(
+        `Restore finished — ${result.saved} saved, ${result.skipped} already on device, ${result.failed} failed.`
+      );
+    } catch (e: any) {
+      setRestoreResult(e?.message ?? "Restore failed");
+    } finally {
+      setRestoreRunning(false);
+    }
+  }
 
   async function scanDuplicates() {
     setScanningDupes(true);
@@ -135,6 +170,45 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {lastResult ? (
                 <Text style={{ color: theme.colors.success, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {lastResult}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Restore to device" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Downloads every backed-up photo from your Telegram channel back into this
+                device's gallery. Use after importing a database backup on a new phone to
+                migrate your full library.
+              </Text>
+              {restoreRunning ? (
+                <Button
+                  title="Cancel restore"
+                  variant="danger"
+                  theme={theme}
+                  onPress={requestCancelRestore}
+                  style={{ marginTop: 12 }}
+                />
+              ) : (
+                <Button
+                  title="Restore all originals"
+                  variant="outlined"
+                  theme={theme}
+                  onPress={confirmRestore}
+                  style={{ marginTop: 12 }}
+                />
+              )}
+              {restoreProgress && (restoreRunning || restoreProgress.done > 0) ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  {restoreProgress.done}/{restoreProgress.total} processed —{" "}
+                  {restoreProgress.saved} saved · {restoreProgress.skipped} skipped ·{" "}
+                  {restoreProgress.failed} failed
+                  {restoreProgress.currentFile ? `\n${restoreProgress.currentFile}` : ""}
+                </Text>
+              ) : null}
+              {restoreResult ? (
+                <Text style={{ color: theme.colors.success, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {restoreResult}
                 </Text>
               ) : null}
             </Card>

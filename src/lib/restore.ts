@@ -1,0 +1,112 @@
+import { File, Paths } from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
+import { downloadFile } from "./telegram";
+import { getPhotosByUploadStatus, type PhotoRow } from "./db";
+
+function safeName(filename: string): string {
+  const cleaned = filename.replace(/[^\w.\- ]+/g, "_").trim();
+  return cleaned.length > 0 ? cleaned : "photo.jpg";
+}
+
+function extFor(photo: PhotoRow): string {
+  const fromName = photo.filename.includes(".")
+    ? photo.filename.split(".").pop()!
+    : "jpg";
+  return fromName.toLowerCase().slice(0, 5);
+}
+
+export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
+  const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
+  if (!fileId) throw new Error("No cloud copy available to download");
+  const dest = new File(
+    Paths.cache,
+    `pb_restore_${Date.now()}_${safeName(photo.filename)}.${extFor(photo)}`
+  );
+  try {
+    await downloadFile(fileId, dest.uri);
+    await MediaLibrary.Asset.create(dest.uri);
+  } finally {
+    try {
+      if (dest.exists) dest.delete();
+    } catch {}
+  }
+}
+
+export interface RestoreProgress {
+  done: number;
+  total: number;
+  currentFile: string | null;
+  saved: number;
+  skipped: number;
+  failed: number;
+}
+
+let restoring = false;
+let cancelRequested = false;
+
+export function isRestoring(): boolean {
+  return restoring;
+}
+
+export function requestCancelRestore(): void {
+  cancelRequested = true;
+}
+
+async function ensureSavePermission(): Promise<void> {
+  const { status } = await MediaLibrary.requestPermissionsAsync(false, ["photo"]);
+  if (status !== "granted") throw new Error("Media library permission denied");
+}
+
+async function hasLocalFile(photo: PhotoRow): Promise<boolean> {
+  const uri = photo.local_uri;
+  if (!uri || !uri.startsWith("file://")) return false;
+  try {
+    return new File(uri).exists;
+  } catch {
+    return false;
+  }
+}
+
+export async function restoreAllToDevice(
+  onProgress?: (p: RestoreProgress) => void
+): Promise<RestoreProgress> {
+  if (restoring) throw new Error("A restore is already running");
+  await ensureSavePermission();
+  restoring = true;
+  cancelRequested = false;
+  const progress: RestoreProgress = {
+    done: 0,
+    total: 0,
+    currentFile: null,
+    saved: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  try {
+    const photos = await getPhotosByUploadStatus("uploaded");
+    progress.total = photos.length;
+    onProgress?.({ ...progress });
+    for (const photo of photos) {
+      if (cancelRequested) break;
+      progress.currentFile = photo.filename;
+      onProgress?.({ ...progress });
+      if (await hasLocalFile(photo)) {
+        progress.skipped++;
+      } else {
+        try {
+          await savePhotoToDevice(photo);
+          progress.saved++;
+        } catch {
+          progress.failed++;
+        }
+      }
+      progress.done++;
+      onProgress?.({ ...progress });
+    }
+    return progress;
+  } finally {
+    restoring = false;
+    progress.currentFile = null;
+    onProgress?.({ ...progress });
+  }
+}
