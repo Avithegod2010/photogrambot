@@ -99,6 +99,8 @@ export function TextField({
   style,
   keyboardType,
   autoCapitalize = "none",
+  onEndEditing,
+  onBlur,
 }: {
   value: string;
   onChangeText: (t: string) => void;
@@ -109,6 +111,8 @@ export function TextField({
   style?: TextStyle;
   keyboardType?: "default" | "numeric";
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  onEndEditing?: () => void;
+  onBlur?: () => void;
 }) {
   return (
     <TextInput
@@ -121,6 +125,8 @@ export function TextField({
       keyboardType={keyboardType}
       autoCapitalize={autoCapitalize}
       autoCorrect={false}
+      onEndEditing={onEndEditing}
+      onBlur={onBlur}
       selectionColor={theme.colors.primary}
       style={[
         styles.textField,

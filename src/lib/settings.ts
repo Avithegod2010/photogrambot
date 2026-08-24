@@ -4,9 +4,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const TOKEN_KEY = "pb_bot_token";
 const CHANNEL_KEY = "pb_channel_id";
 const DEVICE_KEY = "pb_device_id";
+const AI_KEY = "pb_ai_api_key";
 
 export type UploadQuality = "document" | "photo";
 export type ThemeMode = "dark" | "amoled" | "light";
+
+export const DEFAULT_AI_PROMPT =
+  "Describe this photo in one concise, natural sentence (max 20 words). " +
+  "Only state what is visible: subjects, setting, and notable objects.";
 
 export interface Prefs {
   uploadPreviews: boolean;
@@ -24,6 +29,9 @@ export interface Prefs {
   appLock: boolean;
   trashAutoPurgeDays: number;
   dbAutoBackup: boolean;
+  aiCaptions: boolean;
+  aiModel: string;
+  aiPrompt: string;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -46,6 +54,9 @@ export const defaultPrefs: Prefs = {
   appLock: false,
   trashAutoPurgeDays: 30,
   dbAutoBackup: true,
+  aiCaptions: false,
+  aiModel: "gemini-2.5-flash",
+  aiPrompt: DEFAULT_AI_PROMPT,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",
@@ -94,6 +105,22 @@ export async function getDeviceId(): Promise<string> {
     return id;
   } catch {
     return "unknown";
+  }
+}
+
+export async function getAiApiKey(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(AI_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setAiApiKey(key: string | null): Promise<void> {
+  if (key === null || key.trim() === "") {
+    await SecureStore.deleteItemAsync(AI_KEY);
+  } else {
+    await SecureStore.setItemAsync(AI_KEY, key.trim());
   }
 }
 

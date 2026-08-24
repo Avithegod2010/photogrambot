@@ -16,6 +16,7 @@ export interface CaptionMeta {
   device?: string | null;
   deviceName?: string | null;
   hash?: string | null;
+  aiDescription?: string | null;
 }
 
 export interface TechnicalExif {
@@ -78,6 +79,9 @@ export function buildCaption(meta: CaptionMeta): string {
   }
   if (meta.gps) {
     parts.push(`🌍 <b>Coords:</b> <code>${meta.gps.lat.toFixed(6)}, ${meta.gps.lon.toFixed(6)}</code>`);
+  }
+  if (meta.aiDescription) {
+    parts.push(`🤖 <i>${escapeHtml(meta.aiDescription)}</i>`);
   }
   const tagLine: string[] = meta.tags.map((t) => `#${t}`);
   if (meta.device) {

@@ -14,10 +14,11 @@ import { useSetupStore } from "../store/useSetupStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useUploadStore } from "../store/useUploadStore";
-import { Button, Card, SectionLabel, ToggleRow, Dialog } from "../components/ui";
+import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog } from "../components/ui";
 import { formatBytes } from "../lib/format";
 import { runSyncNow } from "../lib/sync";
 import { getBackgroundSyncInfo } from "../lib/background";
+import { getAiApiKey, setAiApiKey, DEFAULT_AI_PROMPT } from "../lib/settings";
 import {
   uploadBackupToChannel,
   restoreFromChannelPinned,
@@ -42,6 +43,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [restoreDialog, setRestoreDialog] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
   const [bgSync, setBgSync] = useState<{ available: boolean; registered: boolean } | null>(null);
+  const [aiKeyDraft, setAiKeyDraft] = useState("");
+  const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
+  const [aiPromptDraft, setAiPromptDraft] = useState(prefs.aiPrompt);
 
   useEffect(() => {
     void refreshMeta();
@@ -55,6 +59,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     }
     void getBackgroundSyncInfo().then(setBgSync);
   }, [prefs.autoSync]);
+
+  useEffect(() => {
+    void getAiApiKey().then((k) => setAiKeyDraft(k ?? ""));
+  }, []);
+
+  useEffect(() => {
+    setAiModelDraft(prefs.aiModel);
+    setAiPromptDraft(prefs.aiPrompt);
+  }, [prefs.aiModel, prefs.aiPrompt]);
 
   async function onSyncNow() {
     setSyncing(true);
@@ -224,6 +237,51 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ uploadPreviews: v })}
             theme={theme}
           />
+        </Card>
+
+        <SectionLabel text="AI captioning (Gemini)" theme={theme} />
+        <Card theme={theme}>
+          <ToggleRow
+            title="AI captions"
+            subtitle="Describe new photos with Gemini; captions are searchable"
+            value={prefs.aiCaptions}
+            onChange={(v) => void update({ aiCaptions: v })}
+            theme={theme}
+          />
+          {prefs.aiCaptions ? (
+            <>
+              <View style={styles.divider} />
+              <TextField
+                value={aiKeyDraft}
+                onChangeText={setAiKeyDraft}
+                onEndEditing={() => void setAiApiKey(aiKeyDraft)}
+                placeholder="Gemini API key"
+                secureTextEntry
+                theme={theme}
+              />
+              <View style={{ height: 8 }} />
+              <TextField
+                value={aiModelDraft}
+                onChangeText={setAiModelDraft}
+                onEndEditing={() => void update({ aiModel: aiModelDraft.trim() || "gemini-2.5-flash" })}
+                placeholder="Model (e.g. gemini-2.5-flash)"
+                theme={theme}
+              />
+              <View style={{ height: 8 }} />
+              <TextField
+                value={aiPromptDraft}
+                onChangeText={setAiPromptDraft}
+                onEndEditing={() => void update({ aiPrompt: aiPromptDraft.trim() || DEFAULT_AI_PROMPT })}
+                placeholder="Caption prompt"
+                multiline
+                theme={theme}
+                style={{ minHeight: 80, textAlignVertical: "top" }}
+              />
+              <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant, marginTop: 6 }]}>
+                Uses the upload preview image. Saved automatically when you finish editing.
+              </Text>
+            </>
+          ) : null}
         </Card>
 
         <SectionLabel text="Folder synchronisation" theme={theme} />

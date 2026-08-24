@@ -28,6 +28,7 @@ export interface PhotoRow {
   latitude: number | null;
   longitude: number | null;
   exif: string | null;
+  ai_caption: string | null;
   favorite: number;
   status: PhotoStatus;
   error: string | null;
@@ -148,17 +149,19 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       v TEXT NOT NULL
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS photos_fts USING fts5(
-      photo_id UNINDEXED, filename, folder, tags, device, camera, mime
+      photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption
     );
   `);
   await addColumnsIfMissing(db, "photos", [
     ["latitude", "REAL"],
     ["longitude", "REAL"],
     ["exif", "TEXT"],
+    ["ai_caption", "TEXT"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
   ]);
+  await migrateFtsSchema(db);
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS hash_cache (
       local_id TEXT NOT NULL,
@@ -181,6 +184,21 @@ async function addColumnsIfMissing(
       await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
     }
   }
+}
+
+async function migrateFtsSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  const row = await db.getFirstAsync<{ sql: string }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'photos_fts'"
+  );
+  if (!row || row.sql.includes("ai_caption")) return;
+  // FTS5 tables cannot be altered — drop and rebuild (derived data only).
+  await db.execAsync("DROP TABLE photos_fts");
+  await db.execAsync(`
+    CREATE VIRTUAL TABLE photos_fts USING fts5(
+      photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption
+    );
+  `);
+  await ftsRebuild();
 }
 
 export async function kvGet(key: string): Promise<string | null> {
@@ -253,7 +271,9 @@ export async function updatePhoto(id: string, patch: Partial<PhotoRow>): Promise
   const values = keys.map((k) => (patch as any)[k] ?? null);
   await d.runAsync(`UPDATE photos SET ${setSql} WHERE id = ?`, [...values, id]);
   if (
-    keys.some((k) => ["filename", "folder", "tags", "device", "camera", "mime"].includes(k))
+    keys.some((k) =>
+      ["filename", "folder", "tags", "device", "camera", "mime", "ai_caption"].includes(k)
+    )
   ) {
     const full = await getPhoto(id);
     if (full) await ftsIndexPhoto(full);
@@ -364,8 +384,8 @@ export async function ftsIndexPhoto(p: PhotoRow): Promise<void> {
   const d = await getDb();
   await d.runAsync("DELETE FROM photos_fts WHERE photo_id = ?", [p.id]);
   await d.runAsync(
-    "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime) VALUES (?,?,?,?,?,?,?)",
-    [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? ""]
+    "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption) VALUES (?,?,?,?,?,?,?,?)",
+    [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? ""]
   );
 }
 
@@ -376,8 +396,8 @@ export async function ftsRebuild(): Promise<void> {
   for (const r of rows) {
     const p = rowToPhoto(r);
     await d.runAsync(
-      "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime) VALUES (?,?,?,?,?,?,?)",
-      [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? ""]
+      "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption) VALUES (?,?,?,?,?,?,?,?)",
+      [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? ""]
     );
   }
 }
