@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   Pressable,
   ScrollView,
@@ -13,6 +14,7 @@ import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
+import { savePhotoToDevice } from "../lib/restore";
 import type { PhotoRow } from "../lib/db";
 
 export function ViewerScreen({ route, navigation }: { route: any; navigation: any }) {
@@ -24,10 +26,28 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
   const zoomedRef = useRef(false);
   const { toggleFavorite, trashPhotos } = useLibraryStore();
 
   const photo = photos[index];
+  const hasCloudCopy = !!(
+    photo &&
+    (photo.remote_file_id || photo.preview_file_id || photo.thumb_file_id)
+  );
+
+  async function onSave() {
+    if (!photo || saving) return;
+    setSaving(true);
+    try {
+      await savePhotoToDevice(photo);
+      Alert.alert("Saved", "Photo saved to your device gallery.");
+    } catch (e: any) {
+      Alert.alert("Save failed", e?.message ?? "Could not download the photo.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const swipeUp = Gesture.Pan()
     .activeOffsetY([-24, 24])
@@ -124,6 +144,14 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
               </Text>
               <Text style={styles.actionLabel}>Favorite</Text>
             </Pressable>
+            {hasCloudCopy ? (
+              <Pressable style={styles.actionBtn} onPress={() => void onSave()}>
+                <Text style={[styles.actionIcon, { color: "#fff" }]}>
+                  {saving ? "…" : "⬇"}
+                </Text>
+                <Text style={styles.actionLabel}>Save</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={styles.actionBtn}
               onPress={() => trashPhotos([photo.id], false).then(() => navigation.goBack())}
