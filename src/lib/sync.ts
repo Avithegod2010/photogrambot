@@ -1,0 +1,131 @@
+import * as MediaLibrary from "expo-media-library";
+import { loadPrefs, savePrefs } from "./settings";
+import { enqueueUploads, processQueue } from "./uploader";
+
+export interface DeviceFolder {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export async function ensurePermissions(): Promise<boolean> {
+  const { status } = await MediaLibrary.requestPermissionsAsync(false, ["photo"]);
+  return status === "granted";
+}
+
+export async function hasPermissions(): Promise<boolean> {
+  const { status } = await MediaLibrary.getPermissionsAsync();
+  return status === "granted";
+}
+
+export async function listDeviceFolders(): Promise<DeviceFolder[]> {
+  const albums = await MediaLibrary.Album.getAll();
+  const folders: DeviceFolder[] = [];
+  for (const album of albums) {
+    try {
+      const assets = await new MediaLibrary.Query()
+        .album(album)
+        .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+        .exeForMetadata();
+      if (assets.length > 0) {
+        folders.push({ id: album.id, name: await album.getTitle(), count: assets.length });
+      }
+    } catch {}
+  }
+  folders.sort((a, b) => b.count - a.count);
+  return folders;
+}
+
+export interface ScanResult {
+  scanned: number;
+  enqueued: number;
+}
+
+export async function scanAndEnqueueAll(
+  onProgress?: (scanned: number, enqueued: number) => void
+): Promise<ScanResult> {
+  const prefs = await loadPrefs();
+  const excluded = new Set(prefs.excludedFolders);
+  const albums = await MediaLibrary.Album.getAll();
+
+  const seenLocalIds = new Set<string>();
+  let scanned = 0;
+  let enqueued = 0;
+
+  for (const album of albums) {
+    const title = await album.getTitle();
+    if (excluded.has(title)) continue;
+    try {
+      const assets = await new MediaLibrary.Query()
+        .album(album)
+        .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+        .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: true })
+        .exeForMetadata();
+      const items = [];
+      for (const meta of assets) {
+        if (seenLocalIds.has(meta.id)) continue;
+        seenLocalIds.add(meta.id);
+        scanned++;
+        items.push({
+          local_id: meta.id,
+          filename: meta.filename ?? `photo_${meta.id}`,
+          folder: title,
+          size: null,
+          width: meta.width,
+          height: meta.height,
+          taken_at: meta.creationTime ?? 0,
+          added_at: meta.modificationTime ?? meta.creationTime ?? 0,
+        });
+      }
+      if (items.length > 0) {
+        enqueued += await enqueueUploads(items, "sync");
+      }
+      if (onProgress) onProgress(scanned, enqueued);
+    } catch {}
+  }
+
+  await savePrefs({ lastFullSyncAt: Date.now() });
+  return { scanned, enqueued };
+}
+
+export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
+  const prefs = await loadPrefs();
+  const excluded = new Set(prefs.excludedFolders);
+  const albums = await MediaLibrary.Album.getAll();
+  let enqueued = 0;
+  for (const album of albums) {
+    const title = await album.getTitle();
+    if (excluded.has(title)) continue;
+    try {
+      const assets = await new MediaLibrary.Query()
+        .album(album)
+        .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+        .gt(MediaLibrary.AssetField.MODIFICATION_TIME, Math.floor(sinceMs / 1000))
+        .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: true })
+        .exeForMetadata();
+      if (assets.length === 0) continue;
+      enqueued += await enqueueUploads(
+        assets.map((meta) => ({
+          local_id: meta.id,
+          filename: meta.filename ?? `photo_${meta.id}`,
+          folder: title,
+          size: null,
+          width: meta.width,
+          height: meta.height,
+          taken_at: meta.creationTime ?? 0,
+          added_at: meta.modificationTime ?? meta.creationTime ?? 0,
+        })),
+        "sync"
+      );
+    } catch {}
+  }
+  return enqueued;
+}
+
+export async function runSyncNow(
+  onProgress?: (scanned: number, enqueued: number) => void
+): Promise<ScanResult> {
+  const result = await scanAndEnqueueAll(onProgress);
+  void processQueue();
+  return result;
+}
