@@ -19,10 +19,19 @@ import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
 import { getCachedTelegramFile } from "../lib/media";
+import { tokenForPhoto } from "../lib/destinations";
 import { isVideoMime } from "../lib/format";
 import type { PhotoRow } from "../lib/db";
 
-function CloudVideo({ fileId, mime }: { fileId: string; mime: string | null }) {
+function CloudVideo({
+  fileId,
+  mime,
+  profileId,
+}: {
+  fileId: string;
+  mime: string | null;
+  profileId?: string | null;
+}) {
   const width = Dimensions.get("window").width;
   const height = Dimensions.get("window").height;
   const style = { width, height: height * 0.92 };
@@ -33,17 +42,19 @@ function CloudVideo({ fileId, mime }: { fileId: string; mime: string | null }) {
     let alive = true;
     setUri(null);
     setFailed(false);
-    getCachedTelegramFile(fileId, "mp4")
-      .then((u) => {
+    (async () => {
+      try {
+        const token = profileId ? await tokenForPhoto({ profile_id: profileId }) : null;
+        const u = await getCachedTelegramFile(fileId, "mp4", token);
         if (alive) setUri(u);
-      })
-      .catch(() => {
+      } catch {
         if (alive) setFailed(true);
-      });
+      }
+    })();
     return () => {
       alive = false;
     };
-  }, [fileId]);
+  }, [fileId, profileId]);
 
   const player = useVideoPlayer(uri, () => {});
 
@@ -110,7 +121,8 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
     if (!fileId) return;
     try {
-      const uri = await getCachedTelegramFile(fileId, "mp4");
+      const token = await tokenForPhoto(photo);
+      const uri = await getCachedTelegramFile(fileId, "mp4", token);
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: photo.mime ?? "video/mp4",
@@ -175,11 +187,12 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
               >
                 <Pressable onPress={() => setChromeVisible((v) => !v)}>
                   {video && r.fileId ? (
-                    <CloudVideo fileId={r.fileId} mime={p.mime} />
+                    <CloudVideo fileId={r.fileId} mime={p.mime} profileId={p.profile_id} />
                   ) : (
                     <TelegramImage
                       fileId={r.fileId}
                       localUri={r.localUri}
+                      profileId={p.profile_id}
                       style={{ width, height: height * 0.92 }}
                       resizeMode="contain"
                     />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Image, View } from "react-native";
 import { getCachedTelegramFile } from "../lib/media";
+import { tokenForPhoto } from "../lib/destinations";
 
 export function TelegramImage({
   fileId,
@@ -8,12 +9,14 @@ export function TelegramImage({
   style,
   resizeMode = "cover",
   onLoad,
+  profileId,
 }: {
   fileId: string | null;
   localUri?: string | null;
   style: any;
   resizeMode?: "cover" | "contain";
   onLoad?: () => void;
+  profileId?: string | null;
 }) {
   const [uri, setUri] = useState<string | null>(localUri ?? null);
   const [failed, setFailed] = useState(false);
@@ -29,17 +32,19 @@ export function TelegramImage({
       return;
     }
     setUri(null);
-    getCachedTelegramFile(fileId)
-      .then((p) => {
+    (async () => {
+      try {
+        const token = profileId ? await tokenForPhoto({ profile_id: profileId }) : null;
+        const p = await getCachedTelegramFile(fileId, "jpg", token);
         if (alive) setUri(`file://${p}`);
-      })
-      .catch(() => {
+      } catch {
         if (alive) setFailed(true);
-      });
+      }
+    })();
     return () => {
       alive = false;
     };
-  }, [fileId, localUri]);
+  }, [fileId, localUri, profileId]);
 
   if (!uri) {
     return (

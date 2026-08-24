@@ -28,6 +28,7 @@ import { enqueueUploads, processQueue } from "../lib/uploader";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { getCachedTelegramFile } from "../lib/media";
+import { tokenForPhoto, listProfiles } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { Button, Dialog, TextField } from "../components/ui";
 import type { PeriodGroup } from "../lib/db";
@@ -126,7 +127,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         const ext = p.filename.includes(".")
           ? p.filename.split(".").pop()!.toLowerCase()
           : "jpg";
-        uris.push(await getCachedTelegramFile(fid, ext));
+        const token = p.profile_id ? await tokenForPhoto(p) : null;
+        uris.push(await getCachedTelegramFile(fid, ext, token));
         if (p.mime && !p.mime.startsWith("image/")) allImages = false;
       }
       if (uris.length === 0) {
@@ -179,6 +181,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         <TelegramImage
           fileId={thumb.fileId}
           localUri={thumb.localUri}
+          profileId={photo.profile_id}
           style={{ width: w, height: h }}
         />
         {photo.favorite ? (
@@ -576,6 +579,16 @@ function LocalPickerSheet({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
+  const [destId, setDestId] = useState<string | null>(null);
+  const multiDest = useSettingsStore((s) => s.prefs.multiDestination);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (multiDest) {
+      void listProfiles().then((ps) => setProfiles(ps.map((p) => ({ id: p.id, name: p.name }))));
+    }
+  }, [visible, multiDest]);
 
   useEffect(() => {
     if (!visible) return;
@@ -627,7 +640,7 @@ function LocalPickerSheet({
       taken_at: a.creationTime ?? 0,
       added_at: a.modificationTime ?? a.creationTime ?? 0,
     }));
-    const n = await enqueueUploads(items, "manual");
+    const n = await enqueueUploads(items, "manual", destId);
     onClose();
     if (n > 0) void processQueue();
   }
@@ -702,9 +715,38 @@ function LocalPickerSheet({
             { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 12 },
           ]}
         >
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, flex: 1 }}>
-            {dupeCount > 0 ? `${dupeCount} already backed up` : "Photos upload as original quality"}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+              {dupeCount > 0 ? `${dupeCount} already backed up` : "Photos upload as original quality"}
+            </Text>
+            {multiDest && profiles.length > 0 ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {profiles.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => setDestId(destId === p.id ? null : p.id)}
+                    style={[
+                      styles.destChip,
+                      {
+                        backgroundColor:
+                          destId === p.id ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        color: destId === p.id ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                        fontSize: 11,
+                        fontWeight: "600",
+                      }}
+                    >
+                      {p.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
           <Button
             title={picked.size > 0 ? `Upload ${picked.size}` : "Upload"}
             theme={theme}
@@ -1000,6 +1042,11 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 10,
     fontWeight: "700",
+  },
+  destChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   overviewCard: {
     marginHorizontal: 16,

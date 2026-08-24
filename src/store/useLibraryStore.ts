@@ -21,6 +21,7 @@ import {
   type AlbumWithCover,
 } from "../lib/db";
 import { getBotToken, getChannelId } from "../lib/settings";
+import { tokenForPhoto } from "../lib/destinations";
 import { deleteMessage, setMessageReaction } from "../lib/telegram";
 
 export interface TrashItem extends PhotoRow {
@@ -120,10 +121,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const next = !photo.favorite;
     await setFavorite(photo.id, next);
     const channelId = await getChannelId();
+    const token = await tokenForPhoto(photo);
     if (next && channelId && photo.message_id) {
-      await setMessageReaction(channelId, photo.message_id, "❤️");
+      await setMessageReaction(channelId, photo.message_id, "❤️", token ?? undefined);
     } else if (!next && channelId && photo.message_id) {
-      await setMessageReaction(channelId, photo.message_id, null);
+      await setMessageReaction(channelId, photo.message_id, null, token ?? undefined);
     }
     await get().refresh();
   },
@@ -138,10 +140,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             return getPhoto(id);
           })());
         if (photo?.message_id && channelId) {
-          await deleteMessage(channelId, photo.message_id);
+          const token = await tokenForPhoto(photo);
+          await deleteMessage(channelId, photo.message_id, token ?? undefined);
           const previewMsgId = (photo as any).preview_message_id;
           if (previewMsgId) {
-            await deleteMessage(channelId, previewMsgId);
+            await deleteMessage(channelId, previewMsgId, token ?? undefined);
           }
         }
         await markTrashRemoteDeleted(id);
@@ -164,7 +167,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     for (const id of ids) {
       const photo = await getPhoto(id);
       if (photo?.message_id && channelId) {
-        await deleteMessage(channelId, photo.message_id);
+        const token = await tokenForPhoto(photo);
+        await deleteMessage(channelId, photo.message_id, token ?? undefined);
       }
       await deletePhoto(id);
     }

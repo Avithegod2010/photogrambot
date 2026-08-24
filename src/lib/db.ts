@@ -31,6 +31,7 @@ export interface PhotoRow {
   ai_caption: string | null;
   duration: number | null;
   parts: string | null;
+  profile_id: string | null;
   favorite: number;
   status: PhotoStatus;
   error: string | null;
@@ -64,6 +65,7 @@ export interface QueueRow {
   state: "pending" | "running" | "done" | "failed" | "skipped" | "duplicate";
   retries: number;
   next_attempt_at: number | null;
+  profile_id: string | null;
   error: string | null;
   created_at: number;
 }
@@ -162,9 +164,11 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["ai_caption", "TEXT"],
     ["duration", "INTEGER"],
     ["parts", "TEXT"],
+    ["profile_id", "TEXT"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
+    ["profile_id", "TEXT"],
   ]);
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
@@ -234,8 +238,8 @@ export async function insertPhoto(p: Partial<PhotoRow> & { id: string }): Promis
       (id, local_id, local_uri, remote_file_id, preview_file_id, thumb_file_id,
        message_id, preview_message_id, filename, folder, width, height, size, mime,
        taken_at, added_at, uploaded_at, remote_date, content_hash, device, camera,
-       tags, latitude, longitude, exif, favorite, status, error, upload_type)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       tags, latitude, longitude, exif, ai_caption, duration, parts, profile_id, favorite, status, error, upload_type)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       p.id,
       p.local_id ?? null,
@@ -262,6 +266,10 @@ export async function insertPhoto(p: Partial<PhotoRow> & { id: string }): Promis
       p.latitude ?? null,
       p.longitude ?? null,
       p.exif ?? null,
+      p.ai_caption ?? null,
+      p.duration ?? null,
+      p.parts ?? null,
+      p.profile_id ?? null,
       p.favorite ?? 0,
       p.status ?? "local",
       p.error ?? null,
@@ -583,12 +591,13 @@ export async function enqueueUpload(item: {
   added_at: number;
   content_hash: string | null;
   upload_type: string;
+  profile_id?: string | null;
 }): Promise<number> {
   const d = await getDb();
   const res = await d.runAsync(
     `INSERT INTO upload_queue (local_id, local_uri, filename, folder, size, taken_at, added_at,
-      content_hash, upload_type, state, retries, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?)`,
+      content_hash, upload_type, state, retries, created_at, profile_id)
+     VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?)`,
     [
       item.local_id,
       item.local_uri,
@@ -600,6 +609,7 @@ export async function enqueueUpload(item: {
       item.content_hash,
       item.upload_type,
       Date.now(),
+      item.profile_id ?? null,
     ]
   );
   return res.lastInsertRowId ?? 0;

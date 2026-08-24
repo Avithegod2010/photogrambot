@@ -215,6 +215,7 @@ export function MonthGrid({
           <TelegramImage
             fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
             localUri={item.local_uri}
+            profileId={item.profile_id}
             style={{ width: "100%", height: "100%" }}
           />
         </Pressable>

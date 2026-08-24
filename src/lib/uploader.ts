@@ -30,6 +30,11 @@ import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo } from "./vsplit";
+import {
+  resolveDestination,
+  profileIdForFolder,
+  type Destination,
+} from "./destinations";
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_RETRIES = 5;
@@ -108,7 +113,8 @@ export interface LocalAssetRef {
 
 export async function enqueueUploads(
   items: LocalAssetRef[],
-  uploadType: "manual" | "sync"
+  uploadType: "manual" | "sync",
+  profileId?: string | null
 ): Promise<number> {
   let enqueued = 0;
   for (const item of items) {
@@ -123,6 +129,9 @@ export async function enqueueUploads(
         continue;
       }
     }
+    const pid =
+      profileId ??
+      (await profileIdForFolder(item.folder));
     const queueId = await enqueueUpload({
       local_id: item.local_id,
       local_uri: localUri,
@@ -133,6 +142,7 @@ export async function enqueueUploads(
       added_at: Date.now(),
       content_hash: null,
       upload_type: uploadType,
+      profile_id: pid,
     });
     if (queueId > 0) {
       await insertPhoto({
@@ -149,6 +159,7 @@ export async function enqueueUploads(
         added_at: Date.now(),
         status: "local",
         upload_type: uploadType,
+        profile_id: pid,
       });
       enqueued++;
     }
@@ -214,8 +225,7 @@ export async function processQueue(): Promise<void> {
   } finally {
     processing = false;
     try {
-      const channelId = await getChannelId();
-      if (channelId) await flushPreviews(channelId);
+      await flushPreviews();
     } catch {}
     setProgress({ running: false, currentFile: null, sentBytes: 0, totalBytes: 0, percent: null });
   }
@@ -245,14 +255,18 @@ function computeBackoffMs(e: unknown, retries: number): number {
   return base + Math.floor(Math.random() * 5_000);
 }
 
-async function topicIdFor(channelId: string, folder: string | null): Promise<number | null> {
+async function topicIdFor(
+  channelId: string,
+  folder: string | null,
+  token: string
+): Promise<number | null> {
   try {
     const prefs = await loadPrefs();
     if (!prefs.topicPerFolder || !folder) return null;
     const raw = await kvGet("topic_map");
     const map: Record<string, number> = raw ? JSON.parse(raw) : {};
     if (map[folder]) return map[folder];
-    const topic = await createForumTopic(channelId, folder);
+    const topic = await createForumTopic(channelId, folder, token);
     if (!topic) return null;
     map[folder] = topic.message_thread_id;
     await kvSet("topic_map", JSON.stringify(map));
@@ -266,6 +280,9 @@ interface PendingPreview {
   uri: string;
   caption: string;
   filename: string;
+  channelId: string;
+  token: string;
+  threadId?: number;
   resolve: (m: TgMessage | null) => void;
 }
 
@@ -274,24 +291,25 @@ let previewFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function queuePreview(
   channelId: string,
+  token: string,
   uri: string,
   caption: string,
   filename: string,
   messageThreadId?: number
 ): Promise<TgMessage | null> {
   return new Promise<TgMessage | null>((resolve) => {
-    previewBuffer.push({ uri, caption, filename, resolve });
+    previewBuffer.push({ uri, caption, filename, channelId, token, threadId: messageThreadId, resolve });
     if (previewBuffer.length >= 10) {
-      void flushPreviews(channelId, messageThreadId);
+      void flushPreviews();
     } else if (!previewFlushTimer) {
       previewFlushTimer = setTimeout(() => {
-        void flushPreviews(channelId, messageThreadId);
+        void flushPreviews();
       }, 1500);
     }
   });
 }
 
-async function flushPreviews(channelId: string, messageThreadId?: number): Promise<void> {
+async function flushPreviews(): Promise<void> {
   if (previewFlushTimer) {
     clearTimeout(previewFlushTimer);
     previewFlushTimer = null;
@@ -299,35 +317,65 @@ async function flushPreviews(channelId: string, messageThreadId?: number): Promi
   const batch = previewBuffer;
   previewBuffer = [];
   if (batch.length === 0) return;
-  try {
-    const messages = await sendMediaGroup(
-      channelId,
-      batch.map((p) => ({ uri: p.uri, caption: p.caption, filename: p.filename })),
-      { messageThreadId }
-    );
-    if (messages && messages.length === batch.length) {
-      batch.forEach((p, i) => p.resolve(messages[i] ?? null));
-      return;
-    }
-    throw new Error("Media group size mismatch");
-  } catch {
-    for (const p of batch) {
+  // Group by destination so profiles never cross contaminate a media group.
+  const groups = new Map<string, PendingPreview[]>();
+  for (const p of batch) {
+    const key = `${p.token}|${p.channelId}|${p.threadId ?? ""}`;
+    const list = groups.get(key);
+    if (list) list.push(p);
+    else groups.set(key, [p]);
+  }
+  for (const group of groups.values()) {
+    for (const chunk of chunksOf(group, 10)) {
       try {
-        p.resolve(await sendPhoto(channelId, p.uri, { caption: p.caption, filename: p.filename }));
+        const messages = await sendMediaGroup(
+          chunk[0].channelId,
+          chunk.map((p) => ({ uri: p.uri, caption: p.caption, filename: p.filename })),
+          { messageThreadId: chunk[0].threadId, token: chunk[0].token }
+        );
+        if (messages && messages.length === chunk.length) {
+          chunk.forEach((p, i) => p.resolve(messages[i] ?? null));
+          continue;
+        }
+        throw new Error("Media group size mismatch");
       } catch {
-        p.resolve(null);
+        for (const p of chunk) {
+          try {
+            p.resolve(
+              await sendPhoto(p.channelId, p.uri, {
+                caption: p.caption,
+                filename: p.filename,
+                token: p.token,
+              })
+            );
+          } catch {
+            p.resolve(null);
+          }
+        }
       }
     }
   }
 }
 
+function chunksOf<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 async function uploadQueueItem(item: QueueRow): Promise<void> {
-  const token = await getBotToken();
-  const channelId = await getChannelId();
-  if (!token || !channelId) {
-    await updateQueueItem(item.id, { state: "failed", error: "Bot not configured" });
+  const dest: Destination | null = await resolveDestination(item.profile_id);
+  if (!dest) {
+    await updateQueueItem(item.id, {
+      state: "failed",
+      error: item.profile_id
+        ? "Destination missing or its bot token was never entered"
+        : "Bot not configured",
+    });
     return;
   }
+  const token = dest.token;
+  const channelId = dest.channelId;
   await updateQueueItem(item.id, { state: "running" });
   const photoId = `local_${item.local_id}`;
   try {
@@ -375,7 +423,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     }
 
     await updatePhoto(photoId, { status: "uploading", content_hash: hash });
-    const threadId = await topicIdFor(channelId, item.folder);
+    const threadId = await topicIdFor(channelId, item.folder, token);
 
     let metaFull: Awaited<ReturnType<typeof getAssetMeta>> | null = null;
     try {
@@ -398,6 +446,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
         deviceId,
         fileSize: file.size,
         threadId,
+        token,
       });
       await updateQueueItem(item.id, { state: "done", error: null });
       return;
@@ -414,6 +463,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
           previewLocalUri = preview.uri;
           previewMessage = await queuePreview(
             channelId,
+            token,
             preview.uri,
             buildPreviewCaption(hash, preview.size),
             `preview_${item.filename.replace(/\.[^.]+$/, "")}.jpg`,
@@ -491,6 +541,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
         onProgress: emitFileProgress,
         signal: controller.signal,
         messageThreadId: threadId ?? undefined,
+        token,
       });
     } finally {
       activeCancels.delete(cancelFn);
@@ -516,6 +567,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       longitude: metaFull?.gps?.lon ?? null,
       exif: metaFull?.technical ? JSON.stringify(metaFull.technical) : null,
       ai_caption: aiDescription,
+      profile_id: item.profile_id,
       error: null,
     });
     await updateQueueItem(item.id, { state: "done", error: null });
@@ -566,6 +618,7 @@ async function uploadVideoItem(
     deviceId: string;
     fileSize: number;
     threadId: number | null;
+    token: string;
   }
 ): Promise<void> {
   const { metaFull } = ctx;
@@ -601,9 +654,10 @@ async function uploadVideoItem(
       const parts = await splitAndUploadVideo(channelId, item.local_uri, {
         hash: ctx.hash ?? "",
         filename: item.filename,
+        messageThreadId: ctx.threadId ?? undefined,
+        token: ctx.token,
         onProgress: emitFileProgress,
         signal: controller.signal,
-        messageThreadId: ctx.threadId ?? undefined,
       });
       partsJson = JSON.stringify(parts);
     } else {
@@ -619,6 +673,7 @@ async function uploadVideoItem(
           onProgress: emitFileProgress,
           signal: controller.signal,
           messageThreadId: ctx.threadId ?? undefined,
+          token: ctx.token,
         });
       } catch (e) {
         if (e instanceof TelegramError && (e.code === 400 || e.code === 415)) {
@@ -630,6 +685,7 @@ async function uploadVideoItem(
             onProgress: emitFileProgress,
             signal: controller.signal,
             messageThreadId: ctx.threadId ?? undefined,
+            token: ctx.token,
           });
         } else {
           throw e;
@@ -660,6 +716,7 @@ async function uploadVideoItem(
       longitude: metaFull?.gps?.lon ?? null,
       duration,
       parts: partsJson,
+      profile_id: item.profile_id,
       error: null,
     });
   } finally {
