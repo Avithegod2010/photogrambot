@@ -2,6 +2,7 @@ import { File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { downloadFile } from "./telegram";
 import { getPhotosByUploadStatus, type PhotoRow } from "./db";
+import { tokenForPhoto } from "./destinations";
 import type { VideoPart } from "./vsplit";
 
 function safeName(filename: string): string {
@@ -27,6 +28,7 @@ function parseParts(raw: string | null | undefined): VideoPart[] | null {
 }
 
 async function reassembleParts(photo: PhotoRow, parts: VideoPart[], dest: File): Promise<void> {
+  const token = await tokenForPhoto(photo);
   if (dest.exists) dest.delete();
   dest.create();
   const handle = dest.open();
@@ -34,7 +36,7 @@ async function reassembleParts(photo: PhotoRow, parts: VideoPart[], dest: File):
     for (const part of parts) {
       const tmp = new File(Paths.cache, `pb_rpart_${Date.now()}.bin`);
       try {
-        await downloadFile(part.file_id, tmp.uri);
+        await downloadFile(part.file_id, tmp.uri, token ?? undefined);
         const bytes = await tmp.bytes();
         handle.writeBytes(bytes);
       } finally {
@@ -58,7 +60,8 @@ export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
     } else {
       const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
       if (!fileId) throw new Error("No cloud copy available to download");
-      await downloadFile(fileId, dest.uri);
+      const token = await tokenForPhoto(photo);
+      await downloadFile(fileId, dest.uri, token ?? undefined);
     }
     await MediaLibrary.Asset.create(dest.uri);
   } finally {

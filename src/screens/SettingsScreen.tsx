@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -264,6 +265,27 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ topicPerFolder: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Multiple destinations (Experimental)"
+            subtitle="Back up to several bot/channel pairs — e.g. a personal archive and a family one — with per-folder routing."
+            value={prefs.multiDestination}
+            onChange={(v) => void update({ multiDestination: v })}
+            theme={theme}
+          />
+          {prefs.multiDestination ? (
+            <Pressable style={styles.destRow} onPress={() => navigation.navigate("Destinations")}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
+                  Manage destinations
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                  Add bot/channel pairs and folder routing rules
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+            </Pressable>
+          ) : null}
         </Card>
 
         <SectionLabel text="AI captioning (Gemini)" theme={theme} />
@@ -557,6 +579,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     marginTop: 8,
+  },
+  destRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
   },
   busyOverlay: {
     position: "absolute",

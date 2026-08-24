@@ -14,8 +14,10 @@ import {
 import { File, Paths } from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { Button } from "./ui";
 import { enqueueUploads, processQueue } from "../lib/uploader";
+import { listProfiles } from "../lib/destinations";
 import { clearSharedMedia } from "../../modules/share-intent";
 
 const COLUMNS = 4;
@@ -29,8 +31,17 @@ export function ShareTargetSheet({
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const multiDest = useSettingsStore((s) => s.prefs.multiDestination);
+  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
+  const [destId, setDestId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const tile = (Dimensions.get("window").width - 8) / COLUMNS;
+
+  React.useEffect(() => {
+    if (multiDest) {
+      void listProfiles().then((ps) => setProfiles(ps.map((p) => ({ id: p.id, name: p.name }))));
+    }
+  }, [multiDest]);
 
   async function onUpload() {
     if (uploading) return;
@@ -64,7 +75,7 @@ export function ShareTargetSheet({
         }
       }
       if (items.length > 0) {
-        enqueued = await enqueueUploads(items, "manual");
+        enqueued = await enqueueUploads(items, "manual", destId);
       }
     } catch (e: any) {
       Alert.alert("Import failed", e?.message ?? "Could not import shared files.");
@@ -98,6 +109,33 @@ export function ShareTargetSheet({
         <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 }}>
           {uris.length} item{uris.length === 1 ? "" : "s"} shared from another app. Upload them to your Telegram channel?
         </Text>
+        {multiDest && profiles.length > 0 ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 16, paddingBottom: 8 }}>
+            {profiles.map((p) => (
+              <Pressable
+                key={p.id}
+                onPress={() => setDestId(destId === p.id ? null : p.id)}
+                style={[
+                  styles.destChip,
+                  {
+                    backgroundColor:
+                      destId === p.id ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: destId === p.id ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                    fontSize: 12,
+                    fontWeight: "600",
+                  }}
+                >
+                  {p.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         <ScrollView contentContainerStyle={{ padding: 4 }}>
           <View style={styles.grid}>
             {uris.map((uri) => (
@@ -147,5 +185,10 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingTop: 10,
+  },
+  destChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
 });

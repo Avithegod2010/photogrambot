@@ -41,6 +41,7 @@ export async function splitAndUploadVideo(
     hash: string;
     filename: string;
     messageThreadId?: number;
+    token?: string;
     onProgress?: (bytesSent: number, totalBytes: number) => void;
     onPartUploaded?: (index: number, total: number) => void;
     signal?: AbortSignal;
@@ -63,6 +64,7 @@ export async function splitAndUploadVideo(
           filename: `${opts.filename}.part${String(i).padStart(2, "0")}`,
           mime: "application/octet-stream",
           messageThreadId: opts.messageThreadId,
+          token: opts.token,
           onProgress: opts.onProgress,
           signal: opts.signal,
         });

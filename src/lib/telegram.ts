@@ -73,8 +73,12 @@ export class TelegramError extends Error {
   }
 }
 
-async function call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
-  const token = await getBotToken();
+async function call<T>(
+  method: string,
+  params?: Record<string, unknown>,
+  tokenOverride?: string
+): Promise<T> {
+  const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const res = await fetch(`${API_BASE}/bot${token}/${method}`, {
     method: "POST",
@@ -97,8 +101,8 @@ export async function getMe(): Promise<TgUser> {
   return call<TgUser>("getMe");
 }
 
-export async function getChat(chatId: string | number): Promise<any> {
-  return call<any>("getChat", { chat_id: chatId });
+export async function getChat(chatId: string | number, tokenOverride?: string): Promise<any> {
+  return call<any>("getChat", { chat_id: chatId }, tokenOverride);
 }
 
 export async function getChatPinnedMessage(chatId: string | number): Promise<TgMessage | null> {
@@ -133,6 +137,7 @@ export interface FileSendOptions {
   filename?: string;
   mime?: string;
   messageThreadId?: number;
+  token?: string;
   onProgress?: (sentBytes: number, totalBytes: number) => void;
   signal?: AbortSignal;
 }
@@ -153,6 +158,7 @@ export async function sendPhoto(
   return sendFileViaTask(chatId, "sendPhoto", "photo", fileUri, params, {
     filename: options.filename ?? "preview.jpg",
     mime: "image/jpeg",
+    token: options.token,
     onProgress: options.onProgress,
     signal: options.signal,
   });
@@ -180,6 +186,7 @@ export async function sendDocument(
   return sendFileViaTask(chatId, "sendDocument", "document", fileUri, params, {
     filename: options.filename ?? "photo.jpg",
     mime: options.mime ?? "application/octet-stream",
+    token: options.token,
     onProgress: options.onProgress,
     signal: options.signal,
   });
@@ -212,6 +219,7 @@ export async function sendVideo(
   return sendFileViaTask(chatId, "sendVideo", "video", fileUri, params, {
     filename: options.filename ?? "video.mp4",
     mime: options.mime ?? "video/mp4",
+    token: options.token,
     onProgress: options.onProgress,
     signal: options.signal,
   });
@@ -223,9 +231,15 @@ async function sendFileViaTask(
   fieldName: string,
   fileUri: string,
   params: Record<string, string>,
-  file: { filename: string; mime: string; onProgress?: (s: number, t: number) => void; signal?: AbortSignal }
+  file: {
+    filename: string;
+    mime: string;
+    token?: string;
+    onProgress?: (s: number, t: number) => void;
+    signal?: AbortSignal;
+  }
 ): Promise<TgMessage> {
-  const token = await getBotToken();
+  const token = file.token ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
   let gotBytes = false;
   let staged: File | null = null;
@@ -268,7 +282,7 @@ async function sendFileViaTask(
     const form = new FormData();
     for (const [k, v] of Object.entries(params)) form.append(k, v);
     form.append(fieldName, { uri: fileUri, name: file.filename, type: file.mime } as any);
-    return uploadForm(method, form);
+    return uploadForm(method, form, file.token);
   } finally {
     if (staged) {
       try { staged.delete(); } catch {}
@@ -293,8 +307,12 @@ function parseTgResult<T>(body: string, status: number): T {
   return json.result as T;
 }
 
-async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
-  const token = await getBotToken();
+async function uploadForm(
+  method: string,
+  form: FormData,
+  tokenOverride?: string
+): Promise<TgMessage> {
+  const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const res = await fetch(`${API_BASE}/bot${token}/${method}`, {
     method: "POST",
@@ -305,13 +323,18 @@ async function uploadForm(method: string, form: FormData): Promise<TgMessage> {
 
 export async function createForumTopic(
   chatId: string | number,
-  name: string
+  name: string,
+  tokenOverride?: string
 ): Promise<{ message_thread_id: number; name: string } | null> {
   try {
-    return await call<{ message_thread_id: number; name: string }>("createForumTopic", {
-      chat_id: chatId,
-      name: name.slice(0, 128),
-    });
+    return await call<{ message_thread_id: number; name: string }>(
+      "createForumTopic",
+      {
+        chat_id: chatId,
+        name: name.slice(0, 128),
+      },
+      tokenOverride
+    );
   } catch {
     return null;
   }
@@ -326,10 +349,10 @@ export interface MediaGroupItem {
 export async function sendMediaGroup(
   chatId: string | number,
   items: MediaGroupItem[],
-  options: { messageThreadId?: number } = {}
+  options: { messageThreadId?: number; token?: string } = {}
 ): Promise<TgMessage[] | null> {
   if (items.length === 0) return [];
-  const token = await getBotToken();
+  const token = options.token ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const form = new FormData();
   form.append("chat_id", String(chatId));
@@ -361,9 +384,13 @@ export async function sendMediaGroup(
   }
 }
 
-export async function deleteMessage(chatId: string | number, messageId: number): Promise<boolean> {
+export async function deleteMessage(
+  chatId: string | number,
+  messageId: number,
+  tokenOverride?: string
+): Promise<boolean> {
   try {
-    await call("deleteMessage", { chat_id: chatId, message_id: messageId });
+    await call("deleteMessage", { chat_id: chatId, message_id: messageId }, tokenOverride);
     return true;
   } catch {
     return false;
@@ -373,18 +400,23 @@ export async function deleteMessage(chatId: string | number, messageId: number):
 export async function setMessageReaction(
   chatId: string | number,
   messageId: number,
-  emoji: string | null
+  emoji: string | null,
+  tokenOverride?: string
 ): Promise<boolean> {
   try {
     const reaction =
       emoji === null
         ? []
         : [{ type: "emoji", emoji }];
-    await call("setMessageReaction", {
-      chat_id: chatId,
-      message_id: messageId,
-      reaction,
-    });
+    await call(
+      "setMessageReaction",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reaction,
+      },
+      tokenOverride
+    );
     return true;
   } catch {
     return false;
@@ -398,8 +430,8 @@ export interface FileResult {
   file_path?: string;
 }
 
-export async function getFile(fileId: string): Promise<FileResult> {
-  return call<FileResult>("getFile", { file_id: fileId });
+export async function getFile(fileId: string, tokenOverride?: string): Promise<FileResult> {
+  return call<FileResult>("getFile", { file_id: fileId }, tokenOverride);
 }
 
 export async function getUpdates(offset: number, timeout = 0): Promise<TgUpdate[]> {
@@ -416,10 +448,14 @@ export async function getUpdates(offset: number, timeout = 0): Promise<TgUpdate[
   return json.result ?? [];
 }
 
-export async function downloadFile(fileId: string, destUri: string): Promise<void> {
-  const token = await getBotToken();
+export async function downloadFile(
+  fileId: string,
+  destUri: string,
+  tokenOverride?: string
+): Promise<void> {
+  const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
-  const info = await getFile(fileId);
+  const info = await getFile(fileId, token);
   if (!info.file_path) throw new TelegramError(400, "No file_path returned by Telegram");
   const url = `${API_BASE}/file/bot${token}/${info.file_path}`;
   const { File } = await import("expo-file-system");

@@ -247,6 +247,7 @@ function TrashTab({ navigation, theme }: { navigation: any; theme: ReturnType<ty
             <TelegramImage
               fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
               localUri={item.local_uri}
+              profileId={item.profile_id}
               style={{ width: "100%", height: "100%", opacity: 0.6 }}
             />
           </Pressable>
@@ -367,6 +368,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
               <TelegramImage
                 fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
                 localUri={item.local_uri}
+                profileId={item.profile_id}
                 style={{ width: "100%", height: "100%" }}
               />
               {selected ? (
@@ -447,6 +449,7 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
                 <TelegramImage
                   fileId={thumb.fileId}
                   localUri={thumb.localUri}
+                  profileId={item.profile_id}
                   style={{ width: "100%", height: "100%" }}
                 />
                 {item.status === "uploaded" ? (

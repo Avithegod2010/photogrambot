@@ -27,7 +27,8 @@ function cacheKeyFor(fileId: string): string {
 
 export async function getCachedTelegramFile(
   fileId: string,
-  ext = "jpg"
+  ext = "jpg",
+  token?: string | null
 ): Promise<string> {
   const path = `${thumbDir().uri}${cacheKeyFor(fileId)}.${ext}`;
   const existing = new File(path);
@@ -37,7 +38,7 @@ export async function getCachedTelegramFile(
   if (running) return running;
   const p = (async () => {
     try {
-      await downloadFile(fileId, path);
+      await downloadFile(fileId, path, token ?? undefined);
       return path;
     } finally {
       inflight.delete(key);
