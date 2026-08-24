@@ -14,7 +14,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getLibraryCounts, getPhotosByUploadStatus, type PhotoRow } from "../lib/db";
+import { getLibraryCounts, getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
+import { unlockHiddenAlbum } from "../lib/biometrics";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
 
@@ -126,10 +127,17 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                 <Pressable
                   key={a.id}
                   style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
-                  onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name })}
+                  onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, locked: !!a.locked })}
                   onLongPress={() =>
-                    Alert.alert(a.name, "Delete this album? Photos are kept in your gallery.", [
+                    Alert.alert(a.name, undefined, [
                       { text: "Cancel", style: "cancel" },
+                      {
+                        text: a.locked ? "Remove lock" : "Lock album",
+                        onPress: async () => {
+                          await setAlbumLocked(a.id, !a.locked);
+                          await useLibraryStore.getState().refreshMeta();
+                        },
+                      },
                       {
                         text: "Delete album",
                         style: "destructive",
@@ -144,9 +152,10 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                       style={{ width: tile, height: tile * 0.8 }}
                     />
                   </View>
-                  <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
-                    {a.name}
-                  </Text>
+              <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
+                {a.locked ? "🔒 " : ""}
+                {a.name}
+              </Text>
                   <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
                     {a.count} photos
                   </Text>
@@ -268,11 +277,20 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const insets = useSafeAreaInsets();
   const albumId: number = route.params?.albumId ?? -1;
   const albumName: string = route.params?.albumName ?? "Album";
+  const needsUnlock: boolean = !!route.params?.locked && albumId !== -1;
+  const [unlocked, setUnlocked] = useState(!needsUnlock);
   const { favorites, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
 
   React.useEffect(() => {
+    if (needsUnlock && !unlocked) {
+      void unlockHiddenAlbum().then((ok) => {
+        if (ok) setUnlocked(true);
+        else navigation.goBack();
+      });
+      return;
+    }
     (async () => {
       if (albumId === -1) {
         setPhotos(favorites);
@@ -281,9 +299,13 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         setPhotos(list);
       }
     })();
-  }, [albumId, favorites]);
+  }, [albumId, favorites, unlocked, needsUnlock]);
 
   const tile = (Dimensions.get("window").width - 4) / 3;
+
+  if (!unlocked) {
+    return <View style={[styles.container, { backgroundColor: theme.colors.background }]} />;
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: 0 }]}>

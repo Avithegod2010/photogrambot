@@ -18,7 +18,13 @@ import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog } from "../com
 import { formatBytes } from "../lib/format";
 import { runSyncNow } from "../lib/sync";
 import { getBackgroundSyncInfo } from "../lib/background";
-import { getAiApiKey, setAiApiKey, DEFAULT_AI_PROMPT } from "../lib/settings";
+import {
+  getAiApiKey,
+  setAiApiKey,
+  getBackupPassphrase,
+  setBackupPassphrase,
+  DEFAULT_AI_PROMPT,
+} from "../lib/settings";
 import {
   uploadBackupToChannel,
   restoreFromChannelPinned,
@@ -46,6 +52,11 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
   const [aiPromptDraft, setAiPromptDraft] = useState(prefs.aiPrompt);
+  const [passDraft, setPassDraft] = useState("");
+
+  useEffect(() => {
+    void getBackupPassphrase().then((p) => setPassDraft(p ?? ""));
+  }, []);
 
   useEffect(() => {
     void refreshMeta();
@@ -245,6 +256,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ includeVideos: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Organize by folder (topics)"
+            subtitle="Create a Telegram forum topic per folder and post uploads there. Needs a topics-enabled group where the bot can manage topics."
+            value={prefs.topicPerFolder}
+            onChange={(v) => void update({ topicPerFolder: v })}
+            theme={theme}
+          />
         </Card>
 
         <SectionLabel text="AI captioning (Gemini)" theme={theme} />
@@ -389,6 +408,32 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ dbAutoBackup: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Encrypt DB backups"
+            subtitle="AES-256-GCM with a passphrase. Anyone with channel access cannot read the index without it. Keep the passphrase safe — encrypted backups cannot be restored without it."
+            value={prefs.dbBackupEncrypt}
+            onChange={(v) => {
+              if (!v) void setBackupPassphrase(null);
+              void update({ dbBackupEncrypt: v });
+            }}
+            theme={theme}
+          />
+          {prefs.dbBackupEncrypt ? (
+            <>
+              <TextField
+                value={passDraft}
+                onChangeText={setPassDraft}
+                onEndEditing={() => void setBackupPassphrase(passDraft || null)}
+                placeholder="Backup passphrase"
+                secureTextEntry
+                theme={theme}
+              />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+                Saved on this device. Enter the same passphrase on a new phone before restoring.
+              </Text>
+            </>
+          ) : null}
           <View style={styles.buttonGrid}>
             <Button title="Backup to channel" variant="outlined" theme={theme} onPress={onBackupToChannel} />
             <Button title="Restore from channel" variant="outlined" theme={theme} onPress={() => setRestoreDialog(true)} />
