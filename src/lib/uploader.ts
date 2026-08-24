@@ -15,11 +15,13 @@ import {
   type QueueRow,
 } from "./db";
 import { getBotToken, getChannelId, loadPrefs, getDeviceId, getAiApiKey, DEFAULT_AI_PROMPT } from "./settings";
-import { sendDocument, sendPhoto, TelegramError, TgMessage } from "./telegram";
+import { sendDocument, sendPhoto, sendVideo, TelegramError, TgMessage } from "./telegram";
 import { captionImageWithGemini } from "./ai";
 import { buildCaption, buildPreviewCaption } from "./caption";
 import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
+import { isVideoMime } from "./format";
+import { splitAndUploadVideo } from "./vsplit";
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_RETRIES = 5;
@@ -248,7 +250,8 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       return;
     }
     const actualSize = file.size;
-    if (actualSize > MAX_UPLOAD_BYTES) {
+    const looksLikeVideo = isVideoMime(guessMime(item.filename));
+    if (actualSize > MAX_UPLOAD_BYTES && !looksLikeVideo) {
       await updateQueueItem(item.id, { state: "skipped", error: "Photo larger than 50 MB" });
       await updatePhoto(photoId, { status: "skipped_too_large", error: "Photo larger than 50 MB" });
       return;
@@ -295,6 +298,20 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     const takenAt = metaFull?.takenAt || item.taken_at || Date.now();
     const mime = metaFull?.mime ?? guessMime(item.filename);
     const tags = buildTags(item.filename, item.folder, takenAt, mime, metaFull?.camera ?? null);
+
+    if (looksLikeVideo || isVideoMime(mime)) {
+      await uploadVideoItem(item, photoId, channelId, {
+        hash,
+        mime,
+        metaFull,
+        takenAt,
+        tags,
+        deviceId,
+        fileSize: file.size,
+      });
+      await updateQueueItem(item.id, { state: "done", error: null });
+      return;
+    }
 
     let previewMessage: TgMessage | null = null;
     let previewFileId: string | null = null;
@@ -439,4 +456,114 @@ export async function getResumeOffset(): Promise<number> {
 
 export async function setResumeOffset(offset: number): Promise<void> {
   await kvSet("updates_offset", String(offset));
+}
+
+async function uploadVideoItem(
+  item: QueueRow,
+  photoId: string,
+  channelId: string,
+  ctx: {
+    hash: string | null;
+    mime: string;
+    metaFull: Awaited<ReturnType<typeof getAssetMeta>> | null;
+    takenAt: number;
+    tags: string[];
+    deviceId: string;
+    fileSize: number;
+  }
+): Promise<void> {
+  const { metaFull } = ctx;
+  const duration = metaFull?.duration ?? null;
+  const fileSize = metaFull?.size ?? ctx.fileSize;
+  const caption = buildCaption({
+    filename: item.filename,
+    path: metaFull?.localUri,
+    size: fileSize,
+    width: metaFull?.width ?? null,
+    height: metaFull?.height ?? null,
+    mime: ctx.mime,
+    duration,
+    dateTaken: ctx.takenAt,
+    dateAdded: metaFull?.addedAt ?? item.added_at,
+    camera: metaFull?.camera ?? null,
+    technical: null,
+    gps: metaFull?.gps ?? null,
+    tags: ctx.tags,
+    device: ctx.deviceId,
+    deviceName: null,
+    hash: ctx.hash,
+  });
+
+  const controller = new AbortController();
+  const cancelFn = () => controller.abort();
+  activeCancels.add(cancelFn);
+  try {
+    let partsJson: string | null = null;
+    let message: TgMessage | null = null;
+    if (fileSize > MAX_UPLOAD_BYTES) {
+      // Too large for one Bot API message — split into reassemblable parts.
+      const parts = await splitAndUploadVideo(channelId, item.local_uri, {
+        hash: ctx.hash ?? "",
+        filename: item.filename,
+        onProgress: emitFileProgress,
+        signal: controller.signal,
+      });
+      partsJson = JSON.stringify(parts);
+    } else {
+      try {
+        message = await sendVideo(channelId, item.local_uri, {
+          caption,
+          filename: item.filename,
+          mime: ctx.mime,
+          duration: duration ?? undefined,
+          width: metaFull?.width ?? undefined,
+          height: metaFull?.height ?? undefined,
+          supportsStreaming: true,
+          onProgress: emitFileProgress,
+          signal: controller.signal,
+        });
+      } catch (e) {
+        if (e instanceof TelegramError && (e.code === 400 || e.code === 415)) {
+          // Unsupported container/codec for sendVideo — keep the original as a document.
+          message = await sendDocument(channelId, item.local_uri, {
+            caption,
+            filename: item.filename,
+            mime: ctx.mime,
+            onProgress: emitFileProgress,
+            signal: controller.signal,
+          });
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    await updatePhoto(photoId, {
+      status: "uploaded",
+      remote_file_id:
+        message?.video?.file_id ?? message?.document?.file_id ?? null,
+      thumb_file_id:
+        message?.video?.thumbnail?.file_id ??
+        message?.document?.thumbnail?.file_id ??
+        null,
+      preview_file_id: null,
+      message_id: message?.message_id ?? null,
+      preview_message_id: null,
+      uploaded_at: Date.now(),
+      content_hash: ctx.hash,
+      device: ctx.deviceId,
+      camera: metaFull?.camera ?? null,
+      tags: ctx.tags.join(" "),
+      size: fileSize,
+      width: metaFull?.width ?? null,
+      height: metaFull?.height ?? null,
+      latitude: metaFull?.gps?.lat ?? null,
+      longitude: metaFull?.gps?.lon ?? null,
+      duration,
+      parts: partsJson,
+      error: null,
+    });
+  } finally {
+    activeCancels.delete(cancelFn);
+  }
 }

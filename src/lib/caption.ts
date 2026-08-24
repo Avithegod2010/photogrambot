@@ -1,4 +1,4 @@
-import { escapeHtml } from "./format";
+import { escapeHtml, formatDuration } from "./format";
 
 export interface CaptionMeta {
   filename: string;
@@ -7,6 +7,7 @@ export interface CaptionMeta {
   width?: number | null;
   height?: number | null;
   mime?: string | null;
+  duration?: number | null;
   dateTaken?: number | null;
   dateAdded?: number | null;
   camera?: string | null;
@@ -57,6 +58,9 @@ export function buildCaption(meta: CaptionMeta): string {
   if (sizeStr) sizeRes.push(`💾 <b>Size: ${sizeStr}</b>`);
   if (meta.width && meta.height) sizeRes.push(`🖼 <b>Res: ${meta.width}×${meta.height}</b>`);
   if (sizeRes.length) parts.push(sizeRes.join("  ·  "));
+  if (meta.duration && meta.duration > 0) {
+    parts.push(`⏱ <b>Duration:</b> ${formatDuration(meta.duration)}`);
+  }
   if (meta.dateTaken) {
     parts.push(`📅 <b>Date taken:</b> <code>${formatDate(meta.dateTaken)}</code>`);
   }

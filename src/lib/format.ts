@@ -10,6 +10,21 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${size >= 100 || i === 0 ? Math.round(size) : size.toFixed(1)} ${units[i]}`;
 }
 
+export function formatDuration(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return "";
+  const totalSec = Math.round(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(h > 0 ? 2 : 1, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function isVideoMime(mime: string | null | undefined): boolean {
+  return !!mime && mime.startsWith("video/");
+}
+
 export interface DateGroup {
   label: string;
   startMs: number;

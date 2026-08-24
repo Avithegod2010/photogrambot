@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   Pressable,
@@ -10,12 +11,65 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Sharing from "expo-sharing";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
+import { getCachedTelegramFile } from "../lib/media";
+import { isVideoMime } from "../lib/format";
 import type { PhotoRow } from "../lib/db";
+
+function CloudVideo({ fileId, mime }: { fileId: string; mime: string | null }) {
+  const width = Dimensions.get("window").width;
+  const height = Dimensions.get("window").height;
+  const style = { width, height: height * 0.92 };
+  const [uri, setUri] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setUri(null);
+    setFailed(false);
+    getCachedTelegramFile(fileId, "mp4")
+      .then((u) => {
+        if (alive) setUri(u);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fileId]);
+
+  const player = useVideoPlayer(uri, () => {});
+
+  if (failed) {
+    return (
+      <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: "#fff", fontSize: 13 }}>Could not download video. Tap Save to restore it.</Text>
+      </View>
+    );
+  }
+  if (!uri) {
+    return (
+      <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
+        <ActivityIndicator color="#fff" />
+      </View>
+    );
+  }
+  return (
+    <VideoView
+      style={style}
+      player={player}
+      contentFit="contain"
+      fullscreenOptions={{ enable: true }}
+    />
+  );
+}
 
 export function ViewerScreen({ route, navigation }: { route: any; navigation: any }) {
   const theme = useTheme();
@@ -46,6 +100,25 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       Alert.alert("Save failed", e?.message ?? "Could not download the photo.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  const isVideo = isVideoMime(photo?.mime) || (photo?.duration ?? 0) > 0;
+
+  async function onShareVideo() {
+    if (!photo) return;
+    const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
+    if (!fileId) return;
+    try {
+      const uri = await getCachedTelegramFile(fileId, "mp4");
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: photo.mime ?? "video/mp4",
+          dialogTitle: "Open in Telegram",
+        });
+      }
+    } catch (e: any) {
+      Alert.alert("Share failed", e?.message ?? "Could not prepare the video.");
     }
   }
 
@@ -85,6 +158,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       >
         {photos.map((p) => {
           const r = resolvePhotoFull(p);
+          const video = isVideoMime(p.mime) || (p.duration ?? 0) > 0;
           return (
             <GestureDetector key={p.id} gesture={swipeUp}>
               <ScrollView
@@ -100,12 +174,16 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
                 scrollEventThrottle={100}
               >
                 <Pressable onPress={() => setChromeVisible((v) => !v)}>
-                  <TelegramImage
-                    fileId={r.fileId}
-                    localUri={r.localUri}
-                    style={{ width, height: height * 0.92 }}
-                    resizeMode="contain"
-                  />
+                  {video && r.fileId ? (
+                    <CloudVideo fileId={r.fileId} mime={p.mime} />
+                  ) : (
+                    <TelegramImage
+                      fileId={r.fileId}
+                      localUri={r.localUri}
+                      style={{ width, height: height * 0.92 }}
+                      resizeMode="contain"
+                    />
+                  )}
                 </Pressable>
               </ScrollView>
             </GestureDetector>
@@ -150,6 +228,12 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
                   {saving ? "…" : "⬇"}
                 </Text>
                 <Text style={styles.actionLabel}>Save</Text>
+              </Pressable>
+            ) : null}
+            {isVideo && (photo.remote_file_id ?? photo.thumb_file_id) ? (
+              <Pressable style={styles.actionBtn} onPress={() => void onShareVideo()}>
+                <Text style={[styles.actionIcon, { color: "#fff" }]}>↗</Text>
+                <Text style={styles.actionLabel}>Share</Text>
               </Pressable>
             ) : null}
             <Pressable

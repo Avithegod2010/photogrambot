@@ -28,12 +28,24 @@ export interface TgDocument {
   thumbnail?: TgPhotoSize;
 }
 
+export interface TgVideo {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+  thumbnail?: TgPhotoSize;
+}
+
 export interface TgMessage {
   message_id: number;
   date: number;
   chat: { id: number; type: string; title?: string; username?: string };
   photo?: TgPhotoSize[];
   document?: TgDocument;
+  video?: TgVideo;
   caption?: string;
   caption_entities?: any[];
 }
@@ -168,6 +180,38 @@ export async function sendDocument(
   return sendFileViaTask(chatId, "sendDocument", "document", fileUri, params, {
     filename: options.filename ?? "photo.jpg",
     mime: options.mime ?? "application/octet-stream",
+    onProgress: options.onProgress,
+    signal: options.signal,
+  });
+}
+
+export async function sendVideo(
+  chatId: string | number,
+  fileUri: string,
+  options: FileSendOptions & {
+    duration?: number;
+    width?: number;
+    height?: number;
+    supportsStreaming?: boolean;
+  } = {}
+): Promise<TgMessage> {
+  const params: Record<string, string> = { chat_id: String(chatId) };
+  if (options.caption) {
+    params.caption = options.caption;
+    params.parse_mode = "HTML";
+  }
+  if (options.replyToMessageId) {
+    params.reply_parameters = JSON.stringify({ message_id: options.replyToMessageId });
+  }
+  if (options.duration && options.duration > 0) {
+    params.duration = String(Math.round(options.duration / 1000));
+  }
+  if (options.width) params.width = String(options.width);
+  if (options.height) params.height = String(options.height);
+  if (options.supportsStreaming) params.supports_streaming = "true";
+  return sendFileViaTask(chatId, "sendVideo", "video", fileUri, params, {
+    filename: options.filename ?? "video.mp4",
+    mime: options.mime ?? "video/mp4",
     onProgress: options.onProgress,
     signal: options.signal,
   });

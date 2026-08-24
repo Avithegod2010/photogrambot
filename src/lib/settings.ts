@@ -32,6 +32,7 @@ export interface Prefs {
   aiCaptions: boolean;
   aiModel: string;
   aiPrompt: string;
+  includeVideos: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -57,6 +58,7 @@ export const defaultPrefs: Prefs = {
   aiCaptions: false,
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
+  includeVideos: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",

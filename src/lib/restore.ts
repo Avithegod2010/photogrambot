@@ -2,6 +2,7 @@ import { File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { downloadFile } from "./telegram";
 import { getPhotosByUploadStatus, type PhotoRow } from "./db";
+import type { VideoPart } from "./vsplit";
 
 function safeName(filename: string): string {
   const cleaned = filename.replace(/[^\w.\- ]+/g, "_").trim();
@@ -15,15 +16,50 @@ function extFor(photo: PhotoRow): string {
   return fromName.toLowerCase().slice(0, 5);
 }
 
+function parseParts(raw: string | null | undefined): VideoPart[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as VideoPart[];
+    return Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.file_id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function reassembleParts(photo: PhotoRow, parts: VideoPart[], dest: File): Promise<void> {
+  if (dest.exists) dest.delete();
+  dest.create();
+  const handle = dest.open();
+  try {
+    for (const part of parts) {
+      const tmp = new File(Paths.cache, `pb_rpart_${Date.now()}.bin`);
+      try {
+        await downloadFile(part.file_id, tmp.uri);
+        const bytes = await tmp.bytes();
+        handle.writeBytes(bytes);
+      } finally {
+        try { tmp.delete(); } catch {}
+      }
+    }
+  } finally {
+    try { handle.close(); } catch {}
+  }
+}
+
 export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
-  const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
-  if (!fileId) throw new Error("No cloud copy available to download");
+  const parts = parseParts(photo.parts);
   const dest = new File(
     Paths.cache,
-    `pb_restore_${Date.now()}_${safeName(photo.filename)}.${extFor(photo)}`
+    `pb_restore_${Date.now()}_${safeName(photo.filename)}.${parts ? "mp4" : extFor(photo)}`
   );
   try {
-    await downloadFile(fileId, dest.uri);
+    if (parts) {
+      await reassembleParts(photo, parts, dest);
+    } else {
+      const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
+      if (!fileId) throw new Error("No cloud copy available to download");
+      await downloadFile(fileId, dest.uri);
+    }
     await MediaLibrary.Asset.create(dest.uri);
   } finally {
     try {

@@ -29,6 +29,8 @@ export interface PhotoRow {
   longitude: number | null;
   exif: string | null;
   ai_caption: string | null;
+  duration: number | null;
+  parts: string | null;
   favorite: number;
   status: PhotoStatus;
   error: string | null;
@@ -157,6 +159,8 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["longitude", "REAL"],
     ["exif", "TEXT"],
     ["ai_caption", "TEXT"],
+    ["duration", "INTEGER"],
+    ["parts", "TEXT"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
