@@ -237,6 +237,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ uploadPreviews: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Video support (Beta)"
+            subtitle="Also back up videos from your device. Files over 50 MB are split into parts that reassemble automatically on restore. Experimental."
+            value={prefs.includeVideos}
+            onChange={(v) => void update({ includeVideos: v })}
+            theme={theme}
+          />
         </Card>
 
         <SectionLabel text="AI captioning (Gemini)" theme={theme} />

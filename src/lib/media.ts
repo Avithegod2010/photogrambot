@@ -97,6 +97,7 @@ export interface AssetMeta {
   height: number;
   size: number | null;
   mime: string | null;
+  duration: number | null;
   takenAt: number;
   addedAt: number;
   camera: string | null;
@@ -166,6 +167,7 @@ export async function getAssetMeta(assetId: string): Promise<AssetMeta> {
     height: info.height,
     size,
     mime,
+    duration: info.duration ?? null,
     takenAt: info.creationTime ?? 0,
     addedAt: info.modificationTime ?? info.creationTime ?? 0,
     camera,
@@ -192,6 +194,19 @@ export function guessMime(filename: string): string {
       return "image/bmp";
     case "dng":
       return "image/x-adobe-dng";
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "mkv":
+      return "video/x-matroska";
+    case "avi":
+      return "video/x-msvideo";
+    case "webm":
+      return "video/webm";
+    case "3gp":
+      return "video/3gpp";
     default:
       return "image/jpeg";
   }

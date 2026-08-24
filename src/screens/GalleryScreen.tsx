@@ -21,7 +21,7 @@ import { useSetupStore } from "../store/useSetupStore";
 import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
-import { groupPhotosByDate, formatBytes } from "../lib/format";
+import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
 import { getUploadedLocalIds } from "../lib/db";
 import { enqueueUploads, processQueue } from "../lib/uploader";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
@@ -148,6 +148,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         {photo.favorite ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.scrim }]}>
             <Text style={styles.favIcon}>♥</Text>
+          </View>
+        ) : null}
+        {isVideoMime(photo.mime) || (photo.duration ?? 0) > 0 ? (
+          <View style={styles.videoBadge}>
+            <Text style={styles.videoBadgeText}>
+              ▶ {formatDuration(photo.duration)}
+            </Text>
           </View>
         ) : null}
         {photo.status === "failed" || photo.status === "skipped_too_large" ? (
@@ -492,6 +499,13 @@ function OverviewCard({
   );
 }
 
+function isWantedPickerMedia(m: MediaLibrary.AssetMetadata): boolean {
+  return (
+    m.mediaType === MediaLibrary.MediaType.IMAGE ||
+    m.mediaType === MediaLibrary.MediaType.VIDEO
+  );
+}
+
 function LocalPickerSheet({
   visible,
   theme,
@@ -514,14 +528,20 @@ function LocalPickerSheet({
     setPicked(new Set());
     (async () => {
       try {
-        const [metas, ids] = await Promise.all([
-          new MediaLibrary.Query()
-            .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+        const includeVideos = useSettingsStore.getState().prefs.includeVideos;
+        let metas = await new MediaLibrary.Query()
+          .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+          .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
+          .limit(600)
+          .exeForMetadata();
+        if (includeVideos) {
+          const all = await new MediaLibrary.Query()
             .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
-            .limit(600)
-            .exeForMetadata(),
-          getUploadedLocalIds(),
-        ]);
+            .limit(900)
+            .exeForMetadata();
+          metas = all.filter((m) => isWantedPickerMedia(m));
+        }
+        const ids = await getUploadedLocalIds();
         setAssets(metas);
         setBackedUp(ids);
       } catch {}
@@ -595,6 +615,13 @@ function LocalPickerSheet({
                   }}
                 >
                   <LocalThumb assetId={item.id} />
+                  {item.mediaType === MediaLibrary.MediaType.VIDEO ? (
+                    <View style={styles.videoBadge}>
+                      <Text style={styles.videoBadgeText}>
+                        ▶ {formatDuration(item.duration)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {isDupe ? (
                     <View style={[styles.dupeBadge, { backgroundColor: theme.colors.primaryContainer }]}>
                       <Text style={{ fontSize: 10, color: theme.colors.onPrimaryContainer }}>☁</Text>
@@ -899,6 +926,20 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "800",
     lineHeight: 11,
+  },
+  videoBadge: {
+    position: "absolute",
+    bottom: 4,
+    left: 4,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+  },
+  videoBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
   },
   overviewCard: {
     marginHorizontal: 16,

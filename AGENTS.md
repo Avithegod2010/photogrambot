@@ -27,5 +27,5 @@ This folder (`E:\Opencode CLI\Projects\photogram-bot`) is **PhotogramBot**, the 
   - Collections tab: two side-by-side tiles — **Local** (not-yet-uploaded photos) and **Cloud** (uploaded photos only).
   - Main Gallery: combined local + cloud; uploaded photos get a small **cloud-check badge** bottom-right (Google Photos style).
 - Distribution target: **public release** (versioning discipline, icons, possibly in-app updater later).
-- Feature roadmap: AI captioning (Gemini) ✅ → video support → remote control via bot commands → multi-destination profiles.
+- Feature roadmap: AI captioning (Gemini) ✅ → video support ✅ (beta, `includeVideos` default off; ≤50 MB `sendVideo` w/ document fallback; >50 MB split into `#vsplit:` parts via `src/lib/vsplit.ts`, reassembled in restore) → remote control via bot commands → multi-destination profiles.
 - AI captioning: Gemini REST (`generativelanguage.googleapis.com`), API key in SecureStore, model/prompt in prefs (`aiCaptions`, `aiModel`, `aiPrompt`), caption stored in `photos.ai_caption` + FTS-searchable.
