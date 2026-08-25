@@ -4,16 +4,22 @@ import MapView, { Marker, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { getGeotagged, type GeotaggedPhoto } from "../lib/db";
+import { isDecoyActive } from "../lib/applock";
 
 export function MapScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const decoy = isDecoyActive();
   const [photos, setPhotos] = useState<GeotaggedPhoto[]>([]);
   const [selected, setSelected] = useState<GeotaggedPhoto[]>([]);
 
   useEffect(() => {
+    if (decoy) {
+      setPhotos([]);
+      return;
+    }
     getGeotagged().then(setPhotos);
-  }, []);
+  }, [decoy]);
 
   const initialRegion = useMemo<Region>(() => {
     if (photos.length === 0) {
@@ -99,16 +105,11 @@ export function MapScreen({ navigation }: { navigation: any }) {
           <Pressable
             style={[styles.viewBtn, { backgroundColor: theme.colors.primaryContainer }]}
             onPress={() => {
-              const ids = selected.map((s) => s.id);
-              const full = photos.filter((p) => ids.includes(p.id)).map((p) => ({
-                id: p.id,
-                preview_file_id: p.preview_file_id,
-                remote_file_id: p.remote_file_id,
-                thumb_file_id: null,
-                local_uri: null,
-                status: "uploaded",
-                taken_at: p.taken_at,
-                filename: `photo_${p.id}`,
+              const full = selected.map((p) => ({
+                ...p,
+                thumb_file_id: p.thumb_file_id ?? null,
+                local_uri: p.local_uri ?? null,
+                status: "uploaded" as const,
                 favorite: 0,
               }));
               navigation.navigate("Viewer", { photos: full, index: 0 });
