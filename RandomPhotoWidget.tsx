@@ -7,12 +7,14 @@ export function RandomPhotoWidget({
   imageHeight,
   count,
   dateLabel,
+  photoId,
 }: {
   imageDataUri: `data:image${string}` | null;
   imageWidth: number;
   imageHeight: number;
   count: number;
   dateLabel: string | null;
+  photoId: string | null;
 }) {
   return (
     <FlexWidget
@@ -25,7 +27,7 @@ export function RandomPhotoWidget({
         backgroundColor: "#101014",
         overflow: "hidden",
       }}
-      clickAction="OPEN_APP"
+      clickAction={photoId ? `photogrambot://photo/${photoId}` : "OPEN_APP"}
     >
       <FlexWidget
         style={{

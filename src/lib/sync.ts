@@ -1,5 +1,6 @@
 import * as MediaLibrary from "expo-media-library";
 import * as Network from "expo-network";
+import * as Battery from "expo-battery";
 import { loadPrefs, savePrefs, type Prefs } from "./settings";
 import { isVideoMime } from "./format";
 import { enqueueUploads, processQueue } from "./uploader";
@@ -39,6 +40,15 @@ export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
       state.type !== Network.NetworkStateType.ETHERNET
     ) {
       return false;
+    }
+    if (p.uploadOnlyCharging) {
+      const batteryState = await Battery.getBatteryStateAsync();
+      if (
+        batteryState !== Battery.BatteryState.CHARGING &&
+        batteryState !== Battery.BatteryState.FULL
+      ) {
+        return false;
+      }
     }
     return true;
   } catch {

@@ -374,13 +374,40 @@ export async function getUploadedLocalIds(): Promise<Set<string>> {
   return new Set(rows.map((r) => r.local_id));
 }
 
+export interface SearchFilters {
+  takenWithinDays?: number | null;
+  hasGps?: boolean;
+  camera?: string | null;
+}
+
 export async function searchPhotos(
   query: string,
+  filters?: SearchFilters,
   limit = 500
 ): Promise<PhotoRow[]> {
   const d = await getDb();
   const cleaned = query.trim();
-  if (!cleaned) return [];
+  const conds: string[] = ["p.id NOT IN (SELECT photo_id FROM trash)"];
+  const params: any[] = [];
+  if (filters?.takenWithinDays && filters.takenWithinDays > 0) {
+    conds.push("p.taken_at >= ?");
+    params.push(Date.now() - filters.takenWithinDays * 86400000);
+  }
+  if (filters?.hasGps) {
+    conds.push("p.latitude IS NOT NULL AND p.longitude IS NOT NULL");
+  }
+  if (filters?.camera && filters.camera.trim()) {
+    conds.push("LOWER(p.camera) LIKE ?");
+    params.push(`%${filters.camera.trim().toLowerCase()}%`);
+  }
+  const where = conds.join(" AND ");
+  if (!cleaned) {
+    const rows = await d.getAllAsync<any>(
+      `SELECT p.* FROM photos p WHERE ${where} ORDER BY p.taken_at DESC LIMIT ?`,
+      [...params, limit]
+    );
+    return rows.map(rowToPhoto);
+  }
   const terms = cleaned
     .split(/\s+/)
     .map((t) => `"${t.replace(/"/g, '""')}"`)
@@ -389,9 +416,9 @@ export async function searchPhotos(
     `SELECT p.* FROM photos p
      JOIN photos_fts f ON p.id = f.photo_id
      WHERE photos_fts MATCH ?
-     AND p.id NOT IN (SELECT photo_id FROM trash)
+     AND ${where}
      ORDER BY p.taken_at DESC LIMIT ?`,
-    [terms, limit]
+    [terms, ...params, limit]
   );
   return rows.map(rowToPhoto);
 }
@@ -724,6 +751,40 @@ export async function getLibraryCounts(): Promise<{ local: number; cloud: number
     WHERE id NOT IN (SELECT photo_id FROM trash)
   `);
   return { local: row?.local ?? 0, cloud: row?.cloud ?? 0 };
+}
+
+export interface MonthBucket {
+  label: string;
+  count: number;
+  bytes: number;
+}
+
+export async function getMonthlyBuckets(monthsBack = 6): Promise<MonthBucket[]> {
+  const d = await getDb();
+  const now = new Date();
+  const since = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1);
+  const rows = await d.getAllAsync<{ ym: string; count: number; bytes: number }>(
+    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch') AS ym,
+            COUNT(*) AS count,
+            COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
+     FROM photos
+     WHERE taken_at >= ? AND id NOT IN (SELECT photo_id FROM trash)
+     GROUP BY ym`,
+    [since.getTime()]
+  );
+  const byKey = new Map(rows.map((r) => [r.ym, r]));
+  const buckets: MonthBucket[] = [];
+  for (let i = 0; i < monthsBack; i++) {
+    const dte = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1) + i, 1);
+    const key = `${dte.getFullYear()}-${String(dte.getMonth() + 1).padStart(2, "0")}`;
+    const row = byKey.get(key);
+    buckets.push({
+      label: dte.toLocaleString(undefined, { month: "narrow" }),
+      count: row?.count ?? 0,
+      bytes: row?.bytes ?? 0,
+    });
+  }
+  return buckets;
 }
 
 export interface PeriodGroup {

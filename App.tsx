@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, AppState, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -31,6 +31,8 @@ import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
 import { getSharedMedia } from "./modules/share-intent";
 import { ShareTargetSheet } from "./src/components/ShareTargetSheet";
+import { requestNotificationPermission } from "./src/lib/notify";
+import { setDecoyActive, isDecoyActive } from "./src/lib/applock";
 import {
   registerBackgroundSync,
   unregisterBackgroundSync,
@@ -41,6 +43,21 @@ import { uploadBackupToChannel } from "./src/lib/backup";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const navigationRef = createNavigationContainerRef<any>();
+
+async function openPhotoFromUrl(url: string | null): Promise<void> {
+  if (!url || !url.startsWith("photogrambot://photo/")) return;
+  if (isDecoyActive()) return;
+  const id = url.replace("photogrambot://photo/", "").split("?")[0];
+  if (!id) return;
+  try {
+    const { getPhoto } = await import("./src/lib/db");
+    const photo = await getPhoto(id);
+    if (photo && navigationRef.isReady()) {
+      navigationRef.navigate("Viewer", { photos: [photo], index: 0 });
+    }
+  } catch {}
+}
 
 function TabIcon({ glyph, color }: { glyph: string; color: string }) {
   return <Text style={{ fontSize: 20, color, lineHeight: 24 }}>{glyph}</Text>;
@@ -104,7 +121,12 @@ function Root({ locked }: { locked: boolean }) {
   if (step === "loading") return <Splash />;
   if (step === "ready") {
     return (
-      <NavigationContainer>
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          void Linking.getInitialURL().then(openPhotoFromUrl);
+        }}
+      >
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Main" component={Tabs} />
           <Stack.Screen
@@ -153,7 +175,13 @@ export default function App() {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") check();
     });
-    return () => sub.remove();
+    const urlSub = Linking.addEventListener("url", ({ url }) => {
+      void openPhotoFromUrl(url);
+    });
+    return () => {
+      sub.remove();
+      urlSub.remove();
+    };
   }, [step, locked]);
 
   useEffect(() => {
@@ -179,6 +207,7 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "background" && useSettingsStore.getState().prefs.appLock) {
+        setDecoyActive(false);
         setLocked(true);
       }
     });
@@ -230,6 +259,7 @@ async function bootstrapBackgroundTasks(): Promise<void> {
       await pollUpdates();
     } catch {}
     if (prefs.autoSync) {
+      void requestNotificationPermission();
       if (await canAutoSyncNow(prefs)) {
         const since = Math.max(
           prefs.lastFullSyncAt,

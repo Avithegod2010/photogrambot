@@ -5,7 +5,6 @@ import {
   getAlbums,
   getAlbumPhotos,
   getTrashItems,
-  searchPhotos,
   setFavorite,
   addToTrash,
   restoreFromTrash,
@@ -19,6 +18,7 @@ import {
   getStats,
   type PhotoRow,
   type AlbumWithCover,
+  type SearchFilters,
 } from "../lib/db";
 import { getBotToken, getChannelId } from "../lib/settings";
 import { tokenForPhoto } from "../lib/destinations";
@@ -59,7 +59,7 @@ interface LibraryState {
   addPhotosToAlbum: (albumId: number, ids: string[]) => Promise<void>;
   removePhotosFromAlbum: (albumId: number, ids: string[]) => Promise<void>;
   loadAlbumPhotos: (albumId: number) => Promise<PhotoRow[]>;
-  search: (query: string) => Promise<PhotoRow[]>;
+  search: (query: string, filters?: SearchFilters) => Promise<PhotoRow[]>;
 }
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
@@ -233,7 +233,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return getAlbumPhotos(albumId);
   },
 
-  search: async (query) => {
-    return searchPhotos(query);
+  search: async (query, filters?) => {
+    const { searchPhotos } = await import("../lib/db");
+    return searchPhotos(query, filters);
   },
 }));

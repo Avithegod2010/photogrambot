@@ -19,6 +19,7 @@ const config: ExpoConfig = {
   name: "PhotogramBot",
   slug: "photogrambot",
   version: "0.1.0",
+  scheme: "photogrambot",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",

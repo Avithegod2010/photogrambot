@@ -16,6 +16,7 @@ import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { getLibraryCounts, getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
 import { unlockHiddenAlbum } from "../lib/biometrics";
+import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
 
@@ -27,14 +28,22 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [newAlbumVisible, setNewAlbumVisible] = useState(false);
   const [albumName, setAlbumName] = useState("");
   const [counts, setCounts] = useState({ local: 0, cloud: 0 });
+  const decoy = isDecoyActive();
 
   useFocusEffect(
     useCallback(() => {
+      if (isDecoyActive()) {
+        setCounts({ local: 0, cloud: 0 });
+        return;
+      }
       void getLibraryCounts().then(setCounts);
     }, [])
   );
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
+  const visibleAlbums = decoy ? [] : albums;
+  const visibleFavorites = decoy ? [] : favorites;
+  const visibleTrash = decoy ? [] : trash;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
@@ -64,7 +73,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                 fontSize: 13,
               }}
             >
-              {t === "albums" ? `Albums · ${albums.length}` : `Trash · ${trash.length}`}
+              {t === "albums" ? `Albums · ${visibleAlbums.length}` : `Trash · ${visibleTrash.length}`}
             </Text>
           </Pressable>
         ))}
@@ -111,19 +120,19 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               </View>
               <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Favorites</Text>
               <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                {favorites.length} photos
+                {visibleFavorites.length} photos
               </Text>
             </Pressable>
           </View>
 
           <SectionLabel text="Your albums" theme={theme} />
-          {albums.length === 0 ? (
+          {visibleAlbums.length === 0 ? (
             <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
               No albums yet. Tap ＋ to create one and organize your backed-up photos.
             </Text>
           ) : (
             <View style={styles.albumGrid}>
-              {albums.map((a) => (
+              {visibleAlbums.map((a) => (
                 <Pressable
                   key={a.id}
                   style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
@@ -167,7 +176,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
           <View style={{ height: 40 }} />
         </ScrollView>
       ) : (
-        <TrashTab navigation={navigation} theme={theme} />
+        <TrashTab navigation={navigation} theme={theme} trash={visibleTrash} />
       )}
 
       <Dialog visible={newAlbumVisible} theme={theme} title="New album">
@@ -203,8 +212,16 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   );
 }
 
-function TrashTab({ navigation, theme }: { navigation: any; theme: ReturnType<typeof useTheme> }) {
-  const { trash, restorePhotos, deleteForever, emptyTrash } = useLibraryStore();
+function TrashTab({
+  navigation,
+  theme,
+  trash,
+}: {
+  navigation: any;
+  theme: ReturnType<typeof useTheme>;
+  trash: ReturnType<typeof useLibraryStore.getState>["trash"];
+}) {
+  const { restorePhotos, deleteForever, emptyTrash } = useLibraryStore();
   const tile = (Dimensions.get("window").width - 4) / 3;
 
   if (trash.length === 0) {
