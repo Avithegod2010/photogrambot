@@ -2,7 +2,10 @@ import { File, Paths } from "expo-file-system";
 import { escapeHtml } from "./format";
 import { sendDocument } from "./telegram";
 
-export const VIDEO_PART_BYTES = 48 * 1024 * 1024;
+// Bot API asymmetry: uploads go up to 50 MB, but bots can only DOWNLOAD
+// files up to 20 MB via getFile. Parts must be downloadable for restore,
+// so they stay safely under the 20 MB download limit.
+export const VIDEO_PART_BYTES = 19 * 1024 * 1024;
 
 export interface VideoPart {
   file_id: string;

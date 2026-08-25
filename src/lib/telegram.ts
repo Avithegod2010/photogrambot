@@ -2,6 +2,46 @@ import { File, Paths, UploadType } from "expo-file-system";
 import { getBotToken, getChannelId } from "./settings";
 
 const API_BASE = "https://api.telegram.org";
+const JSON_TIMEOUT_MS = 60_000;
+const UPLOAD_TIMEOUT_MS = 600_000;
+
+// React Native fetch has no default timeout — a stalled connection would hang
+// a queue worker forever. Abort manually.
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function parseJsonResponse<T>(res: Response, fallbackMethod: string): Promise<T> {
+  let json: TgApiResult<T> | null = null;
+  try {
+    json = JSON.parse(await res.text()) as TgApiResult<T>;
+  } catch {}
+  if (!json) {
+    throw new TelegramError(
+      res.status || 0,
+      `Invalid Telegram response for ${fallbackMethod} (HTTP ${res.status})`
+    );
+  }
+  if (!json.ok) {
+    const ra = json.parameters?.retry_after;
+    throw new TelegramError(
+      json.error_code ?? res.status,
+      json.description ?? "Telegram request failed",
+      typeof ra === "number" ? ra : undefined
+    );
+  }
+  return json.result as T;
+}
 
 export interface TgApiResult<T> {
   ok: boolean;
@@ -80,21 +120,16 @@ async function call<T>(
 ): Promise<T> {
   const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
-  const res = await fetch(`${API_BASE}/bot${token}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params ?? {}),
-  });
-  const json = (await res.json()) as TgApiResult<T>;
-  if (!json.ok) {
-    const ra = json.parameters?.retry_after;
-    throw new TelegramError(
-      json.error_code ?? 0,
-      json.description ?? "Unknown Telegram error",
-      typeof ra === "number" ? ra : undefined
-    );
-  }
-  return json.result as T;
+  const res = await fetchWithTimeout(
+    `${API_BASE}/bot${token}/${method}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params ?? {}),
+    },
+    JSON_TIMEOUT_MS
+  );
+  return parseJsonResponse<T>(res, method);
 }
 
 export async function getMe(): Promise<TgUser> {
@@ -314,10 +349,14 @@ async function uploadForm(
 ): Promise<TgMessage> {
   const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
-  const res = await fetch(`${API_BASE}/bot${token}/${method}`, {
-    method: "POST",
-    body: form,
-  });
+  const res = await fetchWithTimeout(
+    `${API_BASE}/bot${token}/${method}`,
+    {
+      method: "POST",
+      body: form,
+    },
+    UPLOAD_TIMEOUT_MS
+  );
   return parseTgResult<TgMessage>(await res.text(), res.status);
 }
 
@@ -373,10 +412,14 @@ export async function sendMediaGroup(
     } as any);
   });
   try {
-    const res = await fetch(`${API_BASE}/bot${token}/sendMediaGroup`, {
-      method: "POST",
-      body: form,
-    });
+    const res = await fetchWithTimeout(
+      `${API_BASE}/bot${token}/sendMediaGroup`,
+      {
+        method: "POST",
+        body: form,
+      },
+      JSON_TIMEOUT_MS
+    );
     return parseTgResult<TgMessage[]>(await res.text(), res.status);
   } catch (e) {
     if (e instanceof TelegramError) throw e;
@@ -440,12 +483,12 @@ export async function getUpdates(offset: number, timeout = 0): Promise<TgUpdate[
   const url =
     `${API_BASE}/bot${token}/getUpdates?offset=${offset}&timeout=${timeout}` +
     `&allowed_updates=${encodeURIComponent(JSON.stringify(["channel_post", "message"]))}`;
-  const res = await fetch(url);
-  const json = (await res.json()) as TgApiResult<TgUpdate[]>;
-  if (!json.ok) {
-    throw new TelegramError(json.error_code ?? 0, json.description ?? "getUpdates failed");
-  }
-  return json.result ?? [];
+  const res = await fetchWithTimeout(
+    url,
+    { method: "GET" },
+    (timeout + 30) * 1000
+  );
+  return parseJsonResponse<TgUpdate[]>(res, "getUpdates");
 }
 
 export async function downloadFile(
@@ -458,7 +501,6 @@ export async function downloadFile(
   const info = await getFile(fileId, token);
   if (!info.file_path) throw new TelegramError(400, "No file_path returned by Telegram");
   const url = `${API_BASE}/file/bot${token}/${info.file_path}`;
-  const { File } = await import("expo-file-system");
   const dest = new File(destUri);
   if (dest.exists) dest.delete();
   await File.downloadFileAsync(url, dest, { idempotent: true });
