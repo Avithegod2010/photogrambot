@@ -43,7 +43,12 @@ const config: ExpoConfig = {
       backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
-    permissions: ["READ_MEDIA_IMAGES", "READ_EXTERNAL_STORAGE"],
+    permissions: [
+      "READ_MEDIA_IMAGES",
+      "READ_MEDIA_VIDEO",
+      "ACCESS_MEDIA_LOCATION",
+      "READ_EXTERNAL_STORAGE",
+    ],
     predictiveBackGestureEnabled: false,
     intentFilters: [
       {
