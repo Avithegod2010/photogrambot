@@ -76,6 +76,7 @@ export interface TgVideo {
   duration: number;
   mime_type?: string;
   file_size?: number;
+  file_name?: string;
   thumbnail?: TgPhotoSize;
 }
 

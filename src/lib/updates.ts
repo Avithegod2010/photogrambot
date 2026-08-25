@@ -39,7 +39,9 @@ export async function pollUpdates(): Promise<UpdatesResult> {
     const existing = await getPhotoByMessageId(msg.message_id);
     if (existing) continue;
     if (parsed.isPreview) continue;
-    if (msg.document && msg.document.mime_type?.startsWith("image/")) {
+    const isVsplitPart = parsed.tags.includes("vsplit");
+    const docMime = msg.document?.mime_type ?? "";
+    if (msg.document && !isVsplitPart && (docMime.startsWith("image/") || docMime.startsWith("video/"))) {
       const doc = msg.document;
       if (parsed.hash && (await getPhotoByHash(parsed.hash))) continue;
       const takenAt = msg.date * 1000;
@@ -48,7 +50,7 @@ export async function pollUpdates(): Promise<UpdatesResult> {
         remote_file_id: doc.file_id,
         thumb_file_id: doc.thumbnail?.file_id ?? null,
         message_id: msg.message_id,
-        filename: doc.file_name ?? `photo_${msg.message_id}`,
+        filename: doc.file_name ?? `file_${msg.message_id}`,
         folder: null,
         size: doc.file_size ?? null,
         mime: doc.mime_type ?? null,
@@ -61,6 +63,33 @@ export async function pollUpdates(): Promise<UpdatesResult> {
         latitude: parsed.coords?.lat ?? null,
         longitude: parsed.coords?.lon ?? null,
         exif: parsed.technical ? JSON.stringify(parsed.technical) : null,
+        status: "uploaded",
+      });
+      newPhotos++;
+    } else if (msg.video) {
+      const v = msg.video;
+      if (parsed.hash && (await getPhotoByHash(parsed.hash))) continue;
+      const takenAt = msg.date * 1000;
+      await insertPhoto({
+        id: `msg_${msg.message_id}_${v.file_unique_id}`,
+        remote_file_id: v.file_id,
+        thumb_file_id: v.thumbnail?.file_id ?? null,
+        message_id: msg.message_id,
+        filename: v.file_name ?? `video_${msg.message_id}.mp4`,
+        folder: null,
+        size: v.file_size ?? null,
+        mime: v.mime_type ?? "video/mp4",
+        width: v.width,
+        height: v.height,
+        duration: v.duration > 0 ? v.duration * 1000 : null,
+        taken_at: takenAt,
+        added_at: takenAt,
+        remote_date: takenAt,
+        content_hash: parsed.hash,
+        device: parsed.device,
+        tags: parsed.tags.join(" "),
+        latitude: parsed.coords?.lat ?? null,
+        longitude: parsed.coords?.lon ?? null,
         status: "uploaded",
       });
       newPhotos++;
