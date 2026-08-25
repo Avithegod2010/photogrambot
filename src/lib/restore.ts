@@ -48,6 +48,8 @@ async function reassembleParts(photo: PhotoRow, parts: VideoPart[], dest: File):
   }
 }
 
+const BOT_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
+
 export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
   const parts = parseParts(photo.parts);
   const dest = new File(
@@ -60,6 +62,11 @@ export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
     } else {
       const fileId = photo.remote_file_id ?? photo.preview_file_id ?? photo.thumb_file_id;
       if (!fileId) throw new Error("No cloud copy available to download");
+      if ((photo.size ?? 0) > BOT_DOWNLOAD_LIMIT) {
+        throw new Error(
+          "Telegram bots can only download files up to 20 MB — open this item in the Telegram app to save the original"
+        );
+      }
       const token = await tokenForPhoto(photo);
       await downloadFile(fileId, dest.uri, token ?? undefined);
     }
