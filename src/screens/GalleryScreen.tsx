@@ -1042,6 +1042,10 @@ function PeriodJumpList({
 }) {
   const [groups, setGroups] = useState<PeriodGroup[]>([]);
   useEffect(() => {
+    if (isDecoyActive()) {
+      setGroups([]);
+      return;
+    }
     if (mode === "years") {
       import("../lib/db").then(({ getYearGroups }) => getYearGroups()).then(setGroups);
     } else {
