@@ -97,7 +97,17 @@ export function buildCaption(meta: CaptionMeta): string {
   if (meta.hash) {
     parts.push(`#hash: ${meta.hash}`);
   }
-  return parts.join("\n").slice(0, 1024);
+  // Telegram caps captions at 1024 and rejects unbalanced HTML — assemble
+  // greedily line-by-line instead of blind-slicing mid-tag.
+  const out: string[] = [];
+  let length = 0;
+  for (const part of parts) {
+    const sep = out.length > 0 ? 1 : 0;
+    if (length + sep + part.length > 1000) continue;
+    out.push(part);
+    length += sep + part.length;
+  }
+  return out.join("\n");
 }
 
 export function buildPreviewCaption(hash: string | null, sizeBytes: number): string {

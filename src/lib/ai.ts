@@ -13,21 +13,29 @@ export async function captionImageWithGemini(opts: AiCaptionOptions): Promise<st
   const file = new File(opts.imageUri);
   if (!file.exists) throw new Error("AI caption source image missing");
   const data = await file.base64();
-  const res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: opts.prompt },
-            { inline_data: { mime_type: "image/jpeg", data } },
-          ],
-        },
-      ],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 80 },
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: opts.prompt },
+              { inline_data: { mime_type: "image/jpeg", data } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 80 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const json: any = await res.json().catch(() => null);
   if (!res.ok) {
     const message = json?.error?.message ?? `Gemini request failed (HTTP ${res.status})`;

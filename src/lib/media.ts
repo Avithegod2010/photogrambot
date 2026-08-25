@@ -220,14 +220,24 @@ export function buildTags(
   mime: string | null,
   camera: string | null
 ): string[] {
+  const sanitize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 40);
   const tags: string[] = [];
-  if (mime) tags.push(mime.split("/")[1] ?? mime);
-  if (folder) tags.push(folder.toLowerCase().replace(/\s+/g, "_"));
+  if (mime) tags.push(sanitize(mime.split("/")[1] ?? mime));
+  if (folder) {
+    const folderTag = sanitize(folder);
+    if (folderTag) tags.push(folderTag);
+  }
   const d = new Date(takenAt);
   tags.push(String(d.getFullYear()));
   tags.push(`${d.getFullYear()}_${d.getMonth() + 1}`);
   if (camera) {
-    tags.push(camera.toLowerCase().replace(/\s+/g, "_"));
+    const cameraTag = sanitize(camera);
+    if (cameraTag) tags.push(cameraTag);
   }
   return tags;
 }
