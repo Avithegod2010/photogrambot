@@ -7,15 +7,14 @@ const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 
 function toB64(bytes: Uint8Array): string {
   let out = "";
-  let i = 0;
-  while (i < bytes.length) {
-    const b0 = bytes[i++];
-    const b1 = i < bytes.length ? bytes[i++] : NaN;
-    const b2 = i < bytes.length ? bytes[i++] : NaN;
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
     out += B64_ALPHABET[b0 >> 2];
-    out += Number.isNaN(b1) ? "=" : B64_ALPHABET[((b0 & 3) << 4) | (b1 >> 4)];
-    out += Number.isNaN(b2) ? "=" : B64_ALPHABET[((b1 & 15) << 2) | (b2 >> 6)];
-    out += Number.isNaN(b2) ? "=" : B64_ALPHABET[b2 & 63];
+    out += b1 === undefined ? B64_ALPHABET[(b0 & 3) << 4] : B64_ALPHABET[((b0 & 3) << 4) | (b1 >> 4)];
+    out += b2 === undefined ? "=" : B64_ALPHABET[((b1 & 15) << 2) | (b2 >> 6)];
+    out += b2 === undefined ? "=" : B64_ALPHABET[b2 & 63];
   }
   return out;
 }
@@ -128,8 +127,13 @@ export async function decryptText(payload: string, passphrase: string): Promise<
   const [, saltB64, ivB64, ctB64] = parts;
   const key = await Crypto.AESEncryptionKey.import(await deriveKey(passphrase, saltB64));
   const sealed = Crypto.AESSealedData.fromParts(ivB64, ctB64);
-  const plainBytes = (await Crypto.aesDecryptAsync(sealed, key, {
-    output: "bytes",
-  })) as Uint8Array;
+  let plainBytes: Uint8Array;
+  try {
+    plainBytes = (await Crypto.aesDecryptAsync(sealed, key, {
+      output: "bytes",
+    })) as Uint8Array;
+  } catch {
+    throw new Error("Wrong passphrase or corrupted backup");
+  }
   return bytesToUtf8(plainBytes);
 }

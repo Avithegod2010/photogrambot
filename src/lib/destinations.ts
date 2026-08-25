@@ -1,6 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { kvGet, kvSet } from "./db";
-import { getBotToken } from "./settings";
+import { getBotToken, getChannelId } from "./settings";
 
 export const DEFAULT_PROFILE_ID = "default";
 
@@ -107,10 +107,7 @@ export async function resolveDestination(
 ): Promise<Destination | null> {
   if (!profileId || profileId === DEFAULT_PROFILE_ID) {
     const token = await getBotToken();
-    const channelId = await (async () => {
-      const { getChannelId } = await import("./settings");
-      return getChannelId();
-    })();
+    const channelId = await getChannelId();
     if (!token || !channelId) return null;
     return { token, channelId };
   }
