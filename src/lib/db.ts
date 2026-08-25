@@ -70,14 +70,21 @@ export interface QueueRow {
   created_at: number;
 }
 
-let db: SQLite.SQLiteDatabase | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (db) return db;
-  db = await SQLite.openDatabaseAsync("photogrambot.db");
-  await db.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-  await migrate(db);
-  return db;
+  if (!dbPromise) {
+    dbPromise = (async () => {
+      const d = await SQLite.openDatabaseAsync("photogrambot.db");
+      await d.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      await migrate(d);
+      return d;
+    })().catch((err) => {
+      dbPromise = null;
+      throw err;
+    });
+  }
+  return dbPromise;
 }
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -234,12 +241,26 @@ function rowToPhoto(r: any): PhotoRow {
 export async function insertPhoto(p: Partial<PhotoRow> & { id: string }): Promise<void> {
   const d = await getDb();
   await d.runAsync(
-    `INSERT OR REPLACE INTO photos
+    `INSERT INTO photos
       (id, local_id, local_uri, remote_file_id, preview_file_id, thumb_file_id,
        message_id, preview_message_id, filename, folder, width, height, size, mime,
        taken_at, added_at, uploaded_at, remote_date, content_hash, device, camera,
        tags, latitude, longitude, exif, ai_caption, duration, parts, profile_id, favorite, status, error, upload_type)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET
+       local_id=excluded.local_id, local_uri=excluded.local_uri,
+       remote_file_id=excluded.remote_file_id, preview_file_id=excluded.preview_file_id,
+       thumb_file_id=excluded.thumb_file_id, message_id=excluded.message_id,
+       preview_message_id=excluded.preview_message_id, filename=excluded.filename,
+       folder=excluded.folder, width=excluded.width, height=excluded.height,
+       size=excluded.size, mime=excluded.mime, taken_at=excluded.taken_at,
+       added_at=excluded.added_at, uploaded_at=excluded.uploaded_at,
+       remote_date=excluded.remote_date, content_hash=excluded.content_hash,
+       device=excluded.device, camera=excluded.camera, tags=excluded.tags,
+       latitude=excluded.latitude, longitude=excluded.longitude, exif=excluded.exif,
+       ai_caption=excluded.ai_caption, duration=excluded.duration, parts=excluded.parts,
+       profile_id=excluded.profile_id, status=excluded.status, error=excluded.error,
+       upload_type=excluded.upload_type`,
     [
       p.id,
       p.local_id ?? null,
@@ -322,8 +343,14 @@ export async function getPhotoByHash(hash: string): Promise<PhotoRow | null> {
 
 export async function getPhotoByMessageId(messageId: number): Promise<PhotoRow | null> {
   const d = await getDb();
+  // Update polling only sees the default destination's channel, so ignore rows
+  // that were routed to another bot/channel (their message_ids live in a
+  // different namespace and could collide).
   const row = await d.getFirstAsync<any>(
-    "SELECT * FROM photos WHERE message_id = ? OR preview_message_id = ? LIMIT 1",
+    `SELECT * FROM photos
+     WHERE (message_id = ? OR preview_message_id = ?)
+     AND (profile_id IS NULL OR profile_id = 'default')
+     LIMIT 1`,
     [messageId, messageId]
   );
   return row ? rowToPhoto(row) : null;
@@ -903,44 +930,42 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
   const d = await getDb();
   const now = new Date();
   const thisYear = now.getFullYear();
+  // Build the %m-%d date list in JS so the window wraps correctly across
+  // year boundaries (Dec 31 <-> Jan 1), unlike a BETWEEN on %m-%d strings.
+  const dates: string[] = [];
+  for (let off = -windowDays; off <= windowDays; off++) {
+    const dte = new Date(thisYear, now.getMonth(), now.getDate() + off);
+    dates.push(
+      `${String(dte.getMonth() + 1).padStart(2, "0")}-${String(dte.getDate()).padStart(2, "0")}`
+    );
+  }
+  const ph = dates.map(() => "?").join(",");
   const rows = await d.getAllAsync<any>(
     `SELECT CAST(strftime('%Y', taken_at / 1000, 'unixepoch') AS INTEGER) as year,
-       COUNT(*) as count,
-       MIN(taken_at) as startMs,
-       MAX(taken_at) as endMs,
-       (SELECT p.preview_file_id FROM photos p2
-         WHERE p2.status IN ('uploaded','local','failed')
-         AND p2.id NOT IN (SELECT photo_id FROM trash)
-         AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch') AS INTEGER) = year
-         AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch')
-             BETWEEN strftime('%m-%d', ?, 'unixepoch', '-${windowDays} days')
-             AND strftime('%m-%d', ?, 'unixepoch', '+${windowDays} days')
-         ORDER BY p2.taken_at DESC LIMIT 1) as cover_preview_id,
-       (SELECT p.remote_file_id FROM photos p3
-         WHERE p3.status IN ('uploaded','local','failed')
-         AND p3.id NOT IN (SELECT photo_id FROM trash)
-         AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch') AS INTEGER) = year
-         AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch')
-             BETWEEN strftime('%m-%d', ?, 'unixepoch', '-${windowDays} days')
-             AND strftime('%m-%d', ?, 'unixepoch', '+${windowDays} days')
-         ORDER BY p3.taken_at DESC LIMIT 1) as cover_file_id
-     FROM photos p
-     WHERE status IN ('uploaded','local','failed')
-     AND id NOT IN (SELECT photo_id FROM trash)
-     AND year < ?
-     AND strftime('%m-%d', taken_at / 1000, 'unixepoch')
-         BETWEEN strftime('%m-%d', ?, 'unixepoch', '-${windowDays} days')
-         AND strftime('%m-%d', ?, 'unixepoch', '+${windowDays} days')
-     GROUP BY year ORDER BY year DESC`,
-    [
-      now.getTime() / 1000,
-      now.getTime() / 1000,
-      now.getTime() / 1000,
-      now.getTime() / 1000,
-      thisYear,
-      now.getTime() / 1000,
-      now.getTime() / 1000,
-    ]
+        COUNT(*) as count,
+        MIN(taken_at) as startMs,
+        MAX(taken_at) as endMs,
+        (SELECT p2.preview_file_id FROM photos p2
+          WHERE p2.status IN ('uploaded','local','failed')
+          AND p2.id NOT IN (SELECT photo_id FROM trash)
+          AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch') AS INTEGER) =
+              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch') AS INTEGER)
+          AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch') IN (${ph})
+          ORDER BY p2.taken_at DESC LIMIT 1) as cover_preview_id,
+        (SELECT p3.remote_file_id FROM photos p3
+          WHERE p3.status IN ('uploaded','local','failed')
+          AND p3.id NOT IN (SELECT photo_id FROM trash)
+          AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch') AS INTEGER) =
+              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch') AS INTEGER)
+          AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch') IN (${ph})
+          ORDER BY p3.taken_at DESC LIMIT 1) as cover_file_id
+      FROM photos p
+      WHERE status IN ('uploaded','local','failed')
+      AND id NOT IN (SELECT photo_id FROM trash)
+      AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch') AS INTEGER) < ?
+      AND strftime('%m-%d', taken_at / 1000, 'unixepoch') IN (${ph})
+      GROUP BY year ORDER BY year DESC`,
+    [...dates, ...dates, thisYear, ...dates]
   );
   return rows
     .filter((r) => r.count > 0)
@@ -1067,13 +1092,14 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync("DELETE FROM photos");
     }
     for (const p of data.photos ?? []) {
-      await d.runAsync(
+      const res = await d.runAsync(
         `INSERT OR IGNORE INTO photos
           (id, local_id, local_uri, remote_file_id, preview_file_id, thumb_file_id,
            message_id, preview_message_id, filename, folder, width, height, size, mime,
            taken_at, added_at, uploaded_at, remote_date, content_hash, device, camera,
-           tags, latitude, longitude, exif, favorite, status, error, upload_type)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           tags, latitude, longitude, exif, ai_caption, duration, parts, profile_id,
+           favorite, status, error, upload_type)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           p.id, p.local_id ?? null, p.local_uri ?? null, p.remote_file_id ?? null,
           p.preview_file_id ?? null, p.thumb_file_id ?? null, p.message_id ?? null,
@@ -1082,10 +1108,11 @@ export async function importAllData(json: string, replace: boolean): Promise<num
           p.taken_at ?? 0, p.added_at ?? 0, p.uploaded_at ?? null, p.remote_date ?? null,
           p.content_hash ?? null, p.device ?? null, p.camera ?? null, p.tags ?? null,
           p.latitude ?? null, p.longitude ?? null, p.exif ?? null,
+          p.ai_caption ?? null, p.duration ?? null, p.parts ?? null, p.profile_id ?? null,
           p.favorite ?? 0, p.status ?? "local", p.error ?? null, p.upload_type ?? null,
         ]
       );
-      count++;
+      count += res.changes > 0 ? 1 : 0;
     }
     for (const a of data.albums ?? []) {
       await d.runAsync("INSERT OR IGNORE INTO albums (id, name, created_at) VALUES (?,?,?)", [
