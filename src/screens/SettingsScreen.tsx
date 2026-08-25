@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,7 @@ import {
   setBackupPassphrase,
   DEFAULT_AI_PROMPT,
 } from "../lib/settings";
+import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
 import {
   uploadBackupToChannel,
   restoreFromChannelPinned,
@@ -54,6 +55,16 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
   const [aiPromptDraft, setAiPromptDraft] = useState(prefs.aiPrompt);
   const [passDraft, setPassDraft] = useState("");
+  const [pinDialogVisible, setPinDialogVisible] = useState(false);
+  const pinDialogMode = useRef<"real" | "decoy">("real");
+  const [pinDraft, setPinDraft] = useState("");
+  const [pinExists, setPinExists] = useState(false);
+  const [decoyExists, setDecoyExists] = useState(false);
+
+  useEffect(() => {
+    void getPinExists().then(setPinExists);
+    void getDecoyExists().then(setDecoyExists);
+  }, []);
 
   useEffect(() => {
     void getBackupPassphrase().then((p) => setPassDraft(p ?? ""));
@@ -242,6 +253,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ autoSyncWifiOnly: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Upload only while charging"
+            subtitle="Automatic sync waits until the device is plugged in"
+            value={prefs.uploadOnlyCharging}
+            onChange={(v) => void update({ uploadOnlyCharging: v })}
+            theme={theme}
+          />
           <ToggleRow
             title="Upload low-res preview first"
             subtitle="Faster grid loading; the original always follows"
@@ -394,7 +413,70 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ appLock: v })}
             theme={theme}
           />
+          {prefs.appLock ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.buttonGrid}>
+                <Button
+                  title={pinExists ? "Change PIN" : "Set PIN"}
+                  variant="outlined"
+                  theme={theme}
+                  onPress={() => {
+                    pinDialogMode.current = "real";
+                    setPinDialogVisible(true);
+                  }}
+                />
+                <Button
+                  title={decoyExists ? "Change decoy PIN" : "Set decoy PIN"}
+                  variant="outlined"
+                  theme={theme}
+                  onPress={() => {
+                    pinDialogMode.current = "decoy";
+                    setPinDialogVisible(true);
+                  }}
+                />
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 6 }}>
+                The decoy PIN opens an empty gallery — use it when someone insists on seeing the app.
+              </Text>
+            </>
+          ) : null}
         </Card>
+
+        <Dialog
+          visible={pinDialogVisible}
+          theme={theme}
+          title={pinDialogMode.current === "decoy" ? "Set decoy PIN" : "Set PIN"}
+          message="4–8 digits. Leave empty to remove."
+        >
+          <TextField
+            value={pinDraft}
+            onChangeText={(t) => setPinDraft(t.replace(/[^0-9]/g, "").slice(0, 8))}
+            placeholder="PIN"
+            secureTextEntry
+            keyboardType="numeric"
+            theme={theme}
+          />
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+            <Button title="Cancel" variant="text" theme={theme} onPress={() => setPinDialogVisible(false)} />
+            <Button
+              title="Save"
+              theme={theme}
+              onPress={async () => {
+                const pin = pinDraft.trim();
+                if (pinDialogMode.current === "decoy") {
+                  await setDecoyPin(pin || null);
+                  setDecoyExists(!!pin);
+                } else {
+                  await setPin(pin || null);
+                  setPinExists(!!pin);
+                }
+                setPinDraft("");
+                setPinDialogVisible(false);
+              }}
+            />
+          </View>
+        </Dialog>
 
         <SectionLabel text="Maintenance" theme={theme} />
         <Card theme={theme} onPress={() => navigation.navigate("Maintenance")}>

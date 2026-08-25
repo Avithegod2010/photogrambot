@@ -30,6 +30,7 @@ import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo } from "./vsplit";
+import { notifyUploadProgress, notifyUploadComplete } from "./notify";
 import {
   resolveDestination,
   profileIdForFolder,
@@ -217,6 +218,7 @@ export async function processQueue(): Promise<void> {
               skipped: counts.skipped ?? 0,
               duplicates: counts.duplicate ?? 0,
             });
+            void maybeNotifyProgress();
           }
         }
       );
@@ -228,7 +230,19 @@ export async function processQueue(): Promise<void> {
       await flushPreviews();
     } catch {}
     setProgress({ running: false, currentFile: null, sentBytes: 0, totalBytes: 0, percent: null });
+    if (!cancelRequested) {
+      void notifyUploadComplete(progress.done, progress.failed + progress.skipped);
+    }
   }
+}
+
+let lastNotifyAt = 0;
+
+async function maybeNotifyProgress(): Promise<void> {
+  const now = Date.now();
+  if (now - lastNotifyAt < 3000) return;
+  lastNotifyAt = now;
+  await notifyUploadProgress(progress.current, progress.total, progress.currentFile);
 }
 
 export function isProcessing(): boolean {

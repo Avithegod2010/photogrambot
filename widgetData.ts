@@ -4,6 +4,7 @@ export async function getRandomPhotoForWidget(): Promise<{
   imageHeight: number;
   count: number;
   takenAt: number | null;
+  photoId: string | null;
 } | null> {
   try {
     const { getDb } = await import("./src/lib/db");
@@ -27,6 +28,7 @@ export async function getRandomPhotoForWidget(): Promise<{
         imageHeight: 200,
         count: total?.n ?? 0,
         takenAt: null,
+        photoId: null,
       };
     }
     const fileId = row.preview_file_id ?? row.thumb_file_id ?? row.remote_file_id;
@@ -46,6 +48,7 @@ export async function getRandomPhotoForWidget(): Promise<{
       imageHeight: row.height ?? 1080,
       count: total?.n ?? 0,
       takenAt: row.taken_at ?? null,
+      photoId: row.id ?? null,
     };
   } catch {
     return null;

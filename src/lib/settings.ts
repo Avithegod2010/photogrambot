@@ -21,6 +21,7 @@ export interface Prefs {
   autoSync: boolean;
   autoSyncWifiOnly: boolean;
   autoSyncIntervalHours: number;
+  uploadOnlyCharging: boolean;
   syncWindowStart: number;
   syncWindowEnd: number;
   excludedFolders: string[];
@@ -49,6 +50,7 @@ export const defaultPrefs: Prefs = {
   autoSync: false,
   autoSyncWifiOnly: true,
   autoSyncIntervalHours: 6,
+  uploadOnlyCharging: false,
   syncWindowStart: 0,
   syncWindowEnd: 1440,
   excludedFolders: [],

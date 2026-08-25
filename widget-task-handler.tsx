@@ -1,4 +1,5 @@
 import React from "react";
+import { Linking } from "react-native";
 import type { WidgetTaskHandlerProps } from "react-native-android-widget";
 import { RandomPhotoWidget } from "./RandomPhotoWidget";
 import { getRandomPhotoForWidget } from "./widgetData";
@@ -26,12 +27,22 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
           imageHeight={data?.imageHeight ?? 200}
           count={data?.count ?? 0}
           dateLabel={dateLabel}
+          photoId={data?.photoId ?? null}
         />
       );
       break;
     }
+    case "WIDGET_CLICK": {
+      const url =
+        props.clickAction && props.clickAction.startsWith("photogrambot://")
+          ? props.clickAction
+          : "photogrambot://open";
+      try {
+        await Linking.openURL(url);
+      } catch {}
+      break;
+    }
     case "WIDGET_DELETED":
-    case "WIDGET_CLICK":
     default:
       break;
   }

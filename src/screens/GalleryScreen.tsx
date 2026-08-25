@@ -23,8 +23,10 @@ import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
 import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
-import { getUploadedLocalIds } from "../lib/db";
+import { getUploadedLocalIds, getMonthlyBuckets, type MonthBucket, type SearchFilters } from "../lib/db";
 import { enqueueUploads, processQueue } from "../lib/uploader";
+import { ToggleRow } from "../components/ui";
+import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { getCachedTelegramFile } from "../lib/media";
@@ -50,6 +52,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PhotoRow[] | null>(null);
+  const [filters, setFilters] = useState<SearchFilters | null>(null);
+  const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [albumDialogVisible, setAlbumDialogVisible] = useState(false);
@@ -57,6 +61,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const { albums, newAlbum, addPhotosToAlbum } = useLibraryStore();
   const staggered = useSettingsStore((s) => s.prefs.staggeredGrid);
   const [newAlbumName, setNewAlbumName] = useState("");
+  const decoy = isDecoyActive();
 
   useEffect(() => {
     void loadInitial();
@@ -64,12 +69,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }, []);
 
   const sections = useMemo(() => {
-    const source = searchResults ?? photos;
+    const source = decoy ? [] : searchResults ?? photos;
     return groupPhotosByDate(source).map((g) => ({
       label: g.label,
       data: g.items,
     }));
-  }, [photos, searchResults]);
+  }, [photos, searchResults, decoy]);
 
   const tile = (Dimensions.get("window").width - 4) / COLUMNS;
 
@@ -98,11 +103,29 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
   async function runSearch(q: string) {
     setSearch(q);
-    if (q.trim().length === 0) {
+    const hasFilters =
+      !!filters &&
+      (!!(filters.takenWithinDays && filters.takenWithinDays > 0) ||
+        !!filters.hasGps ||
+        !!(filters.camera && filters.camera.trim()));
+    if (q.trim().length === 0 && !hasFilters) {
       setSearchResults(null);
       return;
     }
-    const results = await useLibraryStore.getState().search(q);
+    const results = await useLibraryStore.getState().search(q, filters ?? undefined);
+    setSearchResults(results);
+  }
+
+  async function applyFilters(f: SearchFilters | null) {
+    setFilters(f);
+    const hasFilters =
+      !!f &&
+      (!!(f.takenWithinDays && f.takenWithinDays > 0) || !!f.hasGps || !!(f.camera && f.camera.trim()));
+    if (!hasFilters && search.trim().length === 0) {
+      setSearchResults(null);
+      return;
+    }
+    const results = await useLibraryStore.getState().search(search, f ?? undefined);
     setSearchResults(results);
   }
 
@@ -293,6 +316,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           style={[styles.searchInput, { color: theme.colors.onSurface }]}
           selectionColor={theme.colors.primary}
         />
+        {filters ? (
+          <Pressable onPress={() => void applyFilters(null)} hitSlop={6}>
+            <Text style={{ color: theme.colors.primary, fontSize: 11, fontWeight: "700" }}>FILTERED</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={() => setFilterSheetVisible(true)} hitSlop={6} style={{ paddingHorizontal: 4 }}>
+          <Text style={{ color: theme.colors.onSurfaceVariant }}>☰</Text>
+        </Pressable>
         {search.length > 0 ? (
           <Pressable onPress={() => runSearch("")}>
             <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
@@ -341,7 +372,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           }
           contentContainerStyle={{ paddingBottom: 120 }}
           ListHeaderComponent={
-            !searchResults ? (
+            !searchResults && !decoy ? (
               <View>
                 <OverviewCard theme={theme} stats={stats} />
                 <MemoriesCarousel navigation={navigation} />
@@ -434,7 +465,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           </Pressable>
         </View>
       ) : (
-        !searchResults && (
+        !searchResults &&
+        !decoy && (
           <Pressable
             style={[
               styles.fab,
@@ -451,6 +483,17 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         visible={pickerVisible}
         theme={theme}
         onClose={() => setPickerVisible(false)}
+      />
+
+      <FilterSheet
+        visible={filterSheetVisible}
+        theme={theme}
+        initial={filters}
+        onApply={(f) => {
+          setFilterSheetVisible(false);
+          void applyFilters(f);
+        }}
+        onClose={() => setFilterSheetVisible(false)}
       />
 
       <Dialog
@@ -519,12 +562,17 @@ function OverviewCard({
   stats: { total: number; uploaded: number; pending: number; failed: number; totalBytes: number };
 }) {
   const [open, setOpen] = useState(true);
+  const [buckets, setBuckets] = useState<MonthBucket[]>([]);
+  useEffect(() => {
+    void getMonthlyBuckets(6).then(setBuckets);
+  }, [stats.total]);
   const tiles = [
     { label: "Photos", value: String(stats.total) },
     { label: "Backed up", value: String(stats.uploaded) },
     { label: "Pending", value: String(stats.pending + stats.failed) },
     { label: "Size", value: formatBytes(stats.totalBytes) },
   ];
+  const maxBytes = Math.max(1, ...buckets.map((b) => b.bytes));
   return (
     <View style={[styles.overviewCard, { backgroundColor: theme.colors.surfaceContainer }]}>
       <Pressable style={styles.overviewHeader} onPress={() => setOpen((v) => !v)}>
@@ -539,18 +587,45 @@ function OverviewCard({
         <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{open ? "⌃" : "⌄"}</Text>
       </Pressable>
       {open ? (
-        <View style={styles.overviewGrid}>
-          {tiles.map((t) => (
-            <View
-              key={t.label}
-              style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest }]}
-            >
-              <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>
-                {t.value}
+        <View>
+          <View style={styles.overviewGrid}>
+            {tiles.map((t) => (
+              <View
+                key={t.label}
+                style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest }]}
+              >
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>
+                  {t.value}
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5 }}>{t.label}</Text>
+              </View>
+            ))}
+          </View>
+          {buckets.some((b) => b.count > 0) ? (
+            <View style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest, marginTop: 8 }]}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginBottom: 6 }}>
+                Last 6 months
               </Text>
-              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5 }}>{t.label}</Text>
+              <View style={styles.chartRow}>
+                {buckets.map((b, i) => (
+                  <View key={i} style={styles.chartCol}>
+                    <View style={styles.chartBarArea}>
+                      <View
+                        style={[
+                          styles.chartBar,
+                          {
+                            height: `${Math.max(4, Math.round((b.bytes / maxBytes) * 100))}%`,
+                            backgroundColor: b.bytes > 0 ? theme.colors.primary : theme.colors.outlineVariant,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 9.5 }}>{b.label}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          ))}
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -561,6 +636,110 @@ function isWantedPickerMedia(m: MediaLibrary.AssetMetadata): boolean {
   return (
     m.mediaType === MediaLibrary.MediaType.IMAGE ||
     m.mediaType === MediaLibrary.MediaType.VIDEO
+  );
+}
+
+function FilterSheet({
+  visible,
+  theme,
+  initial,
+  onApply,
+  onClose,
+}: {
+  visible: boolean;
+  theme: ReturnType<typeof useTheme>;
+  initial: SearchFilters | null;
+  onApply: (f: SearchFilters | null) => void;
+  onClose: () => void;
+}) {
+  const [days, setDays] = useState<number | null>(initial?.takenWithinDays ?? null);
+  const [hasGps, setHasGps] = useState(!!initial?.hasGps);
+  const [camera, setCamera] = useState(initial?.camera ?? "");
+  const ranges: { label: string; value: number | null }[] = [
+    { label: "Any time", value: null },
+    { label: "24 h", value: 1 },
+    { label: "7 days", value: 7 },
+    { label: "30 days", value: 30 },
+    { label: "90 days", value: 90 },
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.filterSheet, { backgroundColor: theme.colors.background }]}>
+          <View style={[styles.grabber, { backgroundColor: theme.colors.outline }]} />
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 17, marginBottom: 12 }}>
+            Filter photos
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+            Date range
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {ranges.map((r) => (
+              <Pressable
+                key={r.label}
+                onPress={() => setDays(r.value)}
+                style={[
+                  styles.filterChip,
+                  {
+                    backgroundColor:
+                      days === r.value ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: days === r.value ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                    fontSize: 12.5,
+                    fontWeight: "600",
+                  }}
+                >
+                  {r.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <ToggleRow
+            title="Has location"
+            subtitle="Only photos tagged with GPS coordinates"
+            value={hasGps}
+            onChange={setHasGps}
+            theme={theme}
+          />
+          <View style={{ height: 10 }} />
+          <TextField
+            value={camera}
+            onChangeText={setCamera}
+            placeholder="Camera model contains…"
+            theme={theme}
+          />
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <Button
+              title="Clear"
+              variant="text"
+              theme={theme}
+              onPress={() => {
+                setDays(null);
+                setHasGps(false);
+                setCamera("");
+                onApply(null);
+              }}
+            />
+            <Button
+              title="Apply"
+              theme={theme}
+              onPress={() =>
+                onApply({
+                  takenWithinDays: days,
+                  hasGps,
+                  camera: camera.trim() || null,
+                })
+              }
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1048,6 +1227,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+  filterSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+  },
+  grabber: {
+    alignSelf: "center",
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    marginBottom: 14,
+  },
+  filterChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   overviewCard: {
     marginHorizontal: 16,
     marginTop: 8,
@@ -1072,6 +1270,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
+  },
+  chartRow: {
+    flexDirection: "row",
+    height: 64,
+  },
+  chartCol: {
+    flex: 1,
+    alignItems: "center",
+    gap: 3,
+  },
+  chartBarArea: {
+    flex: 1,
+    width: "60%",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  chartBar: {
+    width: "100%",
+    borderRadius: 4,
   },
   favIcon: {
     color: "#FF8FA3",
