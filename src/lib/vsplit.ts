@@ -18,10 +18,9 @@ export function buildVideoPartCaption(
   total: number,
   filename: string
 ): string {
-  return `🧩 <b>[Part ${index}/${total}]</b> #vsplit:${hash} 📁 <code>${escapeHtml(filename)}</code>`.slice(
-    0,
-    1024
-  );
+  return `🧩 <b>[Part ${index}/${total}]</b> #vsplit:${hash} #part:${index}/${total} 📁 <code>${escapeHtml(
+    filename
+  )}</code>`.slice(0, 1024);
 }
 
 const PART_RE = /#vsplit:([a-fA-F0-9]{64})\s*#part:(\d+)\/(\d+)/;
@@ -45,18 +44,30 @@ export async function splitAndUploadVideo(
     filename: string;
     messageThreadId?: number;
     token?: string;
+    resumeParts?: VideoPart[];
+    onPartsChanged?: (parts: VideoPart[]) => void;
     onProgress?: (bytesSent: number, totalBytes: number) => void;
     onPartUploaded?: (index: number, total: number) => void;
     signal?: AbortSignal;
   }
-): Promise<VideoPart[]> {
+): Promise<{ parts: VideoPart[]; thumbFileId: string | null }> {
   const file = new File(fileUri);
   if (!file.exists) throw new Error("Video file missing on device");
   const total = Math.max(1, Math.ceil(file.size / VIDEO_PART_BYTES));
+  const resume = opts.resumeParts ?? [];
+  let thumbFileId: string | null = null;
+  if (resume.length >= total) {
+    // Everything already uploaded in a previous attempt.
+    return { parts: resume.slice(0, total), thumbFileId };
+  }
+  const parts: VideoPart[] = [...resume];
   const handle = file.open();
-  const parts: VideoPart[] = [];
   try {
-    for (let i = 1; i <= total; i++) {
+    if (resume.length > 0) {
+      // Skip past bytes already uploaded in a previous attempt.
+      handle.offset = resume.length * VIDEO_PART_BYTES;
+    }
+    for (let i = resume.length + 1; i <= total; i++) {
       if (opts.signal?.aborted) throw new Error("Cancelled");
       const bytes = handle.readBytes(VIDEO_PART_BYTES);
       const tmp = new File(Paths.cache, `pb_vpart_${Date.now()}_${i}.bin`);
@@ -73,13 +84,16 @@ export async function splitAndUploadVideo(
         });
         if (!message.document) throw new Error(`Part ${i} upload returned no document`);
         parts.push({ file_id: message.document.file_id, size: bytes.length });
+        // Part 1's auto-thumbnail is ~the video's first frame — good tile.
+        if (!thumbFileId) thumbFileId = message.document.thumbnail?.file_id ?? null;
       } finally {
         try { tmp.delete(); } catch {}
       }
+      opts.onPartsChanged?.(parts);
       opts.onPartUploaded?.(i, total);
     }
   } finally {
     try { handle.close(); } catch {}
   }
-  return parts;
+  return { parts, thumbFileId };
 }

@@ -6,7 +6,9 @@ import {
   updateQueueItem,
   insertPhoto,
   updatePhoto,
+  getPhoto,
   getPhotoByHash,
+  getInFlightHashConflict,
   getPhotoByLocalId,
   getQueueCounts,
   recoverStaleRunning,
@@ -29,7 +31,7 @@ import { buildCaption, buildPreviewCaption } from "./caption";
 import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 import { isVideoMime } from "./format";
-import { splitAndUploadVideo } from "./vsplit";
+import { splitAndUploadVideo, type VideoPart } from "./vsplit";
 import { notifyUploadProgress, notifyUploadComplete } from "./notify";
 import {
   resolveDestination,
@@ -172,6 +174,8 @@ export async function processQueue(): Promise<void> {
   if (processing) return;
   processing = true;
   cancelRequested = false;
+  let runDone = 0;
+  let runFailed = 0;
   try {
     await recoverStaleRunning();
     let discovered = 0;
@@ -210,7 +214,9 @@ export async function processQueue(): Promise<void> {
             const item = batch[i];
             started++;
             setProgress({ current: started, currentFile: item.filename });
-            await uploadQueueItem(item);
+            const outcome = await uploadQueueItem(item);
+            if (outcome === "done") runDone++;
+            else if (outcome === "failed") runFailed++;
             const counts = await getQueueCounts();
             setProgress({
               done: counts.done ?? 0,
@@ -231,7 +237,7 @@ export async function processQueue(): Promise<void> {
     } catch {}
     setProgress({ running: false, currentFile: null, sentBytes: 0, totalBytes: 0, percent: null });
     if (!cancelRequested) {
-      void notifyUploadComplete(progress.done, progress.failed + progress.skipped);
+      void notifyUploadComplete(runDone, runFailed);
     }
   }
 }
@@ -341,6 +347,11 @@ async function flushPreviews(): Promise<void> {
   }
   for (const group of groups.values()) {
     for (const chunk of chunksOf(group, 10)) {
+      if (cancelRequested) {
+        // Upload was cancelled — don't leave orphan previews in the channel.
+        chunk.forEach((p) => p.resolve(null));
+        continue;
+      }
       try {
         const messages = await sendMediaGroup(
           chunk[0].channelId,
@@ -377,7 +388,9 @@ function chunksOf<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-async function uploadQueueItem(item: QueueRow): Promise<void> {
+type UploadOutcome = "done" | "duplicate" | "skipped" | "failed" | "requeued";
+
+async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
   const dest: Destination | null = await resolveDestination(item.profile_id);
   if (!dest) {
     await updateQueueItem(item.id, {
@@ -386,7 +399,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
         ? "Destination missing or its bot token was never entered"
         : "Bot not configured",
     });
-    return;
+    return "failed";
   }
   const token = dest.token;
   const channelId = dest.channelId;
@@ -397,14 +410,14 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     if (!file.exists) {
       await updateQueueItem(item.id, { state: "failed", error: "File missing on device" });
       await updatePhoto(photoId, { status: "failed", error: "File missing on device" });
-      return;
+      return "failed";
     }
     const actualSize = file.size;
     const looksLikeVideo = isVideoMime(guessMime(item.filename));
     if (actualSize > MAX_UPLOAD_BYTES && !looksLikeVideo) {
       await updateQueueItem(item.id, { state: "skipped", error: "Photo larger than 50 MB" });
       await updatePhoto(photoId, { status: "skipped_too_large", error: "Photo larger than 50 MB" });
-      return;
+      return "skipped";
     }
 
     const prefs = await loadPrefs();
@@ -432,7 +445,18 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
             uploaded_at: Date.now(),
           });
         }
-        return;
+        return "duplicate";
+      }
+      // Another worker may be uploading the identical file right now —
+      // requeue briefly instead of double-uploading.
+      const inflight = await getInFlightHashConflict(hash, photoId);
+      if (inflight) {
+        await updateQueueItem(item.id, {
+          state: "pending",
+          error: "Waiting for an identical upload to finish",
+          next_attempt_at: Date.now() + 15_000,
+        });
+        return "requeued";
       }
     }
 
@@ -463,7 +487,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
         token,
       });
       await updateQueueItem(item.id, { state: "done", error: null });
-      return;
+      return "done";
     }
 
     let previewMessage: TgMessage | null = null;
@@ -585,12 +609,13 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
       error: null,
     });
     await updateQueueItem(item.id, { state: "done", error: null });
+    return "done";
   } catch (e: any) {
     const message = e?.message ?? "Upload failed";
     if (cancelRequested) {
       // User cancelled — put the item back without burning a retry.
       await updateQueueItem(item.id, { state: "pending", error: "Cancelled" });
-      return;
+      return "requeued";
     }
     const retries = item.retries + 1;
     const permanent =
@@ -599,6 +624,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
     if (permanent || retries >= MAX_RETRIES) {
       await updateQueueItem(item.id, { state: "failed", retries, error: message });
       await updatePhoto(photoId, { status: "failed", error: message });
+      return "failed";
     } else {
       await updateQueueItem(item.id, {
         state: "pending",
@@ -606,6 +632,7 @@ async function uploadQueueItem(item: QueueRow): Promise<void> {
         error: message,
         next_attempt_at: Date.now() + computeBackoffMs(e, retries),
       });
+      return "requeued";
     }
   }
 }
@@ -662,18 +689,27 @@ async function uploadVideoItem(
   activeCancels.add(cancelFn);
   try {
     let partsJson: string | null = null;
+    let thumbOverride: string | null = null;
     let message: TgMessage | null = null;
     if (fileSize > MAX_UPLOAD_BYTES) {
       // Too large for one Bot API message — split into reassemblable parts.
-      const parts = await splitAndUploadVideo(channelId, item.local_uri, {
+      // Persist partial progress so a retry resumes instead of re-uploading.
+      const existing = await getPhoto(photoId);
+      const resumeParts = parsePartsJson(existing?.parts ?? null);
+      const result = await splitAndUploadVideo(channelId, item.local_uri, {
         hash: ctx.hash ?? "",
         filename: item.filename,
         messageThreadId: ctx.threadId ?? undefined,
         token: ctx.token,
+        resumeParts: resumeParts ?? undefined,
+        onPartsChanged: (parts) => {
+          void updatePhoto(photoId, { parts: JSON.stringify(parts) });
+        },
         onProgress: emitFileProgress,
         signal: controller.signal,
       });
-      partsJson = JSON.stringify(parts);
+      partsJson = JSON.stringify(result.parts);
+      thumbOverride = existing?.thumb_file_id ?? result.thumbFileId;
     } else {
       try {
         message = await sendVideo(channelId, item.local_uri, {
@@ -714,6 +750,7 @@ async function uploadVideoItem(
       thumb_file_id:
         message?.video?.thumbnail?.file_id ??
         message?.document?.thumbnail?.file_id ??
+        thumbOverride ??
         null,
       preview_file_id: null,
       message_id: message?.message_id ?? null,
@@ -735,5 +772,15 @@ async function uploadVideoItem(
     });
   } finally {
     activeCancels.delete(cancelFn);
+  }
+}
+
+function parsePartsJson(raw: string | null | undefined): VideoPart[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as VideoPart[];
+    return Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.file_id ? parsed : null;
+  } catch {
+    return null;
   }
 }

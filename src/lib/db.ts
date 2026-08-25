@@ -341,6 +341,18 @@ export async function getPhotoByHash(hash: string): Promise<PhotoRow | null> {
   return row ? rowToPhoto(row) : null;
 }
 
+export async function getInFlightHashConflict(
+  hash: string,
+  excludePhotoId: string
+): Promise<PhotoRow | null> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<any>(
+    `SELECT * FROM photos WHERE content_hash = ? AND id != ? AND status = 'uploading' LIMIT 1`,
+    [hash, excludePhotoId]
+  );
+  return row ? rowToPhoto(row) : null;
+}
+
 export async function getPhotoByMessageId(messageId: number): Promise<PhotoRow | null> {
   const d = await getDb();
   // Update polling only sees the default destination's channel, so ignore rows
