@@ -133,8 +133,8 @@ async function call<T>(
   return parseJsonResponse<T>(res, method);
 }
 
-export async function getMe(): Promise<TgUser> {
-  return call<TgUser>("getMe");
+export async function getMe(tokenOverride?: string): Promise<TgUser> {
+  return call<TgUser>("getMe", undefined, tokenOverride);
 }
 
 export async function getChat(chatId: string | number, tokenOverride?: string): Promise<any> {
