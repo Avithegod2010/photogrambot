@@ -115,10 +115,12 @@ function Splash() {
   );
 }
 
-function Root({ locked }: { locked: boolean }) {
+function Root({ locked, initialized }: { locked: boolean; initialized: boolean }) {
   const step = useSetupStore((s) => s.step);
+  // Stay on the splash until stores are loaded so an app-locked device never
+  // flashes the gallery for a frame before the lock engages.
+  if (!initialized || step === "loading") return <Splash />;
   if (locked) return <LockScreen onUnlock={() => setUnlocked()} />;
-  if (step === "loading") return <Splash />;
   if (step === "ready") {
     return (
       <NavigationContainer
@@ -238,7 +240,7 @@ export default function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <Root locked={locked} />
+        <Root locked={locked} initialized={initialized} />
         {sharedUris.length > 0 ? (
           <ShareTargetSheet uris={sharedUris} onClose={() => setSharedUris([])} />
         ) : null}

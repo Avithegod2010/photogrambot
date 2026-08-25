@@ -5,7 +5,7 @@ import {
   getChannelId,
   setChannelId,
 } from "../lib/settings";
-import { getMe, getChat, detectChannelFromUpdates, TgUser } from "../lib/telegram";
+import { getMe, getChat, detectChannelFromUpdates, TelegramError, TgUser } from "../lib/telegram";
 import { getDb } from "../lib/db";
 import { ensurePermissions } from "../lib/sync";
 
@@ -48,21 +48,27 @@ export const useSetupStore = create<SetupState>((set, get) => ({
         try {
           const me: TgUser = await getMe();
           botUsername = me.username ?? null;
-        } catch {
-          set({
-            step: "unconfigured",
-            token: null,
-            channelId: null,
-            busy: false,
-          });
-          await setBotToken(null);
-          return;
+        } catch (e) {
+          if (e instanceof TelegramError && (e.code === 401 || e.code === 404)) {
+            // Token genuinely rejected — clear it and force re-setup.
+            set({
+              step: "unconfigured",
+              token: null,
+              channelId: null,
+              busy: false,
+            });
+            await setBotToken(null);
+            return;
+          }
+          // Transient network failure — keep the saved config and degrade
+          // gracefully; uploads will surface errors with retry/backoff.
+          channelTitle = channelId;
         }
         try {
           const chat = await getChat(channelId);
           channelTitle = chat.title ?? chat.username ?? channelId;
         } catch {
-          channelTitle = channelId;
+          channelTitle = channelTitle ?? channelId;
         }
         set({
           step: "ready",
@@ -83,7 +89,7 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   verifyAndSave: async (token: string) => {
     set({ busy: true, error: null });
     try {
-      const me = await getMeWithToken(token);
+      const me = await getMe(token);
       await setBotToken(token);
       set({ token, botUsername: me.username ?? null, busy: false });
       if (get().channelId) {
@@ -149,14 +155,3 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     });
   },
 }));
-
-async function getMeWithToken(token: string): Promise<TgUser> {
-  const saved = await getBotToken();
-  await setBotToken(token);
-  try {
-    return await getMe();
-  } catch (e) {
-    await setBotToken(saved ?? null);
-    throw e;
-  }
-}
