@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -101,23 +101,52 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     setRefreshing(false);
   }
 
-  async function runSearch(q: string) {
+  const searchSeq = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, []);
+
+  function runSearch(q: string) {
     setSearch(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (decoy) {
+      setSearchResults(null);
+      return;
+    }
+    const seq = ++searchSeq.current;
+    // Debounce keystrokes and drop stale responses so fast typing never
+    // shows results from an earlier prefix.
+    searchTimer.current = setTimeout(() => {
+      void executeSearch(q, seq);
+    }, 300);
+  }
+
+  async function executeSearch(q: string, seq: number) {
     const hasFilters =
       !!filters &&
       (!!(filters.takenWithinDays && filters.takenWithinDays > 0) ||
         !!filters.hasGps ||
         !!(filters.camera && filters.camera.trim()));
     if (q.trim().length === 0 && !hasFilters) {
-      setSearchResults(null);
+      if (seq === searchSeq.current) setSearchResults(null);
       return;
     }
     const results = await useLibraryStore.getState().search(q, filters ?? undefined);
-    setSearchResults(results);
+    if (seq === searchSeq.current) setSearchResults(results);
   }
 
   async function applyFilters(f: SearchFilters | null) {
     setFilters(f);
+    if (decoy) {
+      setSearchResults(null);
+      return;
+    }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const seq = ++searchSeq.current;
     const hasFilters =
       !!f &&
       (!!(f.takenWithinDays && f.takenWithinDays > 0) || !!f.hasGps || !!(f.camera && f.camera.trim()));
@@ -126,7 +155,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       return;
     }
     const results = await useLibraryStore.getState().search(search, f ?? undefined);
-    setSearchResults(results);
+    if (seq === searchSeq.current) setSearchResults(results);
   }
 
   async function shareSelected() {

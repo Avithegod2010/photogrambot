@@ -168,9 +168,10 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
         }}
         contentOffset={{ x: startIndex * width, y: 0 }}
       >
-        {photos.map((p) => {
+        {photos.map((p, i) => {
           const r = resolvePhotoFull(p);
           const video = isVideoMime(p.mime) || (p.duration ?? 0) > 0;
+          const active = i === index;
           return (
             <GestureDetector key={p.id} gesture={swipeUp}>
               <ScrollView
@@ -186,7 +187,11 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
                 scrollEventThrottle={100}
               >
                 <Pressable onPress={() => setChromeVisible((v) => !v)}>
-                  {video && r.fileId ? (
+                  {!active ? (
+                    // Off-screen pages stay placeholders — mounting every
+                    // CloudVideo would download every video at once.
+                    <View style={{ width, height: height * 0.92 }} />
+                  ) : video && r.fileId ? (
                     <CloudVideo fileId={r.fileId} mime={p.mime} profileId={p.profile_id} />
                   ) : (
                     <TelegramImage
