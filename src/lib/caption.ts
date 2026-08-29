@@ -117,7 +117,8 @@ export function buildPreviewCaption(hash: string | null, sizeBytes: number): str
     : `<b>[Preview ${sizeStr}]</b>`.slice(0, 1024);
 }
 
-const HASH_RE = /#hasREDACTED_PATH*([a-fA-F0-9]{64})/;
+// Large files (>8 MB) hash as "md5:<32 hex>"; small ones as bare 64-hex SHA-256.
+const HASH_RE = /#hasREDACTED_PATH*(md5:[a-fA-F0-9]{32}|[a-fA-F0-9]{64})/;
 const DEVICE_RE = /#device:([A-Za-z0-9_-]+)/;
 const COORDS_RE = /Coords:<\/b>\s*<code>(-?\d+\.?\d*),\s*(-?\d+\.?\d*)<\/code>/;
 const EXPOSURE_RE = /Exposure:<\/b>\s*([^<\n]+)/;
