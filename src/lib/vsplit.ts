@@ -18,12 +18,15 @@ export function buildVideoPartCaption(
   total: number,
   filename: string
 ): string {
-  return `🧩 <b>[Part ${index}/${total}]</b> #vsplit:${hash} #part:${index}/${total} 📁 <code>${escapeHtml(
+  // An empty hash (hashing failed) must not emit a bare "#vsplit:" token —
+  // it would corrupt the caption grammar parseVideoPartCaption expects.
+  const hashToken = hash ? ` #vsplit:${hash}` : "";
+  return `🧩 <b>[Part ${index}/${total}]</b>${hashToken} #part:${index}/${total} 📁 <code>${escapeHtml(
     filename
   )}</code>`.slice(0, 1024);
 }
 
-const PART_RE = /#vsplit:([a-fA-F0-9]{64})\s*#part:(\d+)\/(\d+)/;
+const PART_RE = /#vsplit:(md5:[a-fA-F0-9]{32}|[a-fA-F0-9]{64})\s*#part:(\d+)\/(\d+)/;
 
 export function parseVideoPartCaption(caption?: string | null): {
   hash: string;
