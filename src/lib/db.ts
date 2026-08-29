@@ -992,26 +992,18 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
     }));
 }
 
-export interface GeotaggedPhoto {
-  id: string;
+// Full photo row; latitude/longitude are non-null because the query's WHERE
+// filters them — keeps MapScreen's toFixed()/Region math honest while still
+// carrying favorite, status, camera, exif, etc. into the viewer.
+export type GeotaggedPhoto = Omit<PhotoRow, "latitude" | "longitude"> & {
   latitude: number;
   longitude: number;
-  taken_at: number;
-  preview_file_id: string | null;
-  remote_file_id: string | null;
-  thumb_file_id?: string | null;
-  local_uri?: string | null;
-  filename?: string | null;
-  mime?: string | null;
-  duration?: number | null;
-  profile_id?: string | null;
-}
+};
 
 export async function getGeotagged(limit = 800): Promise<GeotaggedPhoto[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<any>(
-    `SELECT id, latitude, longitude, taken_at, preview_file_id, remote_file_id,
-            thumb_file_id, local_uri, filename, mime, duration, profile_id
+    `SELECT *
      FROM photos
      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
      AND status IN ('uploaded','local','failed')
