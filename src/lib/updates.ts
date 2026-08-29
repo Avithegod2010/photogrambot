@@ -7,6 +7,7 @@ import {
 } from "./db";
 import { getUpdates, type TgUpdate } from "./telegram";
 import { parseCaption } from "./caption";
+import { getChannelId } from "./settings";
 
 export interface UpdatesResult {
   processed: number;
@@ -26,11 +27,16 @@ export async function pollUpdates(): Promise<UpdatesResult> {
   let processed = 0;
   let newPhotos = 0;
   let backups = 0;
+  const channelId = await getChannelId();
   for (const u of updates) {
     processed++;
     offset = Math.max(offset, u.update_id + 1);
     const msg = u.channel_post ?? u.message;
     if (!msg) continue;
+    // getUpdates returns messages from every chat the bot can see; only
+    // ingest the configured channel so foreign chats can't collide with
+    // our message_id namespace.
+    if (channelId && String(msg.chat.id) !== channelId) continue;
     const parsed = parseCaption(msg.caption);
     if (parsed.isDbBackup) {
       backups++;
