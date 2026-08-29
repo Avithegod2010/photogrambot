@@ -65,6 +65,8 @@ function TabIcon({ glyph, color }: { glyph: string; color: string }) {
 
 function Tabs() {
   const theme = useTheme();
+  // Settings exposes bot/destination config — keep it out of a decoy session.
+  const showSettings = !isDecoyActive();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -94,11 +96,13 @@ function Tabs() {
         component={CollectionsScreen}
         options={{ title: "Collections", tabBarIcon: ({ color }) => <TabIcon glyph="☰" color={color} /> }}
       />
-      <Tab.Screen
-        name="SettingsTab"
-        component={SettingsScreen}
-        options={{ title: "Settings", tabBarIcon: ({ color }) => <TabIcon glyph="⚙" color={color} /> }}
-      />
+      {showSettings ? (
+        <Tab.Screen
+          name="SettingsTab"
+          component={SettingsScreen}
+          options={{ title: "Settings", tabBarIcon: ({ color }) => <TabIcon glyph="⚙" color={color} /> }}
+        />
+      ) : null}
     </Tab.Navigator>
   );
 }

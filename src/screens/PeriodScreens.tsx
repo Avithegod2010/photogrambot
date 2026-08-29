@@ -3,6 +3,7 @@ import { Dimensions, FlatList, Pressable, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { getMonthGroups, getYearGroups, type PeriodGroup } from "../lib/db";
+import { isDecoyActive } from "../lib/applock";
 import { TelegramImage } from "../components/TelegramImage";
 
 const MONTHS = [
@@ -101,6 +102,10 @@ export function MonthsOfYearScreen({
   const [groups, setGroups] = useState<PeriodGroup[]>([]);
 
   useEffect(() => {
+    if (isDecoyActive()) {
+      setGroups([]);
+      return;
+    }
     getMonthGroups(year).then(setGroups);
   }, [year]);
 
@@ -165,6 +170,11 @@ export function PeriodPhotosScreen({ route, navigation }: { route: any; navigati
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isDecoyActive()) {
+      setPhotos([]);
+      setLoading(false);
+      return;
+    }
     import("../lib/db")
       .then(({ getPhotosInRange }) => getPhotosInRange(startMs, endMs))
       .then(setPhotos)

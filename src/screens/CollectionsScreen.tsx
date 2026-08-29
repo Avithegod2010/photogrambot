@@ -86,6 +86,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             <Pressable
               style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
               onPress={() => navigation.navigate("Library", { filter: "local", title: "Local" })}
+              disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
                 <Text style={{ fontSize: 30 }}>📱</Text>
@@ -98,6 +99,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             <Pressable
               style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
               onPress={() => navigation.navigate("Library", { filter: "cloud", title: "Cloud" })}
+              disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
                 <Text style={{ fontSize: 30 }}>☁</Text>
@@ -114,6 +116,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             <Pressable
               style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
               onPress={() => navigation.navigate("Album", { albumId: -1, albumName: "Favorites" })}
+              disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
                 <Text style={{ fontSize: 30 }}>♥</Text>
@@ -309,6 +312,10 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
       });
       return;
     }
+    if (isDecoyActive()) {
+      setPhotos([]);
+      return;
+    }
     (async () => {
       if (albumId === -1) {
         setPhotos(favorites);
@@ -420,6 +427,11 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
 
   useFocusEffect(
     useCallback(() => {
+      if (isDecoyActive()) {
+        setPhotos([]);
+        setLoading(false);
+        return () => {};
+      }
       let alive = true;
       setLoading(true);
       void getPhotosByUploadStatus(filter === "cloud" ? "uploaded" : "local").then((rows) => {

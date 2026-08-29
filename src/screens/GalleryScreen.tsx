@@ -281,7 +281,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={[styles.appTitle, { color: theme.colors.onSurface }]}>PhotogramBot</Text>
-          {channelTitle ? (
+          {channelTitle && !decoy ? (
             <View
               style={[
                 styles.channelChip,
@@ -301,9 +301,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         >
           <Text style={{ fontSize: 18, color: theme.colors.onSurface }}>◉</Text>
         </Pressable>
-        <Pressable onPress={() => navigation.navigate("SettingsTab")} style={styles.gear}>
-          <Text style={{ fontSize: 20, color: theme.colors.onSurface }}>⚙</Text>
-        </Pressable>
+        {!decoy ? (
+          <Pressable onPress={() => navigation.navigate("SettingsTab")} style={styles.gear}>
+            <Text style={{ fontSize: 20, color: theme.colors.onSurface }}>⚙</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.viewSwitchRow}>
