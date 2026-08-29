@@ -16,7 +16,7 @@ This folder (`E:\Opencode CLI\Projects\photogram-bot`) is **PhotogramBot**, the 
    - widget files at root: `RandomPhotoWidget.tsx`, `widget-task-handler.tsx`, `widgetData.ts`
    - `app.config.ts` with android-widget plugin config
 3. **Secrets**: never commit bot tokens or channel ids into git; keep them in gitignored local config or expo-secure-store at runtime.
-4. Before coding, run `npm install` in THIS folder — node_modules was intentionally not copied here.
+4. Before coding, make sure `node_modules` exists — run `npm install` in THIS folder if it doesn't.
 5. Expo SDK 57: read exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
 
 ---
@@ -74,20 +74,16 @@ This folder (`E:\Opencode CLI\Projects\photogram-bot`) is **PhotogramBot**, the 
 | `GalleryScreen.tsx` | Main grid, date sections, search, filter sheet, selection bar |
 | `ViewerScreen.tsx` | Full-screen pager, zoom, video player, save/share/trash |
 | `CollectionsScreen.tsx` | Albums, Favorites, Trash tabs + Local/Cloud tiles |
-| `ViewerScreen.tsx` | Full-screen pager, zoom, video player, save/share/trash |
 | `SetupScreen.tsx` | Bot token + channel onboarding wizard |
 | `FolderSyncScreen.tsx` | Per-folder auto-sync toggles |
 | `LockScreen.tsx` | Biometric + PIN + decoy PIN entry |
 | `MapScreen.tsx` | Geotagged photo clusters |
-| `PeriodScreens.tsx` | Years / Months / Day grids |
+| `PeriodScreens.tsx` | Months-of-year / period photo grids (gallery jump lists cover Years) |
 | `MaintenanceScreen.tsx` | Duplicate finder, integrity check, restore-to-device |
 | `SettingsScreen.tsx` | All prefs, Destinations, backups, app lock, AI captions |
-| `SetupScreen.tsx` | Bot token + channel onboarding wizard |
-| `FolderSyncScreen.tsx` | Per-folder auto-sync toggles |
-| `MapScreen.tsx` | Geotagged photo clusters |
-| `PeriodScreens.tsx` | Years / Months / Day grids |
+| `DestinationsScreen.tsx` | Multi-destination profile manager (experimental) |
 
-### Widget (`modules/`)
+### Widget (repo root)
 | File | Purpose |
 |------|---------|
 | `RandomPhotoWidget.tsx` | Home screen widget (base64 image + tap deep link) |
@@ -130,6 +126,7 @@ This folder (`E:\Opencode CLI\Projects\photogram-bot`) is **PhotogramBot**, the 
 | 8 | Gallery/Viewer | Decoy search leak; viewer lazy-loads only focused page; debounced search with stale-response guard |
 | 9 | screens | Decoy leaks via Map + period views; Map's sparse photo rows |
 | 10 | config | Missing `READ_MEDIA_VIDEO` + `ACCESS_MEDIA_LOCATION` |
+| 11 | audit (new agent) | Decoy leaks closed: Collections Local/Cloud/Favorites tiles + `AlbumScreen`/`LibraryScreen` gates, Settings tab/gear hidden, channel-title chip hidden, period screens guarded; hash dedupe for >8 MB files (`HASH_RE`/`PART_RE` now accept `md5:<32hex>`); `getGeotagged` returns full photo rows (map favorite fix); upload-task hard timeout (600 s); non-JSON responses can't fake 401/404 (token-wipe hardening); poll filtered to configured channel; lock-flash race fixed; dead Years route removed |
 
 ---
 
@@ -141,9 +138,7 @@ This folder (`E:\Opencode CLI\Projects\photogram-bot`) is **PhotogramBot**, the 
 4. **Polish backlog** — upload notifications, search filters, storage chart, widget tap-through, decoy PIN, drag-select, charging-only uploads.
 5. Known deferred bits: OCR + face recognition (deliberately last), widget ignores per-profile tokens (default-profile photos only), topics need forum-enabled group + bot admin, Bot API can't download files >20 MB (oversize originals must be saved via the Telegram app — friendly error shown).
 
----
-
-## Device Verification Checklist (6 Flagged Items)
+> **2026-08-30:** Round 11 (independent audit) landed — see the fixes table. All fixes are code-verifiable only; the device verification round remains #1. Deliberately deferred in Round 11: PBKDF2/constant-time PIN hashing and secretbox KDF standardization (would invalidate existing PINs/backups without a migration layer).
 
 **Phase 0 — Fresh build (required)**
 > Old APKs won't work: `expo-video`, the share-intent Kotlin module, intent filters, `background-task`, `expo-network`, `expo-battery`, `expo-notifications` are all new native code.
