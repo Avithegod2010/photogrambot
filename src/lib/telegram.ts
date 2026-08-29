@@ -27,8 +27,11 @@ async function parseJsonResponse<T>(res: Response, fallbackMethod: string): Prom
     json = JSON.parse(await res.text()) as TgApiResult<T>;
   } catch {}
   if (!json) {
+    // Non-JSON body (captive portal, proxy garbage) must not carry an HTTP
+    // status that callers interpret — e.g. useSetupStore wipes the saved
+    // token on 401/404, which only a genuine Telegram JSON error may trigger.
     throw new TelegramError(
-      res.status || 0,
+      0,
       `Invalid Telegram response for ${fallbackMethod} (HTTP ${res.status})`
     );
   }
@@ -306,7 +309,21 @@ async function sendFileViaTask(
       signal: file.signal,
     });
     try {
-      const result = await task.uploadAsync();
+      // uploadAsync has no timeout — a stalled native upload would hang a
+      // queue worker forever. Race it against a hard timeout that cancels the
+      // task; retry-vs-FormData-fallback is decided by gotBytes below.
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const result = await Promise.race([
+        task.uploadAsync(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            task.cancel();
+            reject(new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s`));
+          }, UPLOAD_TIMEOUT_MS);
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
       return parseTgResult(result.body, result.status);
     } finally {
       task.release();
@@ -331,7 +348,7 @@ function parseTgResult<T>(body: string, status: number): T {
   try {
     json = JSON.parse(body) as TgApiResult<T>;
   } catch {}
-  if (!json) throw new TelegramError(status || 0, `Invalid Telegram response (HTTP ${status})`);
+  if (!json) throw new TelegramError(0, `Invalid Telegram response (HTTP ${status})`);
   if (!json.ok) {
     const ra = json.parameters?.retry_after;
     throw new TelegramError(
@@ -419,7 +436,7 @@ export async function sendMediaGroup(
         method: "POST",
         body: form,
       },
-      JSON_TIMEOUT_MS
+      UPLOAD_TIMEOUT_MS
     );
     return parseTgResult<TgMessage[]>(await res.text(), res.status);
   } catch (e) {
