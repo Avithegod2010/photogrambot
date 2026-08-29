@@ -19,7 +19,6 @@ import { ViewerScreen } from "./src/screens/ViewerScreen";
 import { FolderSyncScreen } from "./src/screens/FolderSyncScreen";
 import { LockScreen } from "./src/screens/LockScreen";
 import {
-  PeriodScreen,
   MonthsOfYearScreen,
   PeriodPhotosScreen,
 } from "./src/screens/PeriodScreens";
@@ -144,7 +143,6 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           <Stack.Screen name="Library" component={LibraryScreen} />
           <Stack.Screen name="FolderSync" component={FolderSyncScreen} />
           <Stack.Screen name="Map" component={MapScreen} options={{ presentation: "fullScreenModal" }} />
-          <Stack.Screen name="Years" component={(props: any) => <PeriodScreen {...props} mode="years" />} />
           <Stack.Screen name="MonthsOfYear" component={MonthsOfYearScreen} />
           <Stack.Screen name="PeriodPhotos" component={PeriodPhotosScreen} />
           <Stack.Screen name="Maintenance" component={MaintenanceScreen} />
@@ -206,6 +204,9 @@ export default function App() {
       await loadSettings();
       await ensureDeviceId();
       await initialize();
+      // Resolve the lock state from freshly loaded prefs BEFORE the first
+      // non-splash paint, or an app-locked device flashes the gallery a frame.
+      setLocked(useSettingsStore.getState().prefs.appLock);
       setInitialized(true);
     })();
   }, []);

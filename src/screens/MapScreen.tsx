@@ -105,14 +105,9 @@ export function MapScreen({ navigation }: { navigation: any }) {
           <Pressable
             style={[styles.viewBtn, { backgroundColor: theme.colors.primaryContainer }]}
             onPress={() => {
-              const full = selected.map((p) => ({
-                ...p,
-                thumb_file_id: p.thumb_file_id ?? null,
-                local_uri: p.local_uri ?? null,
-                status: "uploaded" as const,
-                favorite: 0,
-              }));
-              navigation.navigate("Viewer", { photos: full, index: 0 });
+              // Rows come from getGeotagged as complete photo rows — the
+              // viewer gets real favorite/status/camera/exif, no overrides.
+              navigation.navigate("Viewer", { photos: selected, index: 0 });
             }}
           >
             <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: "700" }}>
