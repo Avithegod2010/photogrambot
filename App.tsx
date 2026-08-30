@@ -30,6 +30,7 @@ import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
 import { getSharedMedia } from "./modules/share-intent";
 import { ShareTargetSheet } from "./src/components/ShareTargetSheet";
+import { PhotoFrameIcon, CloudIcon, SearchIcon } from "./src/components/icons";
 import { requestNotificationPermission } from "./src/lib/notify";
 import { setDecoyActive, isDecoyActive } from "./src/lib/applock";
 import {
@@ -58,14 +59,18 @@ async function openPhotoFromUrl(url: string | null): Promise<void> {
   } catch {}
 }
 
-function TabIcon({ glyph, color }: { glyph: string; color: string }) {
-  return <Text style={{ fontSize: 20, color, lineHeight: 24 }}>{glyph}</Text>;
+function CloudTab(props: any) {
+  // Telephoto-style Cloud tab — reuses LibraryScreen's uploaded-photo grid.
+  return (
+    <LibraryScreen
+      {...props}
+      route={{ ...props.route, params: { filter: "cloud", title: "Cloud", tab: true } }}
+    />
+  );
 }
 
 function Tabs() {
   const theme = useTheme();
-  // Settings exposes bot/destination config — keep it out of a decoy session.
-  const showSettings = !isDecoyActive();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -88,20 +93,18 @@ function Tabs() {
       <Tab.Screen
         name="GalleryTab"
         component={GalleryScreen}
-        options={{ title: "Gallery", tabBarIcon: ({ color }) => <TabIcon glyph="▦" color={color} /> }}
+        options={{ title: "Gallery", tabBarIcon: ({ color }) => <PhotoFrameIcon color={color} /> }}
+      />
+      <Tab.Screen
+        name="CloudTab"
+        component={CloudTab}
+        options={{ title: "Cloud", tabBarIcon: ({ color }) => <CloudIcon color={color} /> }}
       />
       <Tab.Screen
         name="CollectionsTab"
         component={CollectionsScreen}
-        options={{ title: "Collections", tabBarIcon: ({ color }) => <TabIcon glyph="☰" color={color} /> }}
+        options={{ title: "Collections", tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
       />
-      {showSettings ? (
-        <Tab.Screen
-          name="SettingsTab"
-          component={SettingsScreen}
-          options={{ title: "Settings", tabBarIcon: ({ color }) => <TabIcon glyph="⚙" color={color} /> }}
-        />
-      ) : null}
     </Tab.Navigator>
   );
 }
@@ -140,7 +143,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
             options={{ presentation: "fullScreenModal", animation: "fade" }}
           />
           <Stack.Screen name="Album" component={AlbumScreen} />
-          <Stack.Screen name="Library" component={LibraryScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="FolderSync" component={FolderSyncScreen} />
           <Stack.Screen name="Map" component={MapScreen} options={{ presentation: "fullScreenModal" }} />
           <Stack.Screen name="MonthsOfYear" component={MonthsOfYearScreen} />
