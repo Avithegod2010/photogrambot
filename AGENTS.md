@@ -127,6 +127,7 @@ This folder (`photogrambot`) is **PhotogramBot**, the Telegram Bot API version.
 | 9 | screens | Decoy leaks via Map + period views; Map's sparse photo rows |
 | 10 | config | Missing `READ_MEDIA_VIDEO` + `ACCESS_MEDIA_LOCATION` |
 | 11 | audit (new agent) | Decoy leaks closed: Collections Local/Cloud/Favorites tiles + `AlbumScreen`/`LibraryScreen` gates, Settings tab/gear hidden, channel-title chip hidden, period screens guarded; hash dedupe for >8 MB files (`HASH_RE`/`PART_RE` now accept `md5:<32hex>`); `getGeotagged` returns full photo rows (map favorite fix); upload-task hard timeout (600 s); non-JSON responses can't fake 401/404 (token-wipe hardening); poll filtered to configured channel; lock-flash race fixed; dead Years route removed |
+| 12 | device round 1 | **First real device build + test (Samsung SM-S942B, wireless adb)** — Phases 0–2 PASSED. Build fixes: reanimated pinned **4.5.1** (SDK 57 pairing with worklets 0.10.1); share-intent Kotlin module had never compiled (resolve launch intent via `appContext.currentActivity?.intent`). Runtime fixes: Material You crash — `PlatformColor` needs full `@android:color/…` paths (bare names crash `ColorPropConverter` natively), error → `?android:attr/colorError`; photo picker silently empty when media permission denied (now requests permission in-picker, shows denied/error states); cloud thumbnails never loaded — `getCachedTelegramFile` returns a `file://` URI but TelegramImage prepended a second one (`file://file:///…`), AND `Directory.create` needs `{ intermediates: true }` for nested `photogram/thumbs` on fresh installs. 3-per-row grid fix (sub-pixel rounding — floored tile math + margin in gallery/collections/cloud). UI rework per owner: Telephoto-style tabs (Gallery 🖼 / Cloud ☁ / Collections 🔍 via `react-native-svg`, no icon fonts), Settings OFF the tab bar (gallery gear only, SVG gear), Collections Library tiles removed, Gallery tab now mirrors the phone's local roll (cloud-badged) and the ＋ upload button was removed — backups flow via auto-sync / camera-watch / "Sync full gallery now" / share-target |
 
 ---
 
@@ -139,6 +140,12 @@ This folder (`photogrambot`) is **PhotogramBot**, the Telegram Bot API version.
 5. Known deferred bits: OCR + face recognition (deliberately last), widget ignores per-profile tokens (default-profile photos only), topics need forum-enabled group + bot admin, Bot API can't download files >20 MB (oversize originals must be saved via the Telegram app — friendly error shown).
 
 > **2026-08-30:** Round 11 (independent audit) landed — see the fixes table. All fixes are code-verifiable only; the device verification round remains #1. Deliberately deferred in Round 11: PBKDF2/constant-time PIN hashing and secretbox KDF standardization (would invalidate existing PINs/backups without a migration layer).
+
+> **2026-08-31:** Device verification round 1 done — **Phases 0–2 PASS on real hardware** (see checklist status note + Round 12 fixes). UI reworked to the owner's Telephoto-style spec: Gallery tab = local phone roll (cloud-badged), Cloud tab = backed-up library, Collections = albums/favorites/trash, Settings reachable via gallery gear only, ＋ upload button removed. **The app has never been used more than one session — keep walking Phases 3–9 before adding features.** Roadmap priority order below is unchanged otherwise.
+
+## Device Verification Checklist
+
+> **2026-08-31 — device round 1 COMPLETE for Phases 0–2** (Samsung SM-S942B, wireless adb, debug build): fresh build ✅, launches past splash ✅ (getDb race fix validated), setup flow ✅ (bot `@Photogramtestingbot`, channel "Photogram"), 4 photo uploads ✅ (preview + original + metadata caption in channel), offline token retention ✅, Material You theming ✅, picker ✅ (after permissions), new tab UI ✅, local-roll gallery ✅, cloud thumbnails ✅ (4 JPEGs verified in app cache). **Continue at Phase 3.** The phone has a secure lock — adb cannot dismiss the keyguard; ask the owner to unlock it.
 
 **Phase 0 — Fresh build (required)**
 > Old APKs won't work: `expo-video`, the share-intent Kotlin module, intent filters, `background-task`, `expo-network`, `expo-battery`, `expo-notifications` are all new native code.
@@ -153,11 +160,10 @@ npx expo run:android
 - [ ] Paste bot token → Verify → Detect channel (or paste `-100…` ID) → gallery appears
 - [ ] **Offline test** ⚠ *(Round 7)*: force-stop app → airplane mode ON → relaunch → should still reach the gallery, token **not** wiped
 
-**Phase 2 — Core photo uploads**
-- [ ] Tap **+** → picker shows photos; pick 2–3 → upload → banner shows progress + %
-- [ ] Channel check: compressed preview photo (`[Preview …] #hash:`) **+** original document with full metadata caption
-- [ ] Uploaded tiles get the ✓ cloud badge bottom-right
-- [ ] Picker shows ☁ on already-backed-up items; re-upload one → marked duplicate, not re-uploaded
+**Phase 2 — Core photo uploads** *(2026-08-31: PASSED. The ＋ button no longer exists — uploads flow via auto-sync, camera-watch, "Sync full gallery now" in Settings, or share-target. The old picker flow below still applies to the auto-sync pipeline)*
+- [x] Channel check: compressed preview photo (`[Preview …] #hash:`) **+** original document with full metadata caption
+- [x] Uploaded tiles get the ✓ cloud badge bottom-right (Gallery local roll + Cloud tab)
+- [ ] Re-upload of an identical item is marked duplicate, not re-uploaded
 
 **Phase 3 — Auto-sync & camera watch**
 - [ ] Settings → **Auto sync** ON → take a photo with the camera → uploads within ~10 s (camera watch)
@@ -202,6 +208,22 @@ npx expo run:android
 
 ---
 
+## Device & Build Environment (learned 2026-08-31 — read before building)
+
+| Thing | Value |
+|-------|-------|
+| JDK | `<jdk-17>` — export `JAVA_HOME` before any Gradle build (system PATH has only Java 8) |
+| Android SDK | `<android-sdk>` (`ANDROID_HOME` already set); `adb` on PATH |
+| Node | `<nodejs>` (v24) on PATH |
+| Test device | Samsung SM-S942B (Galaxy S25 Ultra) over **wireless adb** — serial is an mDNS name with spaces; `npx expo run:android` cannot parse it and dies at device detection |
+| Build+install flow | `cd android && ./gradlew assembleDebug` (JDK 17 env), then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. First build took ~3 h; incremental ≈ 5 min |
+| Metro | **Port 8081 = this project. Port 8083 = sibling TDLib project's Metro — loading our app from 8083 fails with "TdLibModule not linked".** Stable launcher: `<metro-launcher.cmd>` (starts detached). Run `adb reverse tcp:8081 tcp:8081` after every wireless-adb reconnect, then launch `photogrambot://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081` |
+| Metro pitfalls | A zombie process holding 8081 answers `/status` but serves **stale bundles** (`netstat -ano \| findstr :8081`, kill the PID). CI mode (`CI=1`) never re-reads changed files (metro-file-map persisted cache) — only fresh watch mode is correct. If watch mode dies with "Failed to start watch mode", delete `%TEMP%\metro-cache` and `%TEMP%\metro-file-map-expo-*` and restart (fresh crawl takes ~7 min behind Defender) |
+| Dev client | PhotogramBot debug build IS the dev client. If it shows "problem loading" / "crashed last time", check Metro first, then retry; the launcher's server list entry also works |
+| Device quirks | Secure lock — adb cannot dismiss keyguard, ask the owner to unlock. Screen timeout was extended to 10 min for testing. UI dumps via `uiautomator dump` + `run-as com.photogrambot.app` for app-private files |
+
+---
+
 ## How to Run / Test
 
 ```bash
@@ -237,10 +259,10 @@ Follow the checklist above in order. Report back especially on the **6 ⚠ items
 
 ---
 
-## Next Up (saved 2026-08-25 — give this list back to the owner when they return)
+## Next Up (updated 2026-08-31 — give this list back to the owner when they return)
 
-1. **Device verification round (do first)** — 6+ native features shipped untested (expo-video, share-intent Kotlin module + intent filters, background-task, expo-network, multi-destination). Needs fresh `npx expo run:android` build, then smoke-test: photo/video upload, share-target from another app, Destinations screen, encrypted backup round-trip, background sync trigger. Owner asked for a step-by-step checklist.
-2. **Remote control via bot commands** — last major roadmap feature: `/status`, `/sync`, `/pause`, remote-delete → trash via existing `pollUpdates` (src/lib/updates.ts) infra.
-3. **Release kit** — versionCode discipline, in-app updater, release build config (owner wants public release).
-4. **Polish backlog** — upload notifications, search filters, storage chart, widget tap-through, decoy PIN, drag-select, charging-only uploads.
-5. Known deferred bits: OCR + face recognition (deliberately last), widget ignores per-profile tokens (default-profile photos only), topics need forum-enabled group + bot admin, Bot API can't download files >20 MB (oversize originals must be saved via the Telegram app — friendly error shown).
+1. **Continue the device checklist at Phase 3 (do first)** — auto-sync + camera watch, then Phase 4 video beta (⚠ review flag *a*: duration units; flag *e*: >50 MB split + restore round-trip), Phase 5 share-target, Phase 6 security/decoy **against the new UI** (decoy now also hides the gallery gear, Cloud/Collections are gated), Phase 7 multi-destination, Phase 8 widget/map/filters/chart, Phase 9 encrypted-backup round-trip (⚠ flag *d*).
+2. **Remote control via bot commands** — `/status`, `/sync`, `/pause`, remote-delete → trash via `pollUpdates` (src/lib/updates.ts — now chat-filtered, good foundation).
+3. **Release kit** — versionCode discipline, release build config, in-app updater (owner wants public release). Note the debug build is 281 MB; a release build needs signing config + shrinker pass before any public claim.
+4. **Polish backlog** — local-roll paging (currently capped at 2000/2400 MediaLibrary assets), staggered layout for the local grid, selection flows (albums/trash) currently only reachable via search results / Cloud tab — decide UX, widget tap-through, storage chart.
+5. Known deferred bits: PBKDF2/constant-time PIN compare + secretbox KDF standardization (need a migration layer), OCR + face recognition (last), widget ignores per-profile tokens, topics need forum-enabled group + bot admin, Bot API can't download >20 MB files.
