@@ -93,13 +93,19 @@ export const lightTheme: AppTheme = { mode: "light", dynamic: false, colors: sta
 
 const isAndroid12 = Platform.OS === "android" && Number(Platform.Version) >= 31;
 
+// RN resolves resource_paths only for strings starting with '@' or '?' —
+// a bare name crashes natively in ColorPropConverter ("None of the paths
+// … resolved to a color resource"), so always pass a full resource path.
+// A JS try/catch can't help: the failure happens at native render time.
 function sys(name: string, fallback: ColorValue): ColorValue {
   if (!isAndroid12) return fallback;
-  try {
-    return PlatformColor(name);
-  } catch {
-    return fallback;
-  }
+  return PlatformColor(`@android:color/${name}`);
+}
+
+// system_error has no @android:color resource — the attr is colorError.
+function sysAttr(name: string, fallback: ColorValue): ColorValue {
+  if (!isAndroid12) return fallback;
+  return PlatformColor(`?android:attr/${name}`);
 }
 
 export function dynamicDarkTheme(): AppTheme {
@@ -122,7 +128,7 @@ export function dynamicDarkTheme(): AppTheme {
       surfaceVariant: sys("system_neutral2_700", staticDarkColors.surfaceVariant),
       onSurface: sys("system_neutral1_100", staticDarkColors.onSurface),
       onSurfaceVariant: sys("system_neutral2_300", staticDarkColors.onSurfaceVariant),
-      error: sys("system_error", staticDarkColors.error),
+      error: sysAttr("colorError", staticDarkColors.error),
       onError: staticDarkColors.onError,
       errorContainer: staticDarkColors.errorContainer,
       scrim: "rgba(0,0,0,0.6)",
@@ -152,7 +158,7 @@ export function dynamicLightTheme(): AppTheme {
       surfaceVariant: sys("system_neutral2_100", staticLightColors.surfaceVariant),
       onSurface: sys("system_neutral1_900", staticLightColors.onSurface),
       onSurfaceVariant: sys("system_neutral2_600", staticLightColors.onSurfaceVariant),
-      error: sys("system_error", staticLightColors.error),
+      error: sysAttr("colorError", staticLightColors.error),
       onError: staticLightColors.onError,
       errorContainer: staticLightColors.errorContainer,
       scrim: "rgba(0,0,0,0.4)",
