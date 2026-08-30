@@ -5,13 +5,15 @@ import { downloadFile } from "./telegram";
 
 function cacheDir(): Directory {
   const dir = new Directory(Paths.cache, "photogram");
-  if (!dir.exists) dir.create();
+  // intermediates: on a fresh install cache/ has no photogram/ yet — a plain
+  // create() throws and every thumbnail download fails silently.
+  if (!dir.exists) dir.create({ intermediates: true });
   return dir;
 }
 
 function thumbDir(): Directory {
   const dir = new Directory(Paths.cache, "photogram/thumbs");
-  if (!dir.exists) dir.create();
+  if (!dir.exists) dir.create({ intermediates: true });
   return dir;
 }
 
