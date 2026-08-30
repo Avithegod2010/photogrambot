@@ -24,8 +24,7 @@ import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
 import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
-import { getUploadedLocalIds, getMonthlyBuckets, type MonthBucket, type SearchFilters } from "../lib/db";
-import { enqueueUploads, processQueue } from "../lib/uploader";
+import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
@@ -37,6 +36,8 @@ import { shareMedia } from "../../modules/share-intent";
 import { Button, Dialog, TextField } from "../components/ui";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
+
+type LocalItem = { id: string; taken_at: number; asset: MediaLibrary.AssetMetadata };
 
 const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
@@ -57,26 +58,72 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [filters, setFilters] = useState<SearchFilters | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [pickerVisible, setPickerVisible] = useState(false);
   const [albumDialogVisible, setAlbumDialogVisible] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
   const { albums, newAlbum, addPhotosToAlbum } = useLibraryStore();
   const staggered = useSettingsStore((s) => s.prefs.staggeredGrid);
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
+  // The Gallery tab mirrors the phone's own gallery: every local asset, with
+  // a cloud badge on whatever is already backed up. Search/months/years
+  // operate on the backed-up (DB) library.
+  const [localAssets, setLocalAssets] = useState<LocalItem[]>([]);
+  const [localLoading, setLocalLoading] = useState(true);
+  const [uploadedIds, setUploadedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     void loadInitial();
+    void loadLocal();
     return subscribe();
   }, []);
 
+  useEffect(() => {
+    if (decoy) {
+      setUploadedIds(new Set());
+      return;
+    }
+    void getUploadedLocalIds().then(setUploadedIds);
+  }, [photos, decoy]);
+
+  async function loadLocal() {
+    if (decoy) {
+      setLocalAssets([]);
+      setLocalLoading(false);
+      return;
+    }
+    try {
+      const includeVideos = useSettingsStore.getState().prefs.includeVideos;
+      let metas = await new MediaLibrary.Query()
+        .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+        .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
+        .limit(2000)
+        .exeForMetadata();
+      if (includeVideos) {
+        const all = await new MediaLibrary.Query()
+          .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
+          .limit(2400)
+          .exeForMetadata();
+        metas = all.filter(isWantedPickerMedia);
+      }
+      setLocalAssets(metas.map((a) => ({ id: a.id, taken_at: a.creationTime ?? 0, asset: a })));
+    } catch {
+      setLocalAssets([]);
+    }
+    setLocalLoading(false);
+  }
+
   const sections = useMemo(() => {
-    const source = decoy ? [] : searchResults ?? photos;
+    const source = decoy ? [] : searchResults ?? [];
     return groupPhotosByDate(source).map((g) => ({
       label: g.label,
       data: g.items,
     }));
-  }, [photos, searchResults, decoy]);
+  }, [searchResults, decoy]);
+
+  const localSections = useMemo(() => {
+    if (decoy) return [];
+    return groupPhotosByDate(localAssets).map((g) => ({ label: g.label, data: g.items }));
+  }, [localAssets, decoy]);
 
   const tile = (Dimensions.get("window").width - 4) / COLUMNS;
 
@@ -100,6 +147,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   async function onRefresh() {
     setRefreshing(true);
     await refresh();
+    await loadLocal();
     setRefreshing(false);
   }
 
@@ -278,6 +326,79 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     );
   }
 
+  async function onLocalPress(item: LocalItem) {
+    // Backed-up assets open their real DB row; local-only ones open a
+    // lightweight viewer entry straight from the device file.
+    const dbPhoto = uploadedIds.has(item.id) ? await getPhotoByLocalId(item.id) : null;
+    if (dbPhoto) {
+      navigation.navigate("Viewer", { photos: [dbPhoto], index: 0 });
+      return;
+    }
+    const a = item.asset;
+    let uri: string | null = null;
+    try {
+      uri = await new MediaLibrary.Asset(a.id).getUri();
+    } catch {}
+    const photo: PhotoRow = {
+      id: `local_${a.id}`,
+      local_id: a.id,
+      local_uri: uri,
+      remote_file_id: null,
+      preview_file_id: null,
+      thumb_file_id: null,
+      message_id: null,
+      preview_message_id: null,
+      filename: a.filename ?? "photo.jpg",
+      folder: null,
+      width: a.width ?? null,
+      height: a.height ?? null,
+      size: null,
+      mime: a.mediaType === MediaLibrary.MediaType.VIDEO ? "video/mp4" : "image/jpeg",
+      taken_at: a.creationTime ?? 0,
+      added_at: a.creationTime ?? 0,
+      uploaded_at: null,
+      remote_date: null,
+      content_hash: null,
+      device: null,
+      camera: null,
+      tags: null,
+      latitude: null,
+      longitude: null,
+      exif: null,
+      ai_caption: null,
+      duration: a.duration ? a.duration * 1000 : null,
+      parts: null,
+      profile_id: null,
+      favorite: 0,
+      status: "local",
+      error: null,
+      upload_type: null,
+    };
+    navigation.navigate("Viewer", { photos: [photo], index: 0 });
+  }
+
+  function renderLocalTile(item: LocalItem, width?: number, height?: number) {
+    const backedUp = uploadedIds.has(item.id);
+    const a = item.asset;
+    const w = width ?? tile;
+    const h = height ?? tile;
+    return (
+      <Pressable onPress={() => void onLocalPress(item)} style={{ width: w, height: h }}>
+        <LocalThumb assetId={a.id} />
+        {a.mediaType === MediaLibrary.MediaType.VIDEO ? (
+          <View style={styles.videoBadge}>
+            <Text style={styles.videoBadgeText}>▶ {formatDuration(a.duration)}</Text>
+          </View>
+        ) : null}
+        {backedUp ? (
+          <View style={[styles.cloudBadge, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Text style={[styles.cloudBadgeText, { color: theme.colors.onPrimaryContainer }]}>✓</Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -389,13 +510,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         <View style={styles.empty}>
           <Text style={{ color: theme.colors.onSurfaceVariant }}>No results for “{search}”</Text>
         </View>
-      ) : viewMode !== "days" ? (
-        <PeriodJumpList
-          mode={viewMode}
-          navigation={navigation}
-          theme={theme}
-        />
-      ) : (
+      ) : searchResults ? (
         <FlatList
           data={sections}
           keyExtractor={(s) => s.label}
@@ -451,9 +566,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                 <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>
                   No photos yet
                 </Text>
-                <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-                  Tap + to back up photos from this device to your channel.
-                </Text>
+            <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
+              Nothing backed up yet. New photos back up automatically when Auto sync is on in Settings, or share photos to PhotogramBot from any app.
+            </Text>
               </View>
             )
           }
@@ -461,6 +576,49 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             loadingMore ? (
               <ActivityIndicator style={{ marginVertical: 16 }} color={theme.colors.primary} />
             ) : null
+          }
+        />
+      ) : viewMode !== "days" ? (
+        <PeriodJumpList mode={viewMode} navigation={navigation} theme={theme} />
+      ) : (
+        <FlatList
+          data={localSections}
+          keyExtractor={(s) => s.label}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
+          }
+          contentContainerStyle={{ paddingBottom: 120 }}
+          ListHeaderComponent={
+            !decoy ? (
+              <View>
+                <OverviewCard theme={theme} stats={stats} />
+                <MemoriesCarousel navigation={navigation} />
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <View>
+              <View style={styles.dateHeaderRow}>
+                <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                  {item.label}
+                </Text>
+              </View>
+              <SectionGrid photos={item.data} staggered={false} renderTile={renderLocalTile} />
+            </View>
+          )}
+          ListEmptyComponent={
+            localLoading ? (
+              <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
+            ) : (
+              <View style={styles.empty}>
+                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>
+                  Nothing here yet
+                </Text>
+                <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
+                  Photos from this device appear here. New photos back up automatically when Auto sync is on in Settings.
+                </Text>
+              </View>
+            )
           }
         />
       )}
@@ -500,26 +658,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             <Text style={{ color: theme.colors.onSurfaceVariant }}>Cancel</Text>
           </Pressable>
         </View>
-      ) : (
-        !searchResults &&
-        !decoy && (
-          <Pressable
-            style={[
-              styles.fab,
-              { backgroundColor: theme.colors.primaryContainer, bottom: insets.bottom + 16 },
-            ]}
-            onPress={() => setPickerVisible(true)}
-          >
-            <Text style={[styles.fabText, { color: theme.colors.onPrimaryContainer }]}>＋</Text>
-          </Pressable>
-        )
-      )}
-
-      <LocalPickerSheet
-        visible={pickerVisible}
-        theme={theme}
-        onClose={() => setPickerVisible(false)}
-      />
+      ) : null}
 
       <FilterSheet
         visible={filterSheetVisible}
@@ -779,258 +918,14 @@ function FilterSheet({
   );
 }
 
-function LocalPickerSheet({
-  visible,
-  theme,
-  onClose,
-}: {
-  visible: boolean;
-  theme: ReturnType<typeof useTheme>;
-  onClose: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  const [assets, setAssets] = useState<MediaLibrary.AssetMetadata[]>([]);
-  const [backedUp, setBackedUp] = useState<Set<string>>(new Set());
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [confirmVisible, setConfirmVisible] = useState(false);
-  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
-  const [destId, setDestId] = useState<string | null>(null);
-  const multiDest = useSettingsStore((s) => s.prefs.multiDestination);
-  const [permDenied, setPermDenied] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (multiDest) {
-      void listProfiles().then((ps) => setProfiles(ps.map((p) => ({ id: p.id, name: p.name }))));
-    }
-  }, [visible, multiDest]);
-
-  useEffect(() => {
-    if (!visible) return;
-    setLoading(true);
-    setPicked(new Set());
-    setPermDenied(false);
-    setLoadError(null);
-    (async () => {
-      try {
-        // A denied permission used to render as a silently empty grid — ask
-        // for it here and surface the denied state instead.
-        let perm = await MediaLibrary.getPermissionsAsync();
-        if (!perm.granted && perm.canAskAgain) {
-          perm = await MediaLibrary.requestPermissionsAsync(false, ["photo", "video"]);
-        }
-        if (!perm.granted) {
-          setPermDenied(true);
-          setLoading(false);
-          return;
-        }
-        const includeVideos = useSettingsStore.getState().prefs.includeVideos;
-        let metas = await new MediaLibrary.Query()
-          .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
-          .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
-          .limit(600)
-          .exeForMetadata();
-        if (includeVideos) {
-          const all = await new MediaLibrary.Query()
-            .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
-            .limit(900)
-            .exeForMetadata();
-          metas = all.filter((m) => isWantedPickerMedia(m));
-        }
-        const ids = await getUploadedLocalIds();
-        setAssets(metas);
-        setBackedUp(ids);
-      } catch (e: any) {
-        setLoadError(e?.message ?? "Could not load your photos");
-      }
-      setLoading(false);
-    })();
-  }, [visible]);
-
-  const pickedMetas = assets.filter((a) => picked.has(a.id));
-  const dupeCount = pickedMetas.filter((a) => backedUp.has(a.id)).length;
-
-  async function onUpload() {
-    if (dupeCount > 0) {
-      setConfirmVisible(true);
-      return;
-    }
-    await doUpload();
-  }
-
-  async function doUpload() {
-    setConfirmVisible(false);
-    const items = pickedMetas.map((a) => ({
-      local_id: a.id,
-      filename: a.filename ?? `photo_${a.id}`,
-      folder: null,
-      size: null,
-      width: a.width,
-      height: a.height,
-      taken_at: a.creationTime ?? 0,
-      added_at: a.modificationTime ?? a.creationTime ?? 0,
-    }));
-    const n = await enqueueUploads(items, "manual", destId);
-    onClose();
-    if (n > 0) void processQueue();
-  }
-
-  const tile = (Dimensions.get("window").width - 4) / 4;
-
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.sheet, { backgroundColor: theme.colors.background }]}>
-        <View style={[styles.sheetHeader, { paddingTop: insets.top + 8 }]}>
-          <Pressable onPress={onClose}>
-            <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
-          </Pressable>
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 16 }}>
-            Select photos
-          </Text>
-          <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>
-            {picked.size}
-          </Text>
-        </View>
-        {loading ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} />
-        ) : permDenied ? (
-          <View style={{ alignItems: "center", justifyContent: "center", flex: 1, padding: 32 }}>
-            <Text style={{ fontSize: 40, marginBottom: 10 }}>📷</Text>
-            <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 6 }}>
-              Photo access needed
-            </Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: "center", marginBottom: 16 }}>
-              Allow "Photos and videos" for PhotogramBot so the picker can show your gallery.
-            </Text>
-            <Button title="Open app settings" theme={theme} onPress={() => void Linking.openSettings()} />
-          </View>
-        ) : loadError ? (
-          <Text style={{ textAlign: "center", padding: 24, color: theme.colors.error }}>
-            {loadError}
-          </Text>
-        ) : (
-          <FlatList
-            data={assets}
-            numColumns={4}
-            keyExtractor={(a) => a.id}
-            contentContainerStyle={{ paddingBottom: 120 }}
-            renderItem={({ item }) => {
-              const isPicked = picked.has(item.id);
-              const isDupe = backedUp.has(item.id);
-              return (
-                <Pressable
-                  style={{ width: tile, height: tile, padding: 1 }}
-                  onPress={() => {
-                    const next = new Set(picked);
-                    if (next.has(item.id)) next.delete(item.id);
-                    else next.add(item.id);
-                    setPicked(next);
-                  }}
-                >
-                  <LocalThumb assetId={item.id} />
-                  {item.mediaType === MediaLibrary.MediaType.VIDEO ? (
-                    <View style={styles.videoBadge}>
-                      <Text style={styles.videoBadgeText}>
-                        ▶ {formatDuration(item.duration)}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {isDupe ? (
-                    <View style={[styles.dupeBadge, { backgroundColor: theme.colors.primaryContainer }]}>
-                      <Text style={{ fontSize: 10, color: theme.colors.onPrimaryContainer }}>☁</Text>
-                    </View>
-                  ) : null}
-                  {isPicked ? (
-                    <View style={[styles.pickedOverlay, { borderColor: theme.colors.primary }]}>
-                      <View style={[styles.checkbox, { backgroundColor: theme.colors.primary }]}>
-                        <Text style={{ color: theme.colors.onPrimary, fontSize: 11, fontWeight: "800" }}>
-                          ✓
-                        </Text>
-                      </View>
-                    </View>
-                  ) : null}
-                </Pressable>
-              );
-            }}
-          />
-        )}
-        <View
-          style={[
-            styles.sheetFooter,
-            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 12 },
-          ]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
-              {dupeCount > 0 ? `${dupeCount} already backed up` : "Photos upload as original quality"}
-            </Text>
-            {multiDest && profiles.length > 0 ? (
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                {profiles.map((p) => (
-                  <Pressable
-                    key={p.id}
-                    onPress={() => setDestId(destId === p.id ? null : p.id)}
-                    style={[
-                      styles.destChip,
-                      {
-                        backgroundColor:
-                          destId === p.id ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        color: destId === p.id ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
-                        fontSize: 11,
-                        fontWeight: "600",
-                      }}
-                    >
-                      {p.name}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-          </View>
-          <Button
-            title={picked.size > 0 ? `Upload ${picked.size}` : "Upload"}
-            theme={theme}
-            disabled={picked.size === 0}
-            onPress={onUpload}
-          />
-        </View>
-      </View>
-
-      <Dialog
-        visible={confirmVisible}
-        theme={theme}
-        title="Already backed up"
-        message={`${dupeCount} of the selected photos are already in your channel. Upload them again anyway?`}
-      >
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <Button
-            title="Cancel"
-            theme={theme}
-            variant="text"
-            onPress={() => setConfirmVisible(false)}
-          />
-          <Button title="Upload anyway" theme={theme} onPress={doUpload} />
-        </View>
-      </Dialog>
-    </Modal>
-  );
-}
-
-function SectionGrid({
+function SectionGrid<T extends { id: string; width?: number | null; height?: number | null }>({
   photos,
   staggered,
   renderTile,
 }: {
-  photos: PhotoRow[];
+  photos: T[];
   staggered: boolean;
-  renderTile: (p: PhotoRow, w?: number, h?: number) => React.ReactNode;
+  renderTile: (p: T, w?: number, h?: number) => React.ReactNode;
 }) {
   if (!staggered) {
     return (
@@ -1047,7 +942,7 @@ function SectionGrid({
       p.width && p.height ? p.height / p.width : 1;
     return Math.max(colW * 0.6, Math.min(colW * 1.8, colW * aspect));
   });
-  const columns: { p: PhotoRow; h: number }[][] = Array.from(
+  const columns: { p: T; h: number }[][] = Array.from(
     { length: COLUMNS },
     () => []
   );
