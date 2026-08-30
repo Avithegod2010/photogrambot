@@ -42,3 +42,6 @@ tdlib.secrets.json
 # generated native folders
 /ios
 /android
+
+# Local module build output
+modules/*/android/build/
