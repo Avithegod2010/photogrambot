@@ -14,7 +14,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getLibraryCounts, getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
 import { unlockHiddenAlbum } from "../lib/biometrics";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
@@ -27,18 +27,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [tab, setTab] = useState<"albums" | "trash">("albums");
   const [newAlbumVisible, setNewAlbumVisible] = useState(false);
   const [albumName, setAlbumName] = useState("");
-  const [counts, setCounts] = useState({ local: 0, cloud: 0 });
   const decoy = isDecoyActive();
-
-  useFocusEffect(
-    useCallback(() => {
-      if (isDecoyActive()) {
-        setCounts({ local: 0, cloud: 0 });
-        return;
-      }
-      void getLibraryCounts().then(setCounts);
-    }, [])
-  );
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
   const visibleAlbums = decoy ? [] : albums;
@@ -81,36 +70,6 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
       {tab === "albums" ? (
         <ScrollView contentContainerStyle={styles.scroll}>
-          <SectionLabel text="Library" theme={theme} />
-          <View style={styles.albumGrid}>
-            <Pressable
-              style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
-              onPress={() => navigation.navigate("Library", { filter: "local", title: "Local" })}
-              disabled={decoy}
-            >
-              <View style={styles.albumTilePlaceholder}>
-                <Text style={{ fontSize: 30 }}>📱</Text>
-              </View>
-              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Local</Text>
-              <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                {counts.local} not backed up
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
-              onPress={() => navigation.navigate("Library", { filter: "cloud", title: "Cloud" })}
-              disabled={decoy}
-            >
-              <View style={styles.albumTilePlaceholder}>
-                <Text style={{ fontSize: 30 }}>☁</Text>
-              </View>
-              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Cloud</Text>
-              <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                {counts.cloud} backed up
-              </Text>
-            </Pressable>
-          </View>
-
           <SectionLabel text="Smart collections" theme={theme} />
           <View style={styles.albumGrid}>
             <Pressable
@@ -450,9 +409,11 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
+        {route.params?.tab ? null : (
+          <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+            <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
+          </Pressable>
+        )}
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {title}
         </Text>
