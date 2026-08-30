@@ -1,0 +1,77 @@
+import React from "react";
+import Svg, { Circle, Path, Rect } from "react-native-svg";
+
+// Clean line/filled icons for the tab bar and headers — drawn inline so the
+// app needs no icon-font dependency. All icons: 24x24 viewBox, `color` prop.
+
+export function PhotoFrameIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="3" y="4" width="18" height="16" rx="3" stroke={color} strokeWidth="2" />
+      <Circle cx="8.7" cy="9.3" r="1.7" fill={color} />
+      <Path
+        d="M4.6 17.6l3.9-3.9a1.4 1.4 0 0 1 1.98 0l2.32 2.32 2.62-2.62a1.4 1.4 0 0 1 1.98 0l2.02 2.02"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function CloudIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6.6 18.5a4.1 4.1 0 0 1-.5-8.17 5.9 5.9 0 0 1 11.5-1.16A4.35 4.35 0 0 1 16.9 18.5H6.6z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
+export function CloudUploadIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6.6 15.5a4.1 4.1 0 0 1-.5-8.17 5.9 5.9 0 0 1 11.5-1.16A4.35 4.35 0 0 1 16.9 15.5H6.6z"
+        fill={color}
+      />
+      <Path
+        d="M12 17.2v4.3M9.9 19.2l2.1-2.1 2.1 2.1"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function SearchIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="10.8" cy="10.8" r="6.3" stroke={color} strokeWidth="2" />
+      <Path
+        d="M15.6 15.6L20.2 20.2"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function GearIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"
+        fill={color}
+      />
+    </Svg>
+  );
+}

@@ -29,6 +29,7 @@ import { enqueueUploads, processQueue } from "../lib/uploader";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
+import { GearIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto, listProfiles } from "../lib/destinations";
@@ -303,8 +304,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <Text style={{ fontSize: 18, color: theme.colors.onSurface }}>◉</Text>
         </Pressable>
         {!decoy ? (
-          <Pressable onPress={() => navigation.navigate("SettingsTab")} style={styles.gear}>
-            <Text style={{ fontSize: 20, color: theme.colors.onSurface }}>⚙</Text>
+          <Pressable onPress={() => navigation.navigate("Settings")} style={styles.gear}>
+            <GearIcon
+              color={typeof theme.colors.onSurface === "string" ? theme.colors.onSurface : "#E4E2EA"}
+              size={22}
+            />
           </Pressable>
         ) : null}
       </View>
