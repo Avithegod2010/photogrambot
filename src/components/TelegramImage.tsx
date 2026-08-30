@@ -36,7 +36,9 @@ export function TelegramImage({
       try {
         const token = profileId ? await tokenForPhoto({ profile_id: profileId }) : null;
         const p = await getCachedTelegramFile(fileId, "jpg", token);
-        if (alive) setUri(`file://${p}`);
+        // getCachedTelegramFile already returns an absolute file:// URI —
+        // prepending another yields "file://file:///…" which never loads.
+        if (alive) setUri(p);
       } catch {
         if (alive) setFailed(true);
       }
