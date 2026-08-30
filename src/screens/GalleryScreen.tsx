@@ -5,6 +5,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -792,6 +793,8 @@ function LocalPickerSheet({
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
   const [destId, setDestId] = useState<string | null>(null);
   const multiDest = useSettingsStore((s) => s.prefs.multiDestination);
+  const [permDenied, setPermDenied] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -804,8 +807,21 @@ function LocalPickerSheet({
     if (!visible) return;
     setLoading(true);
     setPicked(new Set());
+    setPermDenied(false);
+    setLoadError(null);
     (async () => {
       try {
+        // A denied permission used to render as a silently empty grid — ask
+        // for it here and surface the denied state instead.
+        let perm = await MediaLibrary.getPermissionsAsync();
+        if (!perm.granted && perm.canAskAgain) {
+          perm = await MediaLibrary.requestPermissionsAsync(false, ["photo", "video"]);
+        }
+        if (!perm.granted) {
+          setPermDenied(true);
+          setLoading(false);
+          return;
+        }
         const includeVideos = useSettingsStore.getState().prefs.includeVideos;
         let metas = await new MediaLibrary.Query()
           .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
@@ -822,7 +838,9 @@ function LocalPickerSheet({
         const ids = await getUploadedLocalIds();
         setAssets(metas);
         setBackedUp(ids);
-      } catch {}
+      } catch (e: any) {
+        setLoadError(e?.message ?? "Could not load your photos");
+      }
       setLoading(false);
     })();
   }, [visible]);
@@ -873,6 +891,21 @@ function LocalPickerSheet({
         </View>
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} />
+        ) : permDenied ? (
+          <View style={{ alignItems: "center", justifyContent: "center", flex: 1, padding: 32 }}>
+            <Text style={{ fontSize: 40, marginBottom: 10 }}>📷</Text>
+            <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 6 }}>
+              Photo access needed
+            </Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: "center", marginBottom: 16 }}>
+              Allow "Photos and videos" for PhotogramBot so the picker can show your gallery.
+            </Text>
+            <Button title="Open app settings" theme={theme} onPress={() => void Linking.openSettings()} />
+          </View>
+        ) : loadError ? (
+          <Text style={{ textAlign: "center", padding: 24, color: theme.colors.error }}>
+            {loadError}
+          </Text>
         ) : (
           <FlatList
             data={assets}
