@@ -23,6 +23,7 @@ export function TelegramImage({
 
   useEffect(() => {
     let alive = true;
+    console.log("[thumb] effect", JSON.stringify({ fileId, localUri, profileId }));
     if (localUri) {
       setUri(localUri);
       return;
@@ -39,7 +40,8 @@ export function TelegramImage({
         // getCachedTelegramFile already returns an absolute file:// URI —
         // prepending another yields "file://file:///…" which never loads.
         if (alive) setUri(p);
-      } catch {
+      } catch (e: any) {
+        console.warn("[thumb] load failed", fileId, e?.message ?? e);
         if (alive) setFailed(true);
       }
     })();
