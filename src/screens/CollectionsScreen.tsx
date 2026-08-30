@@ -184,7 +184,7 @@ function TrashTab({
   trash: ReturnType<typeof useLibraryStore.getState>["trash"];
 }) {
   const { restorePhotos, deleteForever, emptyTrash } = useLibraryStore();
-  const tile = (Dimensions.get("window").width - 4) / 3;
+  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
 
   if (trash.length === 0) {
     return (
@@ -285,7 +285,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
     })();
   }, [albumId, favorites, unlocked, needsUnlock]);
 
-  const tile = (Dimensions.get("window").width - 4) / 3;
+  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
 
   if (!unlocked) {
     return <View style={[styles.container, { backgroundColor: theme.colors.background }]} />;
@@ -404,7 +404,7 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
     }, [filter])
   );
 
-  const tile = (Dimensions.get("window").width - 4) / 3;
+  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>

@@ -125,7 +125,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     return groupPhotosByDate(localAssets).map((g) => ({ label: g.label, data: g.items }));
   }, [localAssets, decoy]);
 
-  const tile = (Dimensions.get("window").width - 4) / COLUMNS;
+  // Floor + margin: three tiles must fit the wrap container even after the
+  // framework rounds fractional DP to whole pixels (2-per-row rounding bug).
+  const tile = Math.floor((Dimensions.get("window").width - 8) / COLUMNS);
 
   const onTilePress = useCallback(
     (photo: PhotoRow, index: number) => {
@@ -936,7 +938,7 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
       </View>
     );
   }
-  const colW = (Dimensions.get("window").width - 4) / COLUMNS;
+  const colW = Math.floor((Dimensions.get("window").width - 8) / COLUMNS);
   const heights = photos.map((p) => {
     const aspect =
       p.width && p.height ? p.height / p.width : 1;
