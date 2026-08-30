@@ -23,7 +23,6 @@ export function TelegramImage({
 
   useEffect(() => {
     let alive = true;
-    console.log("[thumb] effect", JSON.stringify({ fileId, localUri, profileId }));
     if (localUri) {
       setUri(localUri);
       return;
