@@ -2,6 +2,7 @@ package expo.modules.shareintent
 
 import android.content.Intent
 import android.net.Uri
+import com.facebook.react.bridge.ReactContext
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -13,7 +14,9 @@ class ShareIntentModule : Module() {
     Name("ShareIntent")
 
     OnCreate {
-      readIntent(appContext.reactContext?.intent)
+      // appContext.reactContext is typed Context? — the launch intent lives
+      // on the current Activity, reachable via the ReactContext cast.
+      readIntent((appContext.reactContext as? ReactContext)?.currentActivity?.intent)
     }
 
     OnNewIntent { intent ->
