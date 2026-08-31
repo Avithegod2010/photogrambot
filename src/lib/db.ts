@@ -693,6 +693,16 @@ export async function nextQueueBatch(limit: number): Promise<QueueRow[]> {
   return rows.map((r) => r as QueueRow);
 }
 
+export async function hasActiveQueuedUpload(localId: string): Promise<boolean> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM upload_queue
+     WHERE local_id = ? AND state IN ('pending','running')`,
+    [localId]
+  );
+  return (row?.n ?? 0) > 0;
+}
+
 export async function recoverStaleRunning(): Promise<void> {
   const d = await getDb();
   await d.runAsync(

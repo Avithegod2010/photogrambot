@@ -17,6 +17,7 @@ import { useLibraryStore } from "../store/useLibraryStore";
 import { getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
 import { unlockHiddenAlbum } from "../lib/biometrics";
 import { isDecoyActive } from "../lib/applock";
+import { HeartIcon, TrashIcon } from "../components/icons";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
 
@@ -78,7 +79,11 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
-                <Text style={{ fontSize: 30 }}>♥</Text>
+                <HeartIcon
+                  color={typeof theme.colors.favorite === "string" ? theme.colors.favorite : "#FF8FA3"}
+                  size={36}
+                  filled={true}
+                />
               </View>
               <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Favorites</Text>
               <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
@@ -189,7 +194,10 @@ function TrashTab({
   if (trash.length === 0) {
     return (
       <View style={styles.trashEmpty}>
-        <Text style={{ fontSize: 40, marginBottom: 12 }}>🗑</Text>
+        <TrashIcon
+          color={typeof theme.colors.onSurfaceVariant === "string" ? theme.colors.onSurfaceVariant : "#C4C6D0"}
+          size={52}
+        />
         <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>Trash is empty</Text>
         <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
           Trashed photos are hidden here for 30 days before being permanently removed.

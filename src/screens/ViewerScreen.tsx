@@ -16,6 +16,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
+import { CloudUploadIcon, HeartIcon, TrashIcon } from "../components/icons";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
 import { getCachedTelegramFile } from "../lib/media";
@@ -92,6 +93,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   const [chromeVisible, setChromeVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const zoomedRef = useRef(false);
   const { toggleFavorite, trashPhotos } = useLibraryStore();
 
@@ -115,6 +117,42 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   }
 
   const isVideo = isVideoMime(photo?.mime) || (photo?.duration ?? 0) > 0;
+
+  async function onBackupNow() {
+    // Local-only photo (opened from the gallery roll) — enqueue it for the
+    // normal upload pipeline without leaving the viewer.
+    if (!photo || backingUp || !photo.local_id) return;
+    setBackingUp(true);
+    try {
+      const { enqueueUploads, processQueue } = await import("../lib/uploader");
+      const n = await enqueueUploads(
+        [
+          {
+            local_id: photo.local_id,
+            filename: photo.filename,
+            folder: photo.folder,
+            size: photo.size,
+            width: photo.width,
+            height: photo.height,
+            taken_at: photo.taken_at,
+            added_at: photo.added_at,
+          },
+        ],
+        "manual"
+      );
+      if (n > 0) void processQueue();
+      Alert.alert(
+        n > 0 ? "Back up started" : "Already backing up",
+        n > 0
+          ? "This photo was queued for upload to your channel."
+          : "This photo is already queued or backed up."
+      );
+    } catch (e: any) {
+      Alert.alert("Back up failed", e?.message ?? "Could not queue the photo.");
+    } finally {
+      setBackingUp(false);
+    }
+  }
 
   async function onShareVideo() {
     if (!photo) return;
@@ -230,14 +268,17 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
             ]}
           >
             <Pressable style={styles.actionBtn} onPress={() => void toggleFavorite(photo)}>
-              <Text
-                style={[
-                  styles.actionIcon,
-                  { color: photo.favorite ? theme.colors.favorite : "#fff" },
-                ]}
-              >
-                {photo.favorite ? "♥" : "♡"}
-              </Text>
+              <HeartIcon
+                color={
+                  photo.favorite
+                    ? typeof theme.colors.favorite === "string"
+                      ? theme.colors.favorite
+                      : "#FF8FA3"
+                    : "#fff"
+                }
+                size={22}
+                filled={!!photo.favorite}
+              />
               <Text style={styles.actionLabel}>Favorite</Text>
             </Pressable>
             {hasCloudCopy ? (
@@ -247,7 +288,17 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
                 </Text>
                 <Text style={styles.actionLabel}>Save</Text>
               </Pressable>
-            ) : null}
+            ) : (
+              <Pressable style={styles.actionBtn} onPress={() => void onBackupNow()}>
+                <CloudUploadIcon
+                  color="#fff"
+                  size={22}
+                />
+                <Text style={styles.actionLabel}>
+                  {backingUp ? "Queued…" : "Back up"}
+                </Text>
+              </Pressable>
+            )}
             {isVideo && (photo.remote_file_id ?? photo.thumb_file_id) ? (
               <Pressable style={styles.actionBtn} onPress={() => void onShareVideo()}>
                 <Text style={[styles.actionIcon, { color: "#fff" }]}>↗</Text>
@@ -258,7 +309,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
               style={styles.actionBtn}
               onPress={() => trashPhotos([photo.id], false).then(() => navigation.goBack())}
             >
-              <Text style={[styles.actionIcon, { color: "#fff" }]}>🗑</Text>
+              <TrashIcon color="#fff" size={22} />
               <Text style={styles.actionLabel}>Trash</Text>
             </Pressable>
             <Pressable style={styles.actionBtn} onPress={() => setInfoVisible(true)}>

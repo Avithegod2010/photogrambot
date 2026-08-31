@@ -28,7 +28,7 @@ import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, type MonthBu
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
-import { GearIcon } from "../components/icons";
+import { GearIcon, HeartIcon, TrashIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto, listProfiles } from "../lib/destinations";
@@ -290,7 +290,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         />
         {photo.favorite ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.scrim }]}>
-            <Text style={styles.favIcon}>♥</Text>
+            <HeartIcon color={"#FF8FA3"} size={16} filled={true} />
           </View>
         ) : null}
         {isVideoMime(photo.mime) || (photo.duration ?? 0) > 0 ? (
