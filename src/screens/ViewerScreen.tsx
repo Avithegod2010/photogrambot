@@ -364,13 +364,11 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 40,
     paddingTop: 10,
   },
   actionBtn: {
+    flex: 1,
     alignItems: "center",
-    minWidth: 70,
   },
   actionIcon: {
     fontSize: 22,

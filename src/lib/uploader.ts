@@ -182,6 +182,11 @@ export async function processQueue(): Promise<void> {
   let runFailed = 0;
   try {
     await recoverStaleRunning();
+    // Banner denominator = everything pending when the run began. Batches are
+    // pulled 10 at a time, so counting per batch made the total climb
+    // 10→20→30… while uploading. discovered only exceeds the snapshot when
+    // genuinely new items are enqueued mid-run (e.g. camera watch).
+    const startPending = (await getQueueCounts()).pending ?? 0;
     let discovered = 0;
     let started = 0;
     let first = true;
@@ -193,7 +198,7 @@ export async function processQueue(): Promise<void> {
         setProgress({
           running: true,
           current: 0,
-          total: batch.length,
+          total: startPending,
           done: 0,
           failed: 0,
           skipped: 0,
@@ -206,7 +211,7 @@ export async function processQueue(): Promise<void> {
         first = false;
       }
       discovered += batch.length;
-      setProgress({ total: discovered });
+      setProgress({ total: Math.max(startPending, discovered) });
       let index = 0;
       const workers = Array.from(
         { length: Math.min(UPLOAD_CONCURRENCY, batch.length) },
