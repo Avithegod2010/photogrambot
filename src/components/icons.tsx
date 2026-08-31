@@ -75,3 +75,52 @@ export function GearIcon({ color, size = 24 }: { color: string; size?: number })
     </Svg>
   );
 }
+
+// Symmetric heart drawn from two circles + rotated square — no glyph-font
+// baseline wobble.
+export function HeartIcon({ color, size = 24, filled = false }: { color: string; size?: number; filled?: boolean }) {
+  const fill = filled ? color : "none";
+  const stroke = color;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 20.3c-.3 0-.6-.11-.83-.32C6.4 15.7 3.4 12.9 3.4 9.6c0-2.63 2.03-4.7 4.6-4.7 1.5 0 2.97.72 4 1.98 1.03-1.26 2.5-1.98 4-1.98 2.57 0 4.6 2.07 4.6 4.7 0 3.3-3 6.1-7.77 10.38-.23.21-.53.32-.83.32z"
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={filled ? 1 : 2}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function TrashIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 6.5h16"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <Path
+        d="M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5"
+        stroke={color}
+        strokeWidth="2"
+      />
+      <Path
+        d="M6 6.5l.8 12.1A2 2 0 0 0 8.8 20.5h6.4a2 2 0 0 0 2-1.9L18 6.5"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10 10.5v6M14 10.5v6"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}

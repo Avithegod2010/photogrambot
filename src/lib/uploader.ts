@@ -10,6 +10,7 @@ import {
   getPhotoByHash,
   getInFlightHashConflict,
   getPhotoByLocalId,
+  hasActiveQueuedUpload,
   getQueueCounts,
   recoverStaleRunning,
   kvGet,
@@ -123,6 +124,9 @@ export async function enqueueUploads(
   for (const item of items) {
     const existing = await getPhotoByLocalId(item.local_id);
     if (existing && existing.status === "uploaded") continue;
+    // A full-gallery sync can run for minutes — never stack duplicate queue
+    // rows for an asset that is already pending or mid-upload.
+    if (await hasActiveQueuedUpload(item.local_id)) continue;
     let localUri = existing?.local_uri ?? null;
     if (!localUri) {
       try {
