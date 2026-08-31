@@ -275,8 +275,10 @@ async function bootstrapBackgroundTasks(): Promise<void> {
           prefs.lastFullSyncAt,
           Date.now() - prefs.autoSyncIntervalHours * 3600 * 1000
         );
-        const enqueued = await scanRecentAndEnqueue(since);
-        if (enqueued > 0) void processQueue();
+        await scanRecentAndEnqueue(since);
+        // Resume whatever is already pending too — a cold start with a large
+        // backlog must not sit idle just because nothing new was scanned.
+        void processQueue();
       }
       void startCameraWatch();
       void registerBackgroundSync();

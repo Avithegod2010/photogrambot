@@ -189,6 +189,21 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (local_id, modification_time)
     );
   `);
+  // Collapse duplicate active rows left by historical races between concurrent
+  // scans (watcher scan vs bootstrap/background task run in separate contexts,
+  // so the app-level hasActiveQueuedUpload check is not atomic across them),
+  // then let SQLite enforce one active row per asset from now on.
+  await db.execAsync(`
+    DELETE FROM upload_queue
+     WHERE state IN ('pending','running')
+       AND id NOT IN (
+         SELECT MIN(id) FROM upload_queue
+          WHERE state IN ('pending','running')
+          GROUP BY local_id
+       );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_queue_active_local
+      ON upload_queue(local_id) WHERE state IN ('pending','running');
+  `);
 }
 
 async function addColumnsIfMissing(
@@ -660,24 +675,31 @@ export async function enqueueUpload(item: {
   profile_id?: string | null;
 }): Promise<number> {
   const d = await getDb();
-  const res = await d.runAsync(
-    `INSERT INTO upload_queue (local_id, local_uri, filename, folder, size, taken_at, added_at,
-      content_hash, upload_type, state, retries, created_at, profile_id)
-     VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?)`,
-    [
-      item.local_id,
-      item.local_uri,
-      item.filename,
-      item.folder,
-      item.size,
-      item.taken_at,
-      item.added_at,
-      item.content_hash,
-      item.upload_type,
-      Date.now(),
-      item.profile_id ?? null,
-    ]
-  );
+  let res;
+  try {
+    res = await d.runAsync(
+      `INSERT INTO upload_queue (local_id, local_uri, filename, folder, size, taken_at, added_at,
+        content_hash, upload_type, state, retries, created_at, profile_id)
+       VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?)`,
+      [
+        item.local_id,
+        item.local_uri,
+        item.filename,
+        item.folder,
+        item.size,
+        item.taken_at,
+        item.added_at,
+        item.content_hash,
+        item.upload_type,
+        Date.now(),
+        item.profile_id ?? null,
+      ]
+    );
+  } catch (e) {
+    // uq_queue_active_local: a concurrent scan enqueued this asset first.
+    if (String((e as Error)?.message ?? "").includes("UNIQUE constraint failed")) return 0;
+    throw e;
+  }
   return res.lastInsertRowId ?? 0;
 }
 
