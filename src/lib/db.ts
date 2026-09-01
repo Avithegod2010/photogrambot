@@ -432,6 +432,7 @@ export interface SearchFilters {
   takenWithinDays?: number | null;
   hasGps?: boolean;
   camera?: string | null;
+  notBackedUp?: boolean;
 }
 
 export async function searchPhotos(
@@ -453,6 +454,9 @@ export async function searchPhotos(
   if (filters?.camera && filters.camera.trim()) {
     conds.push("LOWER(p.camera) LIKE ?");
     params.push(`%${filters.camera.trim().toLowerCase()}%`);
+  }
+  if (filters?.notBackedUp) {
+    conds.push("p.status != 'uploaded'");
   }
   const where = conds.join(" AND ");
   if (!cleaned) {
