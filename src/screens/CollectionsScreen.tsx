@@ -12,9 +12,15 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getPhotosByUploadStatus, setAlbumLocked, type PhotoRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, type PhotoRow } from "../lib/db";
+import { getChannelId } from "../lib/settings";
+import { setMessageReaction } from "../lib/telegram";
+import { getCachedTelegramFile } from "../lib/media";
+import { tokenForPhoto } from "../lib/destinations";
+import { shareMedia } from "../../modules/share-intent";
 import { unlockHiddenAlbum } from "../lib/biometrics";
 import { isDecoyActive } from "../lib/applock";
 import { HeartIcon, TrashIcon } from "../components/icons";
@@ -76,6 +82,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             <Pressable
               style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
               onPress={() => navigation.navigate("Album", { albumId: -1, albumName: "Favorites" })}
+              onLongPress={() => navigation.navigate("Album", { albumId: -1, albumName: "Favorites", selectMode: true })}
               disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
@@ -105,21 +112,40 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                   style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
                   onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, locked: !!a.locked })}
                   onLongPress={() =>
-                    Alert.alert(a.name, undefined, [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: a.locked ? "Remove lock" : "Lock album",
-                        onPress: async () => {
-                          await setAlbumLocked(a.id, !a.locked);
-                          await useLibraryStore.getState().refreshMeta();
+                    // Long-press is the album-management menu; "Select photos"
+                    // is the entry into the bulk-selection grid (tap still
+                    // opens the album). Android Alert renders at most 3
+                    // buttons and silently drops the rest — dismissal is
+                    // cancelable:true, never a 4th Cancel button.
+                    Alert.alert(
+                      a.name,
+                      undefined,
+                      [
+                        {
+                          text: "Select photos",
+                          onPress: () =>
+                            navigation.navigate("Album", {
+                              albumId: a.id,
+                              albumName: a.name,
+                              locked: !!a.locked,
+                              selectMode: true,
+                            }),
                         },
-                      },
-                      {
-                        text: "Delete album",
-                        style: "destructive",
-                        onPress: () => void removeAlbum(a.id),
-                      },
-                    ])
+                        {
+                          text: a.locked ? "Remove lock" : "Lock album",
+                          onPress: () => {
+                            void setAlbumLocked(a.id, !a.locked);
+                            void useLibraryStore.getState().refreshMeta();
+                          },
+                        },
+                        {
+                          text: "Delete album",
+                          style: "destructive",
+                          onPress: () => void removeAlbum(a.id),
+                        },
+                      ],
+                      { cancelable: true }
+                    )
                   }
                 >
                   <View style={styles.albumTilePlaceholder}>
@@ -188,8 +214,44 @@ function TrashTab({
   theme: ReturnType<typeof useTheme>;
   trash: ReturnType<typeof useLibraryStore.getState>["trash"];
 }) {
+  const insets = useSafeAreaInsets();
   const { restorePhotos, deleteForever, emptyTrash } = useLibraryStore();
   const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+
+  const clearSel = () => {
+    setSelection(new Set());
+    setSelectionMode(false);
+  };
+  const toggleSel = (id: string) => {
+    const next = new Set(selection);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelection(next);
+    if (selectionMode && next.size === 0) setSelectionMode(false);
+  };
+
+  // Store actions loop single-item helpers internally and refresh() themselves;
+  // the local selection must clear after the list shrinks.
+  function restoreSelected() {
+    const ids = Array.from(selection);
+    if (ids.length === 0) return;
+    void restorePhotos(ids).then(clearSel);
+  }
+
+  function deleteSelectedForever() {
+    const ids = Array.from(selection);
+    if (ids.length === 0) return;
+    Alert.alert(
+      `Delete ${ids.length} item${ids.length === 1 ? "" : "s"} forever?`,
+      "This also removes them from your Telegram channel. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void deleteForever(ids).then(clearSel) },
+      ]
+    );
+  }
 
   if (trash.length === 0) {
     return (
@@ -216,7 +278,11 @@ function TrashTab({
         renderItem={({ item }) => (
           <Pressable
             style={{ width: tile, height: tile, padding: 1 }}
-            onPress={() =>
+            onPress={() => {
+              if (selectionMode) {
+                toggleSel(item.id);
+                return;
+              }
               Alert.alert(item.filename, "Restore this photo or delete it forever?", [
                 { text: "Cancel", style: "cancel" },
                 {
@@ -228,8 +294,12 @@ function TrashTab({
                   style: "destructive",
                   onPress: () => void deleteForever([item.id]),
                 },
-              ])
-            }
+              ]);
+            }}
+            onLongPress={() => {
+              setSelectionMode(true);
+              setSelection(new Set([item.id]));
+            }}
           >
             <TelegramImage
               fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
@@ -237,25 +307,59 @@ function TrashTab({
               profileId={item.profile_id}
               style={{ width: "100%", height: "100%", opacity: 0.6 }}
             />
+            {selection.has(item.id) ? (
+              <View style={[styles.pickedOverlay, { borderColor: theme.colors.primary, backgroundColor: "rgba(0,0,0,0.45)" }]}>
+                <View style={[styles.checkbox, { backgroundColor: theme.colors.primary }]}>
+                  <Text style={{ color: theme.colors.onPrimary, fontSize: 11 }}>✓</Text>
+                </View>
+              </View>
+            ) : null}
           </Pressable>
         )}
       />
-      <View style={[styles.trashFooter, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <Text style={{ color: theme.colors.onSurfaceVariant, flex: 1, fontSize: 12 }}>
-          Items auto-delete after 30 days
-        </Text>
-        <Button
-          title="Empty trash"
-          variant="danger"
-          theme={theme}
-          onPress={() =>
-            Alert.alert("Empty trash?", "All trashed photos will be permanently deleted.", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Empty", style: "destructive", onPress: () => void emptyTrash() },
-            ])
-          }
-        />
-      </View>
+      {selectionMode ? (
+        // Selection bar replaces the auto-delete footer while selecting so
+        // the two bottom bars never stack.
+        <View
+          style={[
+            styles.selectionBar,
+            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 8 },
+          ]}
+        >
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }} numberOfLines={1}>
+            {selection.size} selected
+          </Text>
+          <Pressable onPress={() => setSelection(new Set(trash.map((t) => t.id)))} style={styles.selAction}>
+            <Text style={{ color: theme.colors.primary }}>All</Text>
+          </Pressable>
+          <Pressable onPress={restoreSelected} style={styles.selAction}>
+            <Text style={{ color: theme.colors.primary }}>Restore</Text>
+          </Pressable>
+          <Pressable onPress={deleteSelectedForever} style={styles.selAction}>
+            <Text style={{ color: theme.colors.error }}>Delete</Text>
+          </Pressable>
+          <Pressable onPress={clearSel} style={styles.selAction}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.trashFooter, { backgroundColor: theme.colors.surfaceContainer }]}>
+          <Text style={{ color: theme.colors.onSurfaceVariant, flex: 1, fontSize: 12 }}>
+            Items auto-delete after 30 days
+          </Text>
+          <Button
+            title="Empty trash"
+            variant="danger"
+            theme={theme}
+            onPress={() =>
+              Alert.alert("Empty trash?", "All trashed photos will be permanently deleted.", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Empty", style: "destructive", onPress: () => void emptyTrash() },
+              ])
+            }
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -270,6 +374,11 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const { favorites, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  // Entered via the Collections long-press "Select photos" action or by
+  // long-pressing a tile here. Regular albums toggle selection on tap
+  // regardless (existing behavior); the flag is what lets Favorites taps
+  // select instead of opening the viewer.
+  const [selectionMode, setSelectionMode] = useState(!!route.params?.selectMode);
 
   React.useEffect(() => {
     if (needsUnlock && !unlocked) {
@@ -295,6 +404,141 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
 
   const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
 
+  const clearSel = () => {
+    setSelection(new Set());
+    setSelectionMode(false);
+  };
+  const toggleSel = (id: string) => {
+    const next = new Set(selection);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelection(next);
+    if (selectionMode && next.size === 0) setSelectionMode(false);
+  };
+
+  const selectedItems = photos.filter((p) => selection.has(p.id));
+  const allFav = selectedItems.length > 0 && selectedItems.every((p) => !!p.favorite);
+  // "Back up" only makes sense for rows that exist on this device but have no
+  // cloud copy — enqueueUploads skips already-uploaded/queued rows anyway.
+  const backupable = selectedItems.filter(
+    (p): p is PhotoRow & { local_id: string } => p.status === "local" && !!p.local_id
+  );
+  const barVisible = selection.size > 0 || (selectionMode && photos.length > 0);
+
+  // Deterministic bulk favorite: mixed selections favorite everything, an
+  // all-favorite selection unfavorites. One Telegram reaction + one refresh
+  // per action, not per photo (toggleFavorite would refresh N times).
+  async function favoriteSelected() {
+    if (selectedItems.length === 0) return;
+    const makeFav = !allFav;
+    try {
+      const channelId = await getChannelId();
+      for (const p of selectedItems) {
+        await setFavorite(p.id, makeFav);
+        if (channelId && p.message_id) {
+          const token = await tokenForPhoto(p);
+          try {
+            await setMessageReaction(channelId, p.message_id, makeFav ? "❤️" : null, token ?? undefined);
+          } catch {
+            // Reaction is cosmetic — never block the loop on it.
+          }
+        }
+      }
+      await useLibraryStore.getState().refresh();
+      clearSel();
+    } catch (e: any) {
+      Alert.alert("Favorites failed", e?.message ?? "Could not update the selected photos.");
+    }
+  }
+
+  async function shareSelected() {
+    if (selectedItems.length === 0) return;
+    // Android intents carrying hundreds of URIs blow the ~1 MB binder limit
+    // (TransactionTooLargeException) — cap like GalleryScreen's share.
+    const items = selectedItems.slice(0, 20);
+    try {
+      const uris: string[] = [];
+      let allImages = true;
+      for (const p of items) {
+        if (p.local_uri && p.local_uri.startsWith("file://")) {
+          try {
+            if (new File(p.local_uri).exists) {
+              uris.push(p.local_uri);
+              if (p.mime && !p.mime.startsWith("image/")) allImages = false;
+              continue;
+            }
+          } catch {}
+        }
+        const fid = p.remote_file_id ?? p.preview_file_id ?? p.thumb_file_id;
+        if (!fid) continue;
+        const ext = p.filename.includes(".")
+          ? p.filename.split(".").pop()!.toLowerCase()
+          : "jpg";
+        const token = p.profile_id ? await tokenForPhoto(p) : null;
+        uris.push(await getCachedTelegramFile(fid, ext, token));
+        if (p.mime && !p.mime.startsWith("image/")) allImages = false;
+      }
+      if (uris.length === 0) {
+        Alert.alert("Nothing to share", "Could not prepare the selected photos.");
+        return;
+      }
+      shareMedia(uris, allImages ? "image/*" : "*/*");
+    } catch (e: any) {
+      Alert.alert("Share failed", e?.message ?? "Could not share the selection.");
+    }
+  }
+
+  function trashSelected() {
+    const ids = selectedItems.map((p) => p.id);
+    if (ids.length === 0) return;
+    Alert.alert(
+      `Move ${ids.length} photo${ids.length === 1 ? "" : "s"} to trash?`,
+      "You can restore them from Collections → Trash, or delete from Telegram permanently later.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Hide locally",
+          onPress: () => void useLibraryStore.getState().trashPhotos(ids, false).then(clearSel),
+        },
+        {
+          text: "Delete from Telegram too",
+          style: "destructive",
+          onPress: () => void useLibraryStore.getState().trashPhotos(ids, true).then(clearSel),
+        },
+      ]
+    );
+  }
+
+  async function backupSelected() {
+    if (backupable.length === 0) return;
+    try {
+      const { enqueueUploads, processQueue } = await import("../lib/uploader");
+      const n = await enqueueUploads(
+        backupable.map((p) => ({
+          local_id: p.local_id,
+          filename: p.filename,
+          folder: p.folder,
+          size: p.size,
+          width: p.width,
+          height: p.height,
+          taken_at: p.taken_at,
+          added_at: p.added_at,
+        })),
+        "manual"
+      );
+      if (n > 0) void processQueue();
+      Alert.alert(
+        n > 0 ? "Back up started" : "Already backing up",
+        n > 0
+          ? `${n} photo${n === 1 ? "" : "s"} queued for upload to your channel.`
+          : "The selected photos are already queued or backed up."
+      );
+      clearSel();
+    } catch (e: any) {
+      Alert.alert("Back up failed", e?.message ?? "Could not queue the photos.");
+    }
+  }
+
   if (!unlocked) {
     return <View style={[styles.container, { backgroundColor: theme.colors.background }]} />;
   }
@@ -308,7 +552,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
-        {selection.size > 0 ? (
+        {albumId !== -1 && selection.size > 0 ? (
           <Pressable
             onPress={() => {
               const ids = Array.from(selection);
@@ -322,7 +566,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
                     style: "destructive",
                     onPress: async () => {
                       await removePhotosFromAlbum(albumId, ids);
-                      setSelection(new Set());
+                      clearSel();
                     },
                   },
                 ]
@@ -339,21 +583,26 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         data={photos}
         numColumns={3}
         keyExtractor={(p) => p.id}
-        contentContainerStyle={{ padding: 2 }}
+        contentContainerStyle={{ padding: 2, paddingBottom: barVisible ? 120 : 2 }}
         renderItem={({ item }) => {
           const selected = selection.has(item.id);
           return (
             <Pressable
               style={{ width: tile, height: tile, padding: 1 }}
               onPress={() => {
-                if (albumId === -1) {
-                  navigation.navigate("Viewer", { photos, index: photos.indexOf(item) });
+                if (albumId !== -1) {
+                  toggleSel(item.id);
                   return;
                 }
-                const next = new Set(selection);
-                if (next.has(item.id)) next.delete(item.id);
-                else next.add(item.id);
-                setSelection(next);
+                if (selectionMode) {
+                  toggleSel(item.id);
+                  return;
+                }
+                navigation.navigate("Viewer", { photos, index: photos.indexOf(item) });
+              }}
+              onLongPress={() => {
+                setSelectionMode(true);
+                setSelection(new Set([item.id]));
               }}
             >
               <TelegramImage
@@ -380,6 +629,41 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           </Text>
         }
       />
+      {barVisible ? (
+        <View
+          style={[
+            styles.selectionBar,
+            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 8 },
+          ]}
+        >
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }} numberOfLines={1}>
+            {selection.size} selected
+          </Text>
+          <Pressable
+            onPress={() => setSelection(new Set(photos.map((p) => p.id)))}
+            style={styles.selAction}
+          >
+            <Text style={{ color: theme.colors.primary }}>All</Text>
+          </Pressable>
+          <Pressable onPress={() => void favoriteSelected()} style={styles.selAction}>
+            <Text style={{ color: theme.colors.primary }}>{allFav ? "Unfavorite" : "Favorite"}</Text>
+          </Pressable>
+          {backupable.length > 0 ? (
+            <Pressable onPress={() => void backupSelected()} style={styles.selAction}>
+              <Text style={{ color: theme.colors.primary }}>Back up</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
+            <Text style={{ color: theme.colors.primary }}>Share</Text>
+          </Pressable>
+          <Pressable onPress={trashSelected} style={styles.selAction}>
+            <Text style={{ color: theme.colors.error }}>Trash</Text>
+          </Pressable>
+          <Pressable onPress={clearSel} style={styles.selAction}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -610,5 +894,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
+  },
+  // Mirrors GalleryScreen's selection bar (absolute bottom, count + actions).
+  selectionBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    gap: 4,
+  },
+  selAction: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
 });
