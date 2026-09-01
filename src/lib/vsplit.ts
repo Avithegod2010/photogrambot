@@ -1,4 +1,4 @@
-import { File, Paths } from "expo-file-system";
+import { File, FileMode, Paths } from "expo-file-system";
 import { escapeHtml } from "./format";
 import { sendDocument } from "./telegram";
 
@@ -64,7 +64,9 @@ export async function splitAndUploadVideo(
     return { parts: resume.slice(0, total), thumbFileId };
   }
   const parts: VideoPart[] = [...resume];
-  const handle = file.open();
+  // Read-only handle: scoped storage denies WRITE on the source path, and the
+  // default open mode is READ_WRITE (vsplit only reads; parts go to cache).
+  const handle = file.open(FileMode.ReadOnly);
   try {
     if (resume.length > 0) {
       // Skip past bytes already uploaded in a previous attempt.
