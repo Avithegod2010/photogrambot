@@ -8,8 +8,11 @@ import {
   findDuplicateGroups,
   checkIntegrity,
   removeBrokenPhotos,
+  verifyBackupSample,
   type DuplicateGroup,
   type IntegrityProgress,
+  type VerificationProgress,
+  type VerificationResult,
 } from "../lib/maintenance";
 import {
   getAllUploadedPhotoIds,
@@ -17,7 +20,7 @@ import {
   retryFailedUploads,
   type PhotoRow,
 } from "../lib/db";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatDate } from "../lib/format";
 import { processQueue } from "../lib/uploader";
 import {
   restoreAllToDevice,
@@ -35,6 +38,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [integrityRunning, setIntegrityRunning] = useState(false);
   const [integrity, setIntegrity] = useState<IntegrityProgress | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [verifyRunning, setVerifyRunning] = useState(false);
+  const [verifyProgress, setVerifyProgress] = useState<VerificationProgress | null>(null);
+  const [verifyResult, setVerifyResult] = useState<VerificationResult | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
   const [restoreResult, setRestoreResult] = useState<string | null>(null);
@@ -76,6 +83,19 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       setDupes(await findDuplicateGroups());
     } finally {
       setScanningDupes(false);
+    }
+  }
+
+  async function runVerify() {
+    setVerifyRunning(true);
+    setVerifyResult(null);
+    setVerifyError(null);
+    try {
+      setVerifyResult(await verifyBackupSample(25, setVerifyProgress));
+    } catch (e: any) {
+      setVerifyError(e?.message ?? "Verification failed — try again.");
+    } finally {
+      setVerifyRunning(false);
     }
   }
 
@@ -238,6 +258,76 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {dupes.length > 0 ? (
                 <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 12 }}>
                   {dupes.length} duplicate group{dupes.length === 1 ? "" : "s"} found
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Backup verification" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Fast trust check — samples 25 backed-up photos and confirms the channel still
+                serves them. The full checker scans everything.
+              </Text>
+              <Button
+                title="Verify sample of 25"
+                theme={theme}
+                variant="outlined"
+                busy={verifyRunning}
+                onPress={runVerify}
+                style={{ marginTop: 12 }}
+              />
+              {verifyProgress && !verifyProgress.done ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  Checking {verifyProgress.checked}/{verifyProgress.total} —{" "}
+                  {verifyProgress.broken} broken so far
+                </Text>
+              ) : null}
+              {verifyResult ? (
+                <>
+                  <Text
+                    style={{
+                      color: verifyResult.broken.length > 0 ? theme.colors.error : theme.colors.success,
+                      fontSize: 12.5,
+                      marginTop: 10,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {verifyResult.checked === 0
+                      ? "Nothing backed up yet — nothing to verify."
+                      : verifyResult.broken.length === 0
+                        ? `Sampled ${verifyResult.checked} — all reachable`
+                        : `Sampled ${verifyResult.checked} — ${verifyResult.broken.length} not reachable: ${verifyResult.broken
+                            .slice(0, 3)
+                            .map((b) => b.filename)
+                            .join(", ")}${verifyResult.broken.length > 3 ? `, +${verifyResult.broken.length - 3} more` : ""}`}
+                  </Text>
+                  {verifyResult.checked > 0 ? (
+                    <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginTop: 4 }}>
+                      Verified {formatDate(verifyResult.sampledAt)}
+                    </Text>
+                  ) : null}
+                  {verifyResult.broken.length > 0 ? (
+                    <Button
+                      title="Run full check"
+                      theme={theme}
+                      variant="outlined"
+                      busy={integrityRunning}
+                      onPress={runIntegrity}
+                      style={{ marginTop: 12 }}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+              {verifyError ? (
+                <Text
+                  style={{
+                    color: theme.colors.error,
+                    fontSize: 12.5,
+                    marginTop: 10,
+                    fontWeight: "600",
+                  }}
+                >
+                  {verifyError}
                 </Text>
               ) : null}
             </Card>
