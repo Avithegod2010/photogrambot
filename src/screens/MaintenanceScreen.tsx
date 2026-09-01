@@ -41,6 +41,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [failedCount, setFailedCount] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   function confirmRestore() {
     Alert.alert(
@@ -122,12 +123,17 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   }
 
   useEffect(() => {
-    void getQueueCounts().then((c) => setFailedCount(c.failed ?? 0));
-  }, []);
+    const refreshFailedCount = () =>
+      void getQueueCounts().then((c) => setFailedCount(c.failed ?? 0));
+    void refreshFailedCount();
+    // Stack screens stay mounted — re-check when returning from the queue screen.
+    return navigation.addListener("focus", refreshFailedCount);
+  }, [navigation]);
 
   async function retryFailed() {
     setRetrying(true);
     setRetryResult(null);
+    setRetryError(null);
     try {
       const n = await retryFailedUploads();
       if (n > 0) void processQueue();
@@ -138,6 +144,8 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       );
       setFailedCount((await getQueueCounts()).failed ?? 0);
       await refreshMeta();
+    } catch (e: any) {
+      setRetryError(e?.message ?? "Requeue failed — try again.");
     } finally {
       setRetrying(false);
     }
@@ -196,6 +204,18 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                     }}
                   >
                     {retryResult}
+                  </Text>
+                ) : null}
+                {retryError ? (
+                  <Text
+                    style={{
+                      color: theme.colors.error,
+                      fontSize: 12.5,
+                      marginTop: 10,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {retryError}
                   </Text>
                 ) : null}
               </Card>

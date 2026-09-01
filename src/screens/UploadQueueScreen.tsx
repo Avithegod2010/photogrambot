@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ColorValue } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View, type ColorValue } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import {
@@ -50,6 +50,8 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
         await refresh();
         void processQueue();
       }
+    } catch (e: any) {
+      Alert.alert("Retry failed", e?.message ?? "Could not requeue this item.");
     } finally {
       setBusyId(null);
     }
@@ -62,6 +64,8 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
         await refresh();
         await refreshMeta();
       }
+    } catch (e: any) {
+      Alert.alert("Remove failed", e?.message ?? "Could not remove this item.");
     } finally {
       setBusyId(null);
     }

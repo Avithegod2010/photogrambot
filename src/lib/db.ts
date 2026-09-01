@@ -756,10 +756,31 @@ export async function retryFailedUploads(): Promise<number> {
              AND q2.state IN ('pending','running')
          )`
     );
+    // A still-failing asset gets re-enqueued by every scan, so duplicate
+    // failed rows exist — flipping both would collide on the partial UNIQUE
+    // index. Keep only the oldest attempt per local_id.
+    await d.runAsync(
+      `DELETE FROM upload_queue
+       WHERE state = 'failed'
+         AND EXISTS (
+           SELECT 1 FROM upload_queue q2
+           WHERE q2.local_id = upload_queue.local_id
+             AND q2.state = 'failed'
+             AND q2.id < upload_queue.id
+         )`
+    );
+    // NOT EXISTS re-checks at UPDATE time: a concurrent enqueue may have
+    // added a pending sibling after the DELETE — skip that row instead of
+    // violating uq_queue_active_local and rolling everything back.
     const res = await d.runAsync(
       `UPDATE upload_queue
        SET state = 'pending', retries = 0, error = NULL, next_attempt_at = NULL
-       WHERE state = 'failed'`
+       WHERE state = 'failed'
+         AND NOT EXISTS (
+           SELECT 1 FROM upload_queue q2
+           WHERE q2.local_id = upload_queue.local_id
+             AND q2.state IN ('pending','running')
+         )`
     );
     requeued = res.changes ?? 0;
     await d.runAsync("UPDATE photos SET status = 'local' WHERE status = 'failed'");
