@@ -17,6 +17,7 @@ import { useLibraryStore } from "../store/useLibraryStore";
 import { useUploadStore } from "../store/useUploadStore";
 import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog } from "../components/ui";
 import { formatBytes } from "../lib/format";
+import { getStorageSummary, type StorageSummary } from "../lib/db";
 import { runSyncNow } from "../lib/sync";
 import { getBackgroundSyncInfo } from "../lib/background";
 import {
@@ -60,6 +61,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [pinDraft, setPinDraft] = useState("");
   const [pinExists, setPinExists] = useState(false);
   const [decoyExists, setDecoyExists] = useState(false);
+  const [storage, setStorage] = useState<StorageSummary | null>(null);
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -74,6 +76,10 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void refreshMeta();
     return subscribe();
   }, []);
+
+  useEffect(() => {
+    void getStorageSummary().then(setStorage);
+  }, [stats]);
 
   useEffect(() => {
     if (!prefs.autoSync) {
@@ -561,6 +567,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
+        <SectionLabel text="Storage" theme={theme} />
+        {storage ? <StorageCard storage={storage} theme={theme} /> : null}
+
         <SectionLabel text="About" theme={theme} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>PhotogramBot</Text>
@@ -619,6 +628,87 @@ function Stat({ label, value, theme }: { label: string; value: string; theme: Re
   );
 }
 
+function StorageCard({
+  storage,
+  theme,
+}: {
+  storage: StorageSummary;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  const totalBytes = storage.cloudBytes + storage.localBytes;
+  const cloudPct = totalBytes > 0 ? storage.cloudBytes / totalBytes : 0;
+  const maxMonth = Math.max(...storage.months.map((m) => m.bytes), 0);
+  const monthsWithUploads = storage.months.some((m) => m.bytes > 0);
+  return (
+    <Card theme={theme}>
+      <View style={styles.splitBar}>
+        <View
+          style={{
+            flex: cloudPct,
+            backgroundColor: theme.colors.primary,
+            borderTopLeftRadius: 8,
+            borderBottomLeftRadius: 8,
+          }}
+        />
+        <View
+          style={{
+            flex: 1 - cloudPct,
+            backgroundColor: theme.colors.outlineVariant,
+            borderTopRightRadius: 8,
+            borderBottomRightRadius: 8,
+          }}
+        />
+      </View>
+      <View style={[styles.configRow, { marginTop: 10 }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13.5 }}>
+            In cloud
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+            {formatBytes(storage.cloudBytes)} · {storage.cloudCount} item
+            {storage.cloudCount === 1 ? "" : "s"}
+          </Text>
+        </View>
+        <View style={{ flex: 1, alignItems: "flex-end" }}>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13.5 }}>
+            On device only
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+            {formatBytes(storage.localBytes)} · {storage.localCount} item
+            {storage.localCount === 1 ? "" : "s"}
+          </Text>
+        </View>
+      </View>
+      {monthsWithUploads ? (
+        <>
+          <View style={styles.divider} />
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginBottom: 6 }}>
+            Backed up per month — last 6 months
+          </Text>
+          <View style={styles.chartRow}>
+            {storage.months.map((m, i) => (
+              <View key={i} style={styles.chartCol}>
+                <View style={styles.chartBarArea}>
+                  <View
+                    style={[
+                      styles.chartBar,
+                      {
+                        height: `${Math.max(4, Math.round((m.bytes / maxMonth) * 100))}%`,
+                        backgroundColor: m.bytes > 0 ? theme.colors.primary : theme.colors.outlineVariant,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 9.5 }}>{m.label}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -664,6 +754,33 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+  },
+  splitBar: {
+    flexDirection: "row",
+    height: 10,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  chartRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    height: 80,
+  },
+  chartCol: {
+    flex: 1,
+    alignItems: "center",
+    gap: 4,
+  },
+  chartBarArea: {
+    flex: 1,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  chartBar: {
+    width: "60%",
+    borderRadius: 4,
   },
   stat: {
     width: "33.3%",

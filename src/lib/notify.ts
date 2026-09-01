@@ -64,3 +64,21 @@ export async function notifyUploadComplete(saved: number, failed: number): Promi
     });
   } catch {}
 }
+
+// Unlike the progress/complete notifications this one deliberately fires in
+// the foreground too — with the banner handler configured, that is the only
+// way a failed run becomes visible without opening the queue screen.
+export async function notifyUploadsFailed(failed: number, saved: number): Promise<void> {
+  try {
+    ensureHandler();
+    await Notifications.dismissNotificationAsync(PROGRESS_ID).catch(() => {});
+    await Notifications.scheduleNotificationAsync({
+      identifier: "pb-upload-failed",
+      content: {
+        title: "Uploads failed",
+        body: `${failed} item${failed === 1 ? "" : "s"} failed${saved > 0 ? `, ${saved} uploaded` : ""} — open the app and retry from Maintenance → Upload queue.`,
+      },
+      trigger: null,
+    });
+  } catch {}
+}

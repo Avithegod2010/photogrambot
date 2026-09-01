@@ -33,7 +33,7 @@ import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo, type VideoPart } from "./vsplit";
-import { notifyUploadProgress, notifyUploadComplete } from "./notify";
+import { notifyUploadProgress, notifyUploadComplete, notifyUploadsFailed } from "./notify";
 import {
   resolveDestination,
   profileIdForFolder,
@@ -246,7 +246,11 @@ export async function processQueue(): Promise<void> {
     } catch {}
     setProgress({ running: false, currentFile: null, sentBytes: 0, totalBytes: 0, percent: null });
     if (!cancelRequested) {
-      void notifyUploadComplete(runDone, runFailed);
+      if (runFailed > 0) {
+        void notifyUploadsFailed(runFailed, runDone);
+      } else {
+        void notifyUploadComplete(runDone, runFailed);
+      }
     }
   }
 }
