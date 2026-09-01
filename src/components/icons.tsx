@@ -1,10 +1,11 @@
 import React from "react";
+import type { ColorValue } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
 // Clean line/filled icons for the tab bar and headers — drawn inline so the
 // app needs no icon-font dependency. All icons: 24x24 viewBox, `color` prop.
 
-export function PhotoFrameIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function PhotoFrameIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x="3" y="4" width="18" height="16" rx="3" stroke={color} strokeWidth="2" />
@@ -20,7 +21,7 @@ export function PhotoFrameIcon({ color, size = 24 }: { color: string; size?: num
   );
 }
 
-export function CloudIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function CloudIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -31,7 +32,7 @@ export function CloudIcon({ color, size = 24 }: { color: string; size?: number }
   );
 }
 
-export function CloudUploadIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function CloudUploadIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -49,7 +50,7 @@ export function CloudUploadIcon({ color, size = 24 }: { color: string; size?: nu
   );
 }
 
-export function SearchIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function SearchIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx="10.8" cy="10.8" r="6.3" stroke={color} strokeWidth="2" />
@@ -63,7 +64,7 @@ export function SearchIcon({ color, size = 24 }: { color: string; size?: number 
   );
 }
 
-export function GearIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function GearIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -94,7 +95,7 @@ export function HeartIcon({ color, size = 24, filled = false }: { color: string;
   );
 }
 
-export function TrashIcon({ color, size = 24 }: { color: string; size?: number }) {
+export function TrashIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -120,6 +121,26 @@ export function TrashIcon({ color, size = 24 }: { color: string; size?: number }
         stroke={color}
         strokeWidth="2"
         strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function RetryIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21 12a9 9 0 1 1-2.64-6.36"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <Path
+        d="M21 3.5v5.3h-5.3"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </Svg>
   );

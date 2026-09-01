@@ -11,8 +11,14 @@ import {
   type DuplicateGroup,
   type IntegrityProgress,
 } from "../lib/maintenance";
-import { getAllUploadedPhotoIds, type PhotoRow } from "../lib/db";
+import {
+  getAllUploadedPhotoIds,
+  getQueueCounts,
+  retryFailedUploads,
+  type PhotoRow,
+} from "../lib/db";
 import { formatBytes } from "../lib/format";
+import { processQueue } from "../lib/uploader";
 import {
   restoreAllToDevice,
   requestCancelRestore,
@@ -32,6 +38,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
   const [restoreResult, setRestoreResult] = useState<string | null>(null);
+  const [failedCount, setFailedCount] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState<string | null>(null);
 
   function confirmRestore() {
     Alert.alert(
@@ -112,6 +121,28 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     await scanDuplicates();
   }
 
+  useEffect(() => {
+    void getQueueCounts().then((c) => setFailedCount(c.failed ?? 0));
+  }, []);
+
+  async function retryFailed() {
+    setRetrying(true);
+    setRetryResult(null);
+    try {
+      const n = await retryFailedUploads();
+      if (n > 0) void processQueue();
+      setRetryResult(
+        n > 0
+          ? `Requeued ${n} upload${n === 1 ? "" : "s"}.`
+          : "Nothing to requeue — every failed item already has a newer queue entry."
+      );
+      setFailedCount((await getQueueCounts()).failed ?? 0);
+      await refreshMeta();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -127,6 +158,49 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
         contentContainerStyle={{ padding: 16, paddingBottom: 60 }}
         ListHeaderComponent={
           <View>
+            <SectionLabel text="Upload queue" theme={theme} />
+            <Card theme={theme} onPress={() => navigation.navigate("UploadQueue")}>
+              <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                    Pending & failed uploads
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                    Inspect the queue, retry or remove individual items
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </View>
+            </Card>
+            {failedCount > 0 ? (
+              <Card theme={theme} style={{ marginTop: 10 }}>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                  {failedCount} upload{failedCount === 1 ? "" : "s"} failed after all retries.
+                  Requeue them to try again.
+                </Text>
+                <Button
+                  title="Retry failed uploads"
+                  theme={theme}
+                  variant="outlined"
+                  busy={retrying}
+                  onPress={retryFailed}
+                  style={{ marginTop: 12 }}
+                />
+                {retryResult ? (
+                  <Text
+                    style={{
+                      color: theme.colors.success,
+                      fontSize: 12.5,
+                      marginTop: 10,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {retryResult}
+                  </Text>
+                ) : null}
+              </Card>
+            ) : null}
+
             <SectionLabel text="Duplicate finder" theme={theme} />
             <Card theme={theme}>
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>

@@ -24,6 +24,7 @@ import {
 } from "./src/screens/PeriodScreens";
 import { MapScreen } from "./src/screens/MapScreen";
 import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
+import { UploadQueueScreen } from "./src/screens/UploadQueueScreen";
 import { DestinationsScreen } from "./src/screens/DestinationsScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
@@ -149,6 +150,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           <Stack.Screen name="MonthsOfYear" component={MonthsOfYearScreen} />
           <Stack.Screen name="PeriodPhotos" component={PeriodPhotosScreen} />
           <Stack.Screen name="Maintenance" component={MaintenanceScreen} />
+          <Stack.Screen name="UploadQueue" component={UploadQueueScreen} />
           <Stack.Screen name="Destinations" component={DestinationsScreen} />
         </Stack.Navigator>
       </NavigationContainer>

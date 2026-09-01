@@ -492,6 +492,19 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
           </View>
         </Card>
+        <Card theme={theme} onPress={() => navigation.navigate("UploadQueue")}>
+          <View style={styles.folderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                Upload queue
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                Pending, running and failed uploads — retry or remove items
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+          </View>
+        </Card>
 
         <SectionLabel text="Database" theme={theme} />
         <Card theme={theme}>

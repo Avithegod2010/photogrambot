@@ -741,11 +741,30 @@ export async function updateQueueItem(id: number, patch: Partial<QueueRow>): Pro
   await d.runAsync(`UPDATE upload_queue SET ${setSql} WHERE id = ?`, [...values, id]);
 }
 
-export async function requeueFailed(): Promise<void> {
+export async function retryFailedUploads(): Promise<number> {
   const d = await getDb();
-  await d.runAsync(
-    "UPDATE upload_queue SET state = 'pending', retries = 0, next_attempt_at = NULL WHERE state IN ('failed')"
-  );
+  let requeued = 0;
+  await d.withTransactionAsync(async () => {
+    // A newer pending/running row for the same asset means the failed row is
+    // redundant — requeuing it would hit uq_queue_active_local, so drop it.
+    await d.runAsync(
+      `DELETE FROM upload_queue
+       WHERE state = 'failed'
+         AND EXISTS (
+           SELECT 1 FROM upload_queue q2
+           WHERE q2.local_id = upload_queue.local_id
+             AND q2.state IN ('pending','running')
+         )`
+    );
+    const res = await d.runAsync(
+      `UPDATE upload_queue
+       SET state = 'pending', retries = 0, error = NULL, next_attempt_at = NULL
+       WHERE state = 'failed'`
+    );
+    requeued = res.changes ?? 0;
+    await d.runAsync("UPDATE photos SET status = 'local' WHERE status = 'failed'");
+  });
+  return requeued;
 }
 
 export async function getQueueCounts(): Promise<Record<string, number>> {
@@ -756,6 +775,68 @@ export async function getQueueCounts(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const r of rows) out[r.state] = r.n;
   return out;
+}
+
+export async function getQueueItems(states: string[], limit = 200): Promise<QueueRow[]> {
+  const d = await getDb();
+  if (states.length === 0) return [];
+  const placeholders = states.map(() => "?").join(",");
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM upload_queue
+     WHERE state IN (${placeholders})
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [...states, limit]
+  );
+  return rows.map((r) => r as QueueRow);
+}
+
+export async function retryQueueItem(id: number): Promise<boolean> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ local_id: string }>(
+    "SELECT local_id FROM upload_queue WHERE id = ? AND state = 'failed'",
+    [id]
+  );
+  if (!row) return false;
+  const activeRow = await d.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM upload_queue
+     WHERE local_id = ? AND state IN ('pending','running') AND id != ?`,
+    [row.local_id, id]
+  );
+  if ((activeRow?.n ?? 0) > 0) {
+    // An active row already covers this asset — the failed row is redundant.
+    await d.runAsync("DELETE FROM upload_queue WHERE id = ?", [id]);
+    return true;
+  }
+  try {
+    await d.runAsync(
+      `UPDATE upload_queue
+       SET state = 'pending', retries = 0, error = NULL, next_attempt_at = NULL
+       WHERE id = ? AND state = 'failed'`,
+      [id]
+    );
+  } catch (e) {
+    if (String((e as Error)?.message ?? "").includes("UNIQUE constraint failed")) {
+      // Lost the race with a concurrent scan — drop the now-redundant row.
+      await d.runAsync("DELETE FROM upload_queue WHERE id = ?", [id]);
+      return true;
+    }
+    throw e;
+  }
+  await d.runAsync(
+    "UPDATE photos SET status = 'local' WHERE status = 'failed' AND local_id = ?",
+    [row.local_id]
+  );
+  return true;
+}
+
+export async function removeQueueItem(id: number): Promise<boolean> {
+  const d = await getDb();
+  const res = await d.runAsync(
+    "DELETE FROM upload_queue WHERE id = ? AND state IN ('pending','failed')",
+    [id]
+  );
+  return (res.changes ?? 0) > 0;
 }
 
 export async function clearFinishedQueue(): Promise<void> {
