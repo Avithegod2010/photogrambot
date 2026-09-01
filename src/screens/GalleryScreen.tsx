@@ -182,7 +182,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       !!filters &&
       (!!(filters.takenWithinDays && filters.takenWithinDays > 0) ||
         !!filters.hasGps ||
-        !!(filters.camera && filters.camera.trim()));
+        !!(filters.camera && filters.camera.trim()) ||
+        !!filters.notBackedUp);
     if (q.trim().length === 0 && !hasFilters) {
       if (seq === searchSeq.current) setSearchResults(null);
       return;
@@ -201,7 +202,10 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const seq = ++searchSeq.current;
     const hasFilters =
       !!f &&
-      (!!(f.takenWithinDays && f.takenWithinDays > 0) || !!f.hasGps || !!(f.camera && f.camera.trim()));
+      (!!(f.takenWithinDays && f.takenWithinDays > 0) ||
+        !!f.hasGps ||
+        !!(f.camera && f.camera.trim()) ||
+        !!f.notBackedUp);
     if (!hasFilters && search.trim().length === 0) {
       setSearchResults(null);
       return;
@@ -832,6 +836,7 @@ function FilterSheet({
   const [days, setDays] = useState<number | null>(initial?.takenWithinDays ?? null);
   const [hasGps, setHasGps] = useState(!!initial?.hasGps);
   const [camera, setCamera] = useState(initial?.camera ?? "");
+  const [notBackedUp, setNotBackedUp] = useState(!!initial?.notBackedUp);
   const ranges: { label: string; value: number | null }[] = [
     { label: "Any time", value: null },
     { label: "24 h", value: 1 },
@@ -883,6 +888,13 @@ function FilterSheet({
             onChange={setHasGps}
             theme={theme}
           />
+          <ToggleRow
+            title="Not backed up yet"
+            subtitle="Only photos without a copy in your Telegram channel"
+            value={notBackedUp}
+            onChange={setNotBackedUp}
+            theme={theme}
+          />
           <View style={{ height: 10 }} />
           <TextField
             value={camera}
@@ -899,6 +911,7 @@ function FilterSheet({
                 setDays(null);
                 setHasGps(false);
                 setCamera("");
+                setNotBackedUp(false);
                 onApply(null);
               }}
             />
@@ -910,6 +923,7 @@ function FilterSheet({
                   takenWithinDays: days,
                   hasGps,
                   camera: camera.trim() || null,
+                  notBackedUp,
                 })
               }
             />
