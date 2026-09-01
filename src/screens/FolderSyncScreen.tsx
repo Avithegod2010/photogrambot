@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   StyleSheet,
   Switch,
   Text,
@@ -46,7 +47,8 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
         <Text style={[styles.title, { color: theme.colors.onSurface }]}>Folder sync</Text>
       </View>
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
-        Folders switched off are never uploaded by auto-sync. Turn a folder off to exclude it.
+        Folders switched off are never uploaded by auto-sync. Long-press a folder to exclude it —
+        long-press an excluded folder to re-include it.
       </Text>
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primary} />
@@ -58,13 +60,28 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
           renderItem={({ item }) => {
             const isExcluded = excluded.has(item.name);
             return (
-              <View style={[styles.row, { backgroundColor: theme.colors.surface }]}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.row,
+                  { backgroundColor: theme.colors.surface },
+                  pressed && { backgroundColor: theme.colors.surfaceContainer },
+                ]}
+                onLongPress={() => toggleFolder(item.name, isExcluded)}
+                delayLongPress={300}
+              >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600" }} numberOfLines={1}>
+                  <Text
+                    style={{
+                      color: isExcluded ? theme.colors.onSurfaceVariant : theme.colors.onSurface,
+                      fontWeight: "600",
+                    }}
+                    numberOfLines={1}
+                  >
                     {item.name}
                   </Text>
                   <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
                     {item.count} photo{item.count === 1 ? "" : "s"}
+                    {isExcluded ? " · Excluded" : ""}
                   </Text>
                 </View>
                 <Switch
@@ -73,7 +90,7 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
                   trackColor={{ false: theme.colors.surfaceHighest, true: theme.colors.primaryContainer }}
                   thumbColor={!isExcluded ? theme.colors.primary : theme.colors.onSurfaceVariant}
                 />
-              </View>
+              </Pressable>
             );
           }}
         />
