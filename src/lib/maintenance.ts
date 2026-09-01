@@ -77,12 +77,15 @@ export interface VerificationResult {
 }
 
 // Stride sample — deterministic spread (re-runs re-check the same rows), not random.
+// Inclusive linspace over [0, rows.length-1]: rows are newest-first, so this keeps
+// the newest upload (index 0) and the oldest in every sample, unlike a half-open stride.
 function sampleRows<T>(rows: T[], sampleSize: number): T[] {
   if (rows.length <= sampleSize) return rows;
+  if (sampleSize < 2) return [rows[0]];
   const sampled: T[] = [];
   const seen = new Set<number>();
   for (let i = 0; i < sampleSize; i++) {
-    const idx = Math.floor((i * rows.length) / sampleSize);
+    const idx = Math.floor((i * (rows.length - 1)) / (sampleSize - 1));
     if (seen.has(idx)) continue;
     seen.add(idx);
     sampled.push(rows[idx]);
