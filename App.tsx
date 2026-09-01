@@ -267,11 +267,13 @@ async function bootstrapBackgroundTasks(): Promise<void> {
   try {
     const { prefs } = useSettingsStore.getState();
     await purgeExpiredTrash(prefs.trashAutoPurgeDays);
+    // The failure banner must reach manual-sync users too — permission is
+    // global, not an auto-sync feature.
+    void requestNotificationPermission();
     try {
       await pollUpdates();
     } catch {}
     if (prefs.autoSync) {
-      void requestNotificationPermission();
       if (await canAutoSyncNow(prefs)) {
         const since = Math.max(
           prefs.lastFullSyncAt,
