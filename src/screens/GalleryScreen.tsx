@@ -37,11 +37,22 @@ import { Button, Dialog, TextField } from "../components/ui";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
 
-type LocalItem = { id: string; taken_at: number; asset: MediaLibrary.AssetMetadata };
+type LocalItem = {
+  id: string;
+  taken_at: number;
+  width: number | null;
+  height: number | null;
+  asset: MediaLibrary.AssetMetadata;
+};
 
 const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
 const COLUMNS = 3;
+
+// Local-roll page size. The new Query builder exposes no cursor API
+// (offset/limit only), so infinite scroll pages through the media store by
+// raw-row offset and dedupes ids on append.
+const LOCAL_PAGE_SIZE = 600;
 
 export function GalleryScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -69,7 +80,20 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   // operate on the backed-up (DB) library.
   const [localAssets, setLocalAssets] = useState<LocalItem[]>([]);
   const [localLoading, setLocalLoading] = useState(true);
+  const [loadingMoreLocal, setLoadingMoreLocal] = useState(false);
   const [uploadedIds, setUploadedIds] = useState<Set<string>>(new Set());
+  // Paging cursor = raw rows already consumed from the media store (not the
+  // list length: includeVideos pages are filtered in JS). hasMore lives in a
+  // ref so the onEndReached guard is synchronous.
+  const localPageOffset = useRef(0);
+  const localHasMore = useRef(true);
+  const loadingMoreRef = useRef(false);
+  // Mirror of the ids in localAssets (state updates are async); loadMoreLocal
+  // reads it synchronously to decide whether a page was all re-shown rows.
+  const seenLocalIds = useRef<Set<string>>(new Set());
+  // Refresh and infinite scroll share one cursor: run local loads strictly
+  // one at a time so two queries can never advance the same offset.
+  const localChain = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     void loadInitial();
@@ -85,31 +109,123 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     void getUploadedLocalIds().then(setUploadedIds);
   }, [photos, decoy]);
 
-  async function loadLocal() {
+  function toLocalItem(a: MediaLibrary.AssetMetadata): LocalItem {
+    return {
+      id: a.id,
+      taken_at: a.creationTime ?? 0,
+      width: a.width,
+      height: a.height,
+      asset: a,
+    };
+  }
+
+  function fetchLocalPage(includeVideos: boolean): Promise<MediaLibrary.AssetMetadata[]> {
+    const q = new MediaLibrary.Query().orderBy({
+      key: MediaLibrary.AssetField.CREATION_TIME,
+      ascending: false,
+    });
+    if (!includeVideos) {
+      q.eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE);
+    }
+    return q.offset(localPageOffset.current).limit(LOCAL_PAGE_SIZE).exeForMetadata();
+  }
+
+  // Maps one raw store page to list items, advances the offset cursor and
+  // drops ids already seen (offsets shift when new media lands mid-scroll).
+  // Must be called outside setState updaters — it mutates the cursor refs.
+  function consumeLocalPage(raw: MediaLibrary.AssetMetadata[], includeVideos: boolean): LocalItem[] {
+    const mapped = (includeVideos ? raw.filter(isWantedPickerMedia) : raw).map(toLocalItem);
+    localPageOffset.current += raw.length;
+    if (raw.length < LOCAL_PAGE_SIZE) localHasMore.current = false;
+    const seen = seenLocalIds.current;
+    const out: LocalItem[] = [];
+    for (const it of mapped) {
+      if (!seen.has(it.id)) {
+        seen.add(it.id);
+        out.push(it);
+      }
+    }
+    return out;
+  }
+
+  // Returns how many rows are genuinely new to the list (mirrored in
+  // seenLocalIds) — an all-duplicate page must not stall infinite scroll.
+  function appendLocalPage(raw: MediaLibrary.AssetMetadata[], includeVideos: boolean): number {
+    const page = consumeLocalPage(raw, includeVideos);
+    if (page.length === 0) return 0;
+    setLocalAssets((prev) => [...prev, ...page]);
+    return page.length;
+  }
+
+  function queueLocalLoad(task: () => Promise<void>) {
+    localChain.current = localChain.current.then(task, task);
+    return localChain.current;
+  }
+
+  // Page 1 (mount / pull-to-refresh): resets the cursor and replaces the list.
+  function loadLocal() {
     if (decoy) {
+      localPageOffset.current = 0;
+      localHasMore.current = false;
+      seenLocalIds.current = new Set();
       setLocalAssets([]);
       setLocalLoading(false);
-      return;
+      return Promise.resolve();
     }
-    try {
-      const includeVideos = useSettingsStore.getState().prefs.includeVideos;
-      let metas = await new MediaLibrary.Query()
-        .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
-        .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
-        .limit(2000)
-        .exeForMetadata();
-      if (includeVideos) {
-        const all = await new MediaLibrary.Query()
-          .orderBy({ key: MediaLibrary.AssetField.CREATION_TIME, ascending: false })
-          .limit(2400)
-          .exeForMetadata();
-        metas = all.filter(isWantedPickerMedia);
+    return queueLocalLoad(async () => {
+      localPageOffset.current = 0;
+      localHasMore.current = true;
+      seenLocalIds.current = new Set();
+      try {
+        const includeVideos = useSettingsStore.getState().prefs.includeVideos;
+        // When videos are included, the media-type-less query subsumes the
+        // images-only shape — only that one runs (the old code executed both
+        // and discarded the first result).
+        let raw = await fetchLocalPage(includeVideos);
+        setLocalAssets(consumeLocalPage(raw, includeVideos));
+        // A raw page can be all unwanted media (audio, …): keep consuming so
+        // the first screenful is never an empty page (bounded like the old
+        // 2400-row fetch).
+        let appended = 0;
+        let fetched = raw.length;
+        while (appended === 0 && raw.length === LOCAL_PAGE_SIZE && fetched < LOCAL_PAGE_SIZE * 10) {
+          raw = await fetchLocalPage(includeVideos);
+          fetched += raw.length;
+          appended = appendLocalPage(raw, includeVideos);
+        }
+      } catch {
+        setLocalAssets([]);
+        localHasMore.current = false;
+      } finally {
+        setLocalLoading(false);
       }
-      setLocalAssets(metas.map((a) => ({ id: a.id, taken_at: a.creationTime ?? 0, asset: a })));
-    } catch {
-      setLocalAssets([]);
-    }
-    setLocalLoading(false);
+    });
+  }
+
+  // Next page for infinite scroll. Errors stop paging (append nothing);
+  // pull-to-refresh re-arms it via loadLocal.
+  function loadMoreLocal() {
+    if (decoy || loadingMoreRef.current || !localHasMore.current || localLoading) return;
+    loadingMoreRef.current = true;
+    setLoadingMoreLocal(true);
+    queueLocalLoad(async () => {
+      try {
+        const includeVideos = useSettingsStore.getState().prefs.includeVideos;
+        let raw = await fetchLocalPage(includeVideos);
+        let appended = appendLocalPage(raw, includeVideos);
+        let fetched = raw.length;
+        while (appended === 0 && raw.length === LOCAL_PAGE_SIZE && fetched < LOCAL_PAGE_SIZE * 10) {
+          raw = await fetchLocalPage(includeVideos);
+          fetched += raw.length;
+          appended = appendLocalPage(raw, includeVideos);
+        }
+      } catch {
+        localHasMore.current = false;
+      } finally {
+        loadingMoreRef.current = false;
+        setLoadingMoreLocal(false);
+      }
+    });
   }
 
   const sections = useMemo(() => {
@@ -589,7 +705,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : (
         <FlatList
           data={localSections}
-          keyExtractor={(s) => s.label}
+          // Offset shifts from media added/deleted mid-scroll can leave two
+          // sections with the same date label; the index keeps keys unique.
+          keyExtractor={(s, i) => `${i}:${s.label}`}
+          onEndReached={loadMoreLocal}
+          onEndReachedThreshold={0.6}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
           }
@@ -609,7 +729,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                   {item.label}
                 </Text>
               </View>
-              <SectionGrid photos={item.data} staggered={false} renderTile={renderLocalTile} />
+              <SectionGrid photos={item.data} staggered={staggered} renderTile={renderLocalTile} />
             </View>
           )}
           ListEmptyComponent={
@@ -625,6 +745,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                 </Text>
               </View>
             )
+          }
+          ListFooterComponent={
+            loadingMoreLocal ? (
+              <ActivityIndicator style={{ marginVertical: 16 }} color={theme.colors.primary} />
+            ) : null
           }
         />
       )}
