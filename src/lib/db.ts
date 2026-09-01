@@ -948,7 +948,7 @@ export async function getStorageSummary(): Promise<StorageSummary> {
   const now = new Date();
   const since = new Date(now.getFullYear(), now.getMonth() - 5, 1);
   const rows = await d.getAllAsync<{ ym: string; bytes: number }>(
-    `SELECT strftime('%Y-%m', COALESCE(uploaded_at, taken_at) / 1000, 'unixepoch') AS ym,
+    `SELECT strftime('%Y-%m', COALESCE(uploaded_at, taken_at) / 1000, 'unixepoch', 'localtime') AS ym,
             COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
      FROM photos
      WHERE COALESCE(uploaded_at, taken_at) >= ?
@@ -987,7 +987,7 @@ export async function getMonthlyBuckets(monthsBack = 6): Promise<MonthBucket[]> 
   const now = new Date();
   const since = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1);
   const rows = await d.getAllAsync<{ ym: string; count: number; bytes: number }>(
-    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch') AS ym,
+    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch', 'localtime') AS ym,
             COUNT(*) AS count,
             COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
      FROM photos
