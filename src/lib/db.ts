@@ -926,6 +926,56 @@ export async function getLibraryCounts(): Promise<{ local: number; cloud: number
   return { local: row?.local ?? 0, cloud: row?.cloud ?? 0 };
 }
 
+export interface StorageSummary {
+  cloudBytes: number;
+  cloudCount: number;
+  localBytes: number;
+  localCount: number;
+  months: { label: string; bytes: number }[];
+}
+
+export async function getStorageSummary(): Promise<StorageSummary> {
+  const d = await getDb();
+  const split = await d.getFirstAsync<any>(`
+    SELECT
+      SUM(CASE WHEN status = 'uploaded' THEN COALESCE(size,0) ELSE 0 END) AS cloudBytes,
+      SUM(CASE WHEN status = 'uploaded' THEN 1 ELSE 0 END) AS cloudCount,
+      SUM(CASE WHEN status != 'uploaded' THEN COALESCE(size,0) ELSE 0 END) AS localBytes,
+      SUM(CASE WHEN status != 'uploaded' THEN 1 ELSE 0 END) AS localCount
+    FROM photos
+    WHERE id NOT IN (SELECT photo_id FROM trash)
+  `);
+  const now = new Date();
+  const since = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const rows = await d.getAllAsync<{ ym: string; bytes: number }>(
+    `SELECT strftime('%Y-%m', COALESCE(uploaded_at, taken_at) / 1000, 'unixepoch') AS ym,
+            COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
+     FROM photos
+     WHERE COALESCE(uploaded_at, taken_at) >= ?
+       AND status = 'uploaded'
+       AND id NOT IN (SELECT photo_id FROM trash)
+     GROUP BY ym`,
+    [since.getTime()]
+  );
+  const byKey = new Map(rows.map((r) => [r.ym, r.bytes]));
+  const months: { label: string; bytes: number }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const dte = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    const key = `${dte.getFullYear()}-${String(dte.getMonth() + 1).padStart(2, "0")}`;
+    months.push({
+      label: dte.toLocaleString(undefined, { month: "short" }),
+      bytes: byKey.get(key) ?? 0,
+    });
+  }
+  return {
+    cloudBytes: split?.cloudBytes ?? 0,
+    cloudCount: split?.cloudCount ?? 0,
+    localBytes: split?.localBytes ?? 0,
+    localCount: split?.localCount ?? 0,
+    months,
+  };
+}
+
 export interface MonthBucket {
   label: string;
   count: number;
