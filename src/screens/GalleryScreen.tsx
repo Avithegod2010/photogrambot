@@ -182,11 +182,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         // images-only shape — only that one runs (the old code executed both
         // and discarded the first result).
         let raw = await fetchLocalPage(includeVideos);
-        setLocalAssets(consumeLocalPage(raw, includeVideos));
+        const firstPage = consumeLocalPage(raw, includeVideos);
+        setLocalAssets(firstPage);
         // A raw page can be all unwanted media (audio, …): keep consuming so
         // the first screenful is never an empty page (bounded like the old
-        // 2400-row fetch).
-        let appended = 0;
+        // 2400-row fetch). Seed `appended` from the first consume — otherwise
+        // a productive page 1 still pulls page 2 on every mount/refresh.
+        let appended = firstPage.length;
         let fetched = raw.length;
         while (appended === 0 && raw.length === LOCAL_PAGE_SIZE && fetched < LOCAL_PAGE_SIZE * 10) {
           raw = await fetchLocalPage(includeVideos);
