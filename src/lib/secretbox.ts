@@ -1,7 +1,24 @@
 import * as Crypto from "expo-crypto";
+import { pbkdf2Sha256 } from "./pbkdf2";
 
+// pbgcm1: AES-256-GCM keyed by a homebrew KDF (1000 chained SHA-256s of
+// "<hex>:<i>" — nonstandard, no HMAC construction, under-stretched).
+// pbgcm2: same AES-GCM mechanics, key = PBKDF2-HMAC-SHA256 (pure-TS, pbkdf2.ts)
+// over the raw 16 salt bytes. Both magics stay readable (see decryptText).
 const MAGIC = "pbgcm1";
+const MAGIC_V2 = "pbgcm2";
+// Legacy pbgcm1 KDF rounds — decrypt-only, never used for new backups.
 const KEY_ITERATIONS = 1000;
+
+// pbgcm2 work factor. Backup/restore is a rare, explicitly-triggered
+// interactive operation — unlike the PIN path (applock.ts budgets ~300 ms at
+// 20k iterations) a multi-second derivation is acceptable, and the passphrase
+// protects the entire library index, so stretching is the only real cost
+// lever. OWASP recommends 600k for PBKDF2-HMAC-SHA256. Measured with this
+// pure-TS implementation in desktop Node (V8): ~110 ms per 100k iterations
+// (~0.66 s at 600k; node:crypto native reference ~0.25 s) — expect ~2-4x that
+// on Hermes, i.e. a couple of seconds on the reference device, by design.
+const PBKDF2_BACKUP_ITERATIONS = 600000;
 
 const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -94,7 +111,12 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
-async function deriveKey(passphrase: string, saltB64: string): Promise<Uint8Array> {
+// Legacy pbgcm1 KDF, kept verbatim from the original implementation (renamed
+// only). Ciphertext lives ONLY in the Telegram channel (pinned message /
+// channel docs) — there is no local copy to migrate and no rewrite pass will
+// ever touch old blobs, so this must stay byte-exact for as long as a
+// pre-pbgcm2 backup may be restored.
+async function legacyDeriveKey(passphrase: string, saltB64: string): Promise<Uint8Array> {
   let hex = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     `${saltB64}:${passphrase}`
@@ -106,30 +128,48 @@ async function deriveKey(passphrase: string, saltB64: string): Promise<Uint8Arra
 }
 
 export function isEncryptedBackup(text: string): boolean {
-  return text.startsWith(`${MAGIC}:`);
+  // Restore-path detector (backup.ts deserializeBackup): must accept BOTH
+  // magics — a pre-pbgcm2 channel backup is still an encrypted backup.
+  return text.startsWith(`${MAGIC}:`) || text.startsWith(`${MAGIC_V2}:`);
 }
 
 export async function encryptText(plain: string, passphrase: string): Promise<string> {
   const saltBytes = Crypto.getRandomBytes(16);
   const saltB64 = toB64(saltBytes);
-  const key = await Crypto.AESEncryptionKey.import(await deriveKey(passphrase, saltB64));
+  // pbgcm2 keys from the RAW salt bytes (the salt's base64 text was pbgcm1
+  // key material and must not leak into the new derivation). utf8ToBytes is
+  // surrogate-pair aware, byte-identical to pbkdf2.ts's utf8() helper.
+  const key = await Crypto.AESEncryptionKey.import(
+    pbkdf2Sha256(utf8ToBytes(passphrase), saltBytes, PBKDF2_BACKUP_ITERATIONS, 32)
+  );
   const sealed = await Crypto.aesEncryptAsync(utf8ToBytes(plain), key);
   const iv = (await sealed.iv()) as Uint8Array;
   const ciphertext = (await sealed.ciphertext({ includeTag: true })) as Uint8Array;
-  return `${MAGIC}:${saltB64}:${toB64(iv)}:${toB64(ciphertext)}`;
+  return `${MAGIC_V2}:${saltB64}:${toB64(iv)}:${toB64(ciphertext)}`;
 }
 
 export async function decryptText(payload: string, passphrase: string): Promise<string> {
   const parts = payload.trim().split(":");
-  if (parts.length !== 4 || parts[0] !== MAGIC) {
+  if (parts.length !== 4 || (parts[0] !== MAGIC && parts[0] !== MAGIC_V2)) {
     throw new Error("Unrecognized encrypted backup format");
   }
-  const [, saltB64, ivB64, ctB64] = parts;
-  const key = await Crypto.AESEncryptionKey.import(await deriveKey(passphrase, saltB64));
-  const sealed = Crypto.AESSealedData.fromParts(ivB64, ctB64);
+  const [magic, saltB64, ivB64, ctB64] = parts;
+  // Dispatch on magic: pbgcm2 runs PBKDF2 over the decoded salt bytes;
+  // pbgcm1 keeps the legacy KDF over the salt's base64 TEXT (that string is
+  // part of the old key material, so it must pass through unchanged).
+  const key =
+    magic === MAGIC_V2
+      ? pbkdf2Sha256(utf8ToBytes(passphrase), fromB64(saltB64), PBKDF2_BACKUP_ITERATIONS, 32)
+      : await legacyDeriveKey(passphrase, saltB64);
+  const aesKey = await Crypto.AESEncryptionKey.import(key);
+  let sealed: Crypto.AESSealedData;
   let plainBytes: Uint8Array;
   try {
-    plainBytes = (await Crypto.aesDecryptAsync(sealed, key, {
+    // fromParts decodes base64 natively — invalid iv/ct text throws a raw
+    // IllegalArgumentException before GCM ever runs; catch it so every
+    // failure surfaces as the friendly message.
+    sealed = Crypto.AESSealedData.fromParts(ivB64, ctB64);
+    plainBytes = (await Crypto.aesDecryptAsync(sealed, aesKey, {
       output: "bytes",
     })) as Uint8Array;
   } catch {
