@@ -84,11 +84,11 @@ async function checkOne(
     const dk = pbkdf2Sha256(utf8(pin), parsed.salt, parsed.iterations, 32);
     return ctEqualHex(bytesToHex(dk), parsed.dkHex) ? role : null;
   }
-  // Legacy: single unsalted SHA-256 ("photogrambot:<pin>"). Constant-time
-  // compare not needed on this path — the digest is over a fixed-format
-  // string, and any match migrates the row to pb2 immediately anyway.
+  // Legacy: single unsalted SHA-256 ("photogrambot:<pin>"). Both sides are
+  // fixed-length 64-char hex, so the shared constant-time compare costs
+  // nothing; any match migrates the row to pb2 immediately anyway.
   const legacy = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `photogrambot:${pin}`);
-  if (legacy !== stored) return null;
+  if (!ctEqualHex(legacy, stored)) return null;
   try {
     await SecureStore.setItemAsync(key, newHash(pin));
   } catch {

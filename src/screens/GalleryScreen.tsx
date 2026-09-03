@@ -66,6 +66,16 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PhotoRow[] | null>(null);
+  // "Back up" appears in the selection bar only when a selected row is still
+  // local-only (computed from the same source the bar renders ids from).
+  const hasBackable = useMemo(() => {
+    const src = searchResults ?? photos;
+    if (selection.size === 0) return false;
+    for (const p of src) {
+      if (selection.has(p.id) && p.status === "local" && !!p.local_id) return true;
+    }
+    return false;
+  }, [selection, searchResults, photos]);
   const [filters, setFilters] = useState<SearchFilters | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,6 +83,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
   const { albums, newAlbum, addPhotosToAlbum } = useLibraryStore();
   const staggered = useSettingsStore((s) => s.prefs.staggeredGrid);
+  const includeVideos = useSettingsStore((s) => s.prefs.includeVideos);
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
   // The Gallery tab mirrors the phone's own gallery: every local asset, with
@@ -108,6 +119,16 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
     void getUploadedLocalIds().then(setUploadedIds);
   }, [photos, decoy]);
+
+  // A mid-scroll includeVideos toggle would page a different query shape
+  // against the old offset cursor — reload page 1 when the pref flips.
+  // The ref skips the mount run: loadInitial already kick off loadLocal.
+  const mountedIncludeVideos = useRef(includeVideos);
+  useEffect(() => {
+    if (mountedIncludeVideos.current === includeVideos) return;
+    mountedIncludeVideos.current = includeVideos;
+    void loadLocal();
+  }, [includeVideos]);
 
   function toLocalItem(a: MediaLibrary.AssetMetadata): LocalItem {
     return {
@@ -367,7 +388,44 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
   }
 
-  async function trashSelected() {    const ids = Array.from(selection);
+  // Local-only selected rows → queue originals for upload. Same path as the
+  // viewer's Back up action; enqueueUploads skips already-uploaded/queued rows.
+  async function backUpSelected() {
+    const items = (searchResults ?? photos).filter(
+      (p): p is PhotoRow & { local_id: string } => selection.has(p.id) && p.status === "local" && !!p.local_id
+    );
+    if (items.length === 0) return;
+    try {
+      const { enqueueUploads, processQueue } = await import("../lib/uploader");
+      const n = await enqueueUploads(
+        items.map((p) => ({
+          local_id: p.local_id,
+          filename: p.filename,
+          folder: p.folder,
+          size: p.size,
+          width: p.width,
+          height: p.height,
+          taken_at: p.taken_at,
+          added_at: p.added_at,
+        })),
+        "manual"
+      );
+      if (n > 0) void processQueue();
+      Alert.alert(
+        n > 0 ? "Back up started" : "Already backing up",
+        n > 0
+          ? `${n} photo${n === 1 ? "" : "s"} queued for upload to your channel.`
+          : "The selected photos are already queued or backed up."
+      );
+      setSelection(new Set());
+      setSelectionMode(false);
+    } catch (e: any) {
+      Alert.alert("Back up failed", e?.message ?? "Could not queue the photos.");
+    }
+  }
+
+  async function trashSelected() {
+    const ids = Array.from(selection);
     Alert.alert(
       `Move ${ids.length} photo${ids.length === 1 ? "" : "s"} to trash?`,
       "You can restore them from Collections → Trash, or delete from Telegram permanently later.",
@@ -663,9 +721,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                 {selectionMode ? (
                   <Pressable
                     onPress={() =>
-                      useLibraryStore
-                        .getState()
-                        .selectAll([...selection, ...item.data.map((p) => p.id)])
+                      setSelection(new Set([...selection, ...item.data.map((p) => p.id)]))
                     }
                     hitSlop={8}
                   >
@@ -767,7 +823,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             {selection.size} selected
           </Text>
           <Pressable
-            onPress={() => useLibraryStore.getState().selectAll((searchResults ?? photos).map((p) => p.id))}
+            onPress={() => setSelection(new Set((searchResults ?? photos).map((p) => p.id)))}
             style={styles.selAction}
           >
             <Text style={{ color: theme.colors.primary }}>All</Text>
@@ -775,6 +831,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Share</Text>
           </Pressable>
+          {hasBackable ? (
+            <Pressable onPress={() => void backUpSelected()} style={styles.selAction}>
+              <Text style={{ color: theme.colors.primary }}>Back up</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => setAlbumDialogVisible(true)} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Album</Text>
           </Pressable>
@@ -964,6 +1025,17 @@ function FilterSheet({
   const [hasGps, setHasGps] = useState(!!initial?.hasGps);
   const [camera, setCamera] = useState(initial?.camera ?? "");
   const [notBackedUp, setNotBackedUp] = useState(!!initial?.notBackedUp);
+  // The Modal stays mounted, so useState's initial value only seeds the FIRST
+  // open — re-seed from the applied filters every time the sheet opens.
+  // Deps intentionally [visible] only: re-seeding while open would clobber edits.
+  useEffect(() => {
+    if (!visible) return;
+    setDays(initial?.takenWithinDays ?? null);
+    setHasGps(!!initial?.hasGps);
+    setCamera(initial?.camera ?? "");
+    setNotBackedUp(!!initial?.notBackedUp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
   const ranges: { label: string; value: number | null }[] = [
     { label: "Any time", value: null },
     { label: "24 h", value: 1 },
