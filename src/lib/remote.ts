@@ -1,0 +1,132 @@
+// Remote control via bot commands — the owner messages the channel from any
+// Telegram client and the app reacts. Wired into pollUpdates (updates.ts):
+// non-channel messages are currently DROPPED there, so commands must arrive
+// in the configured channel chat itself (the usual setup — private channel
+// with the bot as admin posting backups).
+//
+// Commands (case-insensitive, reply forms where noted):
+//   /status          — library + queue totals
+//   /sync            — full-gallery scan + enqueue (respects network gates)
+//   /pause           — hold auto-sync (watcher/background/bootstrap)
+//   /resume          — release the pause, then one scan
+//   /delete          — REPLY to a backed-up photo's message → trashes it
+//                      locally and deletes the channel message
+//
+// Security: every command is authenticated by the channel — only messages
+// inside the configured channel chat are honored (updates.ts already drops
+// foreign chats before we run). /delete additionally requires a reply target
+// that maps to a known photo row.
+
+import {
+  getStats,
+  getPhotoByMessageId,
+  addToTrash,
+  markTrashRemoteDeleted,
+  kvGet,
+  kvSet,
+} from "./db";
+import { sendMessage, deleteMessage, type TgMessage } from "./telegram";
+import { tokenForPhoto } from "./destinations";
+import { formatBytes } from "./format";
+
+const PAUSE_KEY = "remote_paused";
+
+export async function isRemotePaused(): Promise<boolean> {
+  return (await kvGet(PAUSE_KEY)) === "1";
+}
+
+function fmt(n: number): string {
+  return String(n);
+}
+
+async function replyStatus(chatId: string, replyTo: number): Promise<void> {
+  const s = await getStats();
+  const paused = await isRemotePaused();
+  const lines = [
+    `PhotogramBot status`,
+    `Library: ${fmt(s.total)} photos, ${fmt(s.uploaded)} backed up (${formatBytes(s.totalBytes)})`,
+    `Queue: ${fmt(s.pending)} pending, ${fmt(s.failed)} failed`,
+    `Trash: ${fmt(s.trashed)}`,
+    paused ? "Auto-sync: PAUSED (send /resume)" : "Auto-sync: active",
+  ];
+  await sendMessage(chatId, lines.join("\n"), { replyToMessageId: replyTo });
+}
+
+// Returns true if the message was a command (caller should skip ingestion).
+export async function handleRemoteCommand(
+  msg: TgMessage,
+  chatId: string
+): Promise<boolean> {
+  const text = (msg.text ?? "").trim();
+  if (!text.startsWith("/")) return false;
+  const cmd = text.split(/[\s@]/)[0].toLowerCase();
+  if (!["/status", "/sync", "/pause", "/resume", "/delete"].includes(cmd)) {
+    return false; // unknown slash command — not ours; let ingestion proceed
+  }
+
+  if (cmd === "/status") {
+    await replyStatus(chatId, msg.message_id);
+  } else if (cmd === "/pause") {
+    await kvSet(PAUSE_KEY, "1");
+    await sendMessage(chatId, "Auto-sync paused. Send /resume to continue.", {
+      replyToMessageId: msg.message_id,
+    });
+  } else if (cmd === "/resume") {
+    await kvSet(PAUSE_KEY, "0");
+    // Release + immediate top-up scan so the effect is observable. Like the
+    // in-app "Sync full gallery now", this skips the Wi-Fi/charging gates —
+    // it's an explicit request, and enqueueUploads dedupes active rows.
+    const { runSyncNow } = await import("./sync");
+    const r = await runSyncNow();
+    await sendMessage(
+      chatId,
+      `Resumed. Scanned ${r.scanned} photos, ${r.enqueued} new queued.`,
+      { replyToMessageId: msg.message_id }
+    );
+  } else if (cmd === "/sync") {
+    const { runSyncNow } = await import("./sync");
+    const r = await runSyncNow();
+    await sendMessage(
+      chatId,
+      `Sync complete: ${r.scanned} photos scanned, ${r.enqueued} new queued.`,
+      { replyToMessageId: msg.message_id }
+    );
+  } else if (cmd === "/delete") {
+    const target = msg.reply_to_message;
+    if (!target) {
+      await sendMessage(
+        chatId,
+        "Reply to a backed-up photo's message with /delete to remove it.",
+        { replyToMessageId: msg.message_id }
+      );
+      return true;
+    }
+    const photo = await getPhotoByMessageId(target.message_id);
+    if (!photo) {
+      await sendMessage(
+        chatId,
+        "That message isn't a backed-up photo this app manages.",
+        { replyToMessageId: msg.message_id }
+      );
+      return true;
+    }
+    const token = await tokenForPhoto(photo);
+    // The reply may point at the original OR the preview post — delete every
+    // known message id, deduped. deleteMessage fails silently on
+    // already-gone messages, so replays stay idempotent.
+    const ids = new Set<number>([target.message_id]);
+    if (photo.message_id) ids.add(photo.message_id);
+    if (photo.preview_message_id) ids.add(photo.preview_message_id);
+    for (const id of ids) {
+      await deleteMessage(chatId, id, token ?? undefined);
+    }
+    await addToTrash(photo.id);
+    await markTrashRemoteDeleted(photo.id);
+    await sendMessage(
+      chatId,
+      `Deleted "${photo.filename}" (moved to app trash).`,
+      { replyToMessageId: msg.message_id }
+    );
+  }
+  return true;
+}

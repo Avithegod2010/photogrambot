@@ -217,6 +217,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (step !== "ready" || locked) return;
+    // While the app is foregrounded, poll the bot for remote commands
+    // (/status /sync /pause /resume /delete) every 60 s and on each
+    // foreground transition. getUpdates' server-side offset already
+    // dedupes; the in-flight guard prevents overlapping local runs.
+    void pollUpdatesOnce();
+    const timer = setInterval(() => {
+      // A decoy session must look exactly like the owner's absence — no
+      // channel activity (no /sync drain, no bot replies) while it's active.
+      if (!isDecoyActive()) void pollUpdatesOnce();
+    }, 60_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active" && !isDecoyActive()) void pollUpdatesOnce();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [step, locked]);
+
+  useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "background" && useSettingsStore.getState().prefs.appLock) {
         setDecoyActive(false);
@@ -261,6 +282,20 @@ export default function App() {
 
 let bootstrapping = false;
 
+// Foreground remote-control polling shares one in-flight guard with the
+// bootstrap pass — overlapping getUpdates runs could double-execute commands.
+let pollingUpdates = false;
+async function pollUpdatesOnce(): Promise<void> {
+  if (pollingUpdates) return;
+  pollingUpdates = true;
+  try {
+    await pollUpdates();
+  } catch {
+  } finally {
+    pollingUpdates = false;
+  }
+}
+
 async function bootstrapBackgroundTasks(): Promise<void> {
   if (bootstrapping) return;
   bootstrapping = true;
@@ -271,7 +306,7 @@ async function bootstrapBackgroundTasks(): Promise<void> {
     // global, not an auto-sync feature.
     void requestNotificationPermission();
     try {
-      await pollUpdates();
+      await pollUpdatesOnce();
     } catch {}
     if (prefs.autoSync) {
       if (await canAutoSyncNow(prefs)) {

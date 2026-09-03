@@ -4,6 +4,7 @@ import * as Battery from "expo-battery";
 import { loadPrefs, savePrefs, type Prefs } from "./settings";
 import { isVideoMime } from "./format";
 import { enqueueUploads, processQueue } from "./uploader";
+import { isRemotePaused } from "./remote";
 
 export interface DeviceFolder {
   id: string;
@@ -31,6 +32,9 @@ function isWantedMedia(
 
 export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
   const p = prefs ?? (await loadPrefs());
+  // /pause from the channel (remote.ts) is the cheapest gate — check it first
+  // so a paused device never even touches the network/battery probes.
+  if (await isRemotePaused()) return false;
   try {
     const state = await Network.getNetworkStateAsync();
     if (!state.isConnected) return false;
