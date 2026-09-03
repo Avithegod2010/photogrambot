@@ -8,11 +8,13 @@ import {
 import { getUpdates, type TgUpdate } from "./telegram";
 import { parseCaption } from "./caption";
 import { getChannelId } from "./settings";
+import { handleRemoteCommand } from "./remote";
 
 export interface UpdatesResult {
   processed: number;
   newPhotos: number;
   backups: number;
+  commands: number;
 }
 
 export async function pollUpdates(): Promise<UpdatesResult> {
@@ -22,11 +24,12 @@ export async function pollUpdates(): Promise<UpdatesResult> {
   try {
     updates = await getUpdates(offset > 0 ? offset : -1, 0);
   } catch {
-    return { processed: 0, newPhotos: 0, backups: 0 };
+    return { processed: 0, newPhotos: 0, backups: 0, commands: 0 };
   }
   let processed = 0;
   let newPhotos = 0;
   let backups = 0;
+  let commands = 0;
   const channelId = await getChannelId();
   for (const u of updates) {
     processed++;
@@ -37,6 +40,17 @@ export async function pollUpdates(): Promise<UpdatesResult> {
     // ingest the configured channel so foreign chats can't collide with
     // our message_id namespace.
     if (channelId && String(msg.chat.id) !== channelId) continue;
+    // Bot commands (/status /sync /pause /resume /delete) — only honored when
+    // a channel is configured AND the message came from it; with the filter
+    // above skipped (no channelId), commands stay disabled too.
+    if (
+      channelId &&
+      msg.text &&
+      (await handleRemoteCommand(msg, String(msg.chat.id)))
+    ) {
+      commands++;
+      continue;
+    }
     const parsed = parseCaption(msg.caption);
     if (parsed.isDbBackup) {
       backups++;
@@ -128,6 +142,6 @@ export async function pollUpdates(): Promise<UpdatesResult> {
     }
   }
   if (offset > 0) await kvSet("updates_offset", String(offset));
-  return { processed, newPhotos, backups };
+  return { processed, newPhotos, backups, commands };
 }
 

@@ -92,6 +92,8 @@ export interface TgMessage {
   video?: TgVideo;
   caption?: string;
   caption_entities?: any[];
+  text?: string;
+  reply_to_message?: TgMessage;
 }
 
 export interface TgUpdate {
@@ -167,6 +169,30 @@ export async function unpinChatMessage(chatId: string | number, messageId: numbe
     await call("unpinChatMessage", { chat_id: chatId, message_id: messageId });
   } catch {
     return;
+  }
+}
+
+// Plain-text status replies for remote control. HTML parse mode would force
+// escaping every dynamic fragment — not worth it for bot-operator output.
+export async function sendMessage(
+  chatId: string | number,
+  text: string,
+  options: { replyToMessageId?: number; token?: string } = {}
+): Promise<void> {
+  try {
+    await call(
+      "sendMessage",
+      {
+        chat_id: String(chatId),
+        text,
+        ...(options.replyToMessageId
+          ? { reply_parameters: JSON.stringify({ message_id: options.replyToMessageId }) }
+          : {}),
+      },
+      options.token
+    );
+  } catch {
+    // Status replies are best-effort — a failed reply must never crash the poll loop.
   }
 }
 
