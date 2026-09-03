@@ -433,6 +433,12 @@ export interface SearchFilters {
   hasGps?: boolean;
   camera?: string | null;
   notBackedUp?: boolean;
+  // Structured dimensions (batch: search-filter dimensions). All optional /
+  // null = no constraint. The conds array below is shared by the no-text and
+  // FTS query paths, so every fragment MUST stay `p.`-qualified.
+  device?: string | null;
+  mediaType?: "photos" | "videos" | null;
+  sort?: "size_desc" | null;
 }
 
 export async function searchPhotos(
@@ -458,10 +464,25 @@ export async function searchPhotos(
   if (filters?.notBackedUp) {
     conds.push("p.status != 'uploaded'");
   }
+  if (filters?.device && filters.device.trim()) {
+    conds.push("p.device = ?");
+    params.push(filters.device.trim());
+  }
+  if (filters?.mediaType === "photos") {
+    // Null-mime rows are excluded from the photos view (accepted trade-off —
+    // device backups always record mime; only edge-case legacy rows lack it).
+    conds.push("p.mime LIKE 'image/%'");
+  } else if (filters?.mediaType === "videos") {
+    conds.push("p.mime LIKE 'video/%'");
+  }
+  const orderBy =
+    filters?.sort === "size_desc"
+      ? "ORDER BY COALESCE(p.size, 0) DESC"
+      : "ORDER BY p.taken_at DESC";
   const where = conds.join(" AND ");
   if (!cleaned) {
     const rows = await d.getAllAsync<any>(
-      `SELECT p.* FROM photos p WHERE ${where} ORDER BY p.taken_at DESC LIMIT ?`,
+      `SELECT p.* FROM photos p WHERE ${where} ${orderBy} LIMIT ?`,
       [...params, limit]
     );
     return rows.map(rowToPhoto);
@@ -475,8 +496,33 @@ export async function searchPhotos(
      JOIN photos_fts f ON p.id = f.photo_id
      WHERE photos_fts MATCH ?
      AND ${where}
-     ORDER BY p.taken_at DESC LIMIT ?`,
+     ${orderBy} LIMIT ?`,
     [terms, ...params, limit]
+  );
+  return rows.map(rowToPhoto);
+}
+
+// Device names of all known photos (uploader device stored per photo), for the
+// FilterSheet device chips. DISTINCT over all rows — devices of trashed photos
+// are harmless to surface (a trashed device's rows are still excluded from
+// search results by the trash cond in searchPhotos).
+export async function getDistinctDevices(): Promise<string[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ device: string }>(
+    "SELECT DISTINCT device FROM photos WHERE device IS NOT NULL AND device != '' ORDER BY device"
+  );
+  return rows.map((r) => r.device);
+}
+
+// Largest uploaded (backed-up), non-trashed photos — feeds the remote /status
+// "Largest" line. Null sizes sink to the bottom via COALESCE.
+export async function getLargestUploaded(n = 3): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded' AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY COALESCE(size, 0) DESC LIMIT ?`,
+    [n]
   );
   return rows.map(rowToPhoto);
 }
