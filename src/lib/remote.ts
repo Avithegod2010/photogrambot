@@ -22,6 +22,7 @@ import {
   getPhotoByMessageId,
   addToTrash,
   markTrashRemoteDeleted,
+  getLargestUploaded,
   kvGet,
   kvSet,
 } from "./db";
@@ -42,6 +43,18 @@ function fmt(n: number): string {
 async function replyStatus(chatId: string, replyTo: number): Promise<void> {
   const s = await getStats();
   const paused = await isRemotePaused();
+  // Informational extra — a failure here must not kill the whole reply (a
+  // thrown /status unwinds past the offset persistence in pollUpdates and
+  // replays the whole batch on the next poll).
+  let largestLine = "";
+  try {
+    const largest = await getLargestUploaded(3);
+    if (largest.length > 0) {
+      largestLine = `Largest: ${largest
+        .map((p) => `${p.filename} (${formatBytes(p.size)})`)
+        .join(", ")}`;
+    }
+  } catch {}
   const lines = [
     `PhotogramBot status`,
     `Library: ${fmt(s.total)} photos, ${fmt(s.uploaded)} backed up (${formatBytes(s.totalBytes)})`,
@@ -49,6 +62,7 @@ async function replyStatus(chatId: string, replyTo: number): Promise<void> {
     `Trash: ${fmt(s.trashed)}`,
     paused ? "Auto-sync: PAUSED (send /resume)" : "Auto-sync: active",
   ];
+  if (largestLine) lines.push(largestLine);
   await sendMessage(chatId, lines.join("\n"), { replyToMessageId: replyTo });
 }
 

@@ -24,7 +24,7 @@ import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
 import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
-import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, type MonthBucket, type SearchFilters } from "../lib/db";
+import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
@@ -317,12 +317,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }
 
   async function executeSearch(q: string, seq: number) {
-    const hasFilters =
-      !!filters &&
-      (!!(filters.takenWithinDays && filters.takenWithinDays > 0) ||
-        !!filters.hasGps ||
-        !!(filters.camera && filters.camera.trim()) ||
-        !!filters.notBackedUp);
+    const hasFilters = hasAnyFilter(filters);
     if (q.trim().length === 0 && !hasFilters) {
       if (seq === searchSeq.current) setSearchResults(null);
       return;
@@ -339,12 +334,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const seq = ++searchSeq.current;
-    const hasFilters =
-      !!f &&
-      (!!(f.takenWithinDays && f.takenWithinDays > 0) ||
-        !!f.hasGps ||
-        !!(f.camera && f.camera.trim()) ||
-        !!f.notBackedUp);
+    const hasFilters = hasAnyFilter(f);
     if (!hasFilters && search.trim().length === 0) {
       setSearchResults(null);
       return;
@@ -695,7 +685,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : searchResults ? (
         <FlatList
           data={sections}
-          keyExtractor={(s) => s.label}
+          // Size-sorted results interleave dates, so the same label can head
+          // multiple sections — key by index+label like the local roll below.
+          keyExtractor={(s, i) => `${i}:${s.label}`}
           onEndReached={() => {
             if (!searchResults) void loadMore();
           }}
@@ -1008,6 +1000,22 @@ function isWantedPickerMedia(m: MediaLibrary.AssetMetadata): boolean {
   );
 }
 
+// True when any SearchFilters dimension actually constrains the query.
+// Single source for the FILTERED badge, the empty-text early-out, and the
+// sheet's all-empty Apply → null handoff — keep the three in sync HERE.
+function hasAnyFilter(f: SearchFilters | null | undefined): boolean {
+  return (
+    !!f &&
+    (!!(f.takenWithinDays && f.takenWithinDays > 0) ||
+      !!f.hasGps ||
+      !!(f.camera && f.camera.trim()) ||
+      !!f.notBackedUp ||
+      !!(f.device && f.device.trim()) ||
+      !!f.mediaType ||
+      !!f.sort)
+  );
+}
+
 function FilterSheet({
   visible,
   theme,
@@ -1025,6 +1033,16 @@ function FilterSheet({
   const [hasGps, setHasGps] = useState(!!initial?.hasGps);
   const [camera, setCamera] = useState(initial?.camera ?? "");
   const [notBackedUp, setNotBackedUp] = useState(!!initial?.notBackedUp);
+  const [device, setDevice] = useState(initial?.device ?? null);
+  const [mediaType, setMediaType] = useState<"photos" | "videos" | null>(
+    initial?.mediaType ?? null
+  );
+  const [sort, setSort] = useState<"size_desc" | null>(initial?.sort ?? null);
+  // Device chips come from the DB, fetched once per open (cached in state for
+  // the open, not per render). In a decoy session the row stays hidden — real
+  // device names would leak the hidden library, same reasoning as the decoy
+  // search short-circuit.
+  const [devices, setDevices] = useState<string[]>([]);
   // The Modal stays mounted, so useState's initial value only seeds the FIRST
   // open — re-seed from the applied filters every time the sheet opens.
   // Deps intentionally [visible] only: re-seeding while open would clobber edits.
@@ -1034,6 +1052,15 @@ function FilterSheet({
     setHasGps(!!initial?.hasGps);
     setCamera(initial?.camera ?? "");
     setNotBackedUp(!!initial?.notBackedUp);
+    setDevice(initial?.device ?? null);
+    setMediaType(initial?.mediaType ?? null);
+    setSort(initial?.sort ?? null);
+    setDevices([]);
+    if (!isDecoyActive()) {
+      getDistinctDevices()
+        .then(setDevices)
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   const ranges: { label: string; value: number | null }[] = [
@@ -1043,64 +1070,119 @@ function FilterSheet({
     { label: "30 days", value: 30 },
     { label: "90 days", value: 90 },
   ];
+  const mediaOptions: { label: string; value: "photos" | "videos" | null }[] = [
+    { label: "Any", value: null },
+    { label: "Photos", value: "photos" },
+    { label: "Videos", value: "videos" },
+  ];
+  const sortOptions: { label: string; value: "size_desc" | null }[] = [
+    { label: "Newest", value: null },
+    { label: "Largest", value: "size_desc" },
+  ];
+  const deviceOptions = devices.map((d) => ({ label: d, value: d }));
+  if (device && !devices.includes(device)) {
+    deviceOptions.push({ label: device, value: device });
+  }
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={[styles.filterSheet, { backgroundColor: theme.colors.background }]}>
           <View style={[styles.grabber, { backgroundColor: theme.colors.outline }]} />
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 17, marginBottom: 12 }}>
-            Filter photos
-          </Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
-            Date range
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-            {ranges.map((r) => (
-              <Pressable
-                key={r.label}
-                onPress={() => setDays(r.value)}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor:
-                      days === r.value ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
-                  },
-                ]}
-              >
-                <Text
-                  style={{
-                    color: days === r.value ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
-                    fontSize: 12.5,
-                    fontWeight: "600",
-                  }}
+          {/* Body scrolls — the rows now overflow on small screens. Action
+              buttons stay pinned below so Apply is always reachable.
+              keyboardShouldPersistTaps keeps chip taps landing while the
+              camera field's keyboard is open (matches the pre-ScrollView
+              behavior of Pressables outside a scroll container). */}
+          <ScrollView
+            style={{ maxHeight: Math.round(Dimensions.get("window").height * 0.7) }}
+            keyboardShouldPersistTaps="always"
+          >
+            <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 17, marginBottom: 12 }}>
+              Filter photos
+            </Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+              Date range
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {ranges.map((r) => (
+                <Pressable
+                  key={r.label}
+                  onPress={() => setDays(r.value)}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor:
+                        days === r.value ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
+                    },
+                  ]}
                 >
-                  {r.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <ToggleRow
-            title="Has location"
-            subtitle="Only photos tagged with GPS coordinates"
-            value={hasGps}
-            onChange={setHasGps}
-            theme={theme}
-          />
-          <ToggleRow
-            title="Not backed up yet"
-            subtitle="Only photos without a copy in your Telegram channel"
-            value={notBackedUp}
-            onChange={setNotBackedUp}
-            theme={theme}
-          />
-          <View style={{ height: 10 }} />
-          <TextField
-            value={camera}
-            onChangeText={setCamera}
-            placeholder="Camera model contains…"
-            theme={theme}
-          />
+                  <Text
+                    style={{
+                      color: days === r.value ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                      fontSize: 12.5,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {r.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <ToggleRow
+              title="Has location"
+              subtitle="Only photos tagged with GPS coordinates"
+              value={hasGps}
+              onChange={setHasGps}
+              theme={theme}
+            />
+            <ToggleRow
+              title="Not backed up yet"
+              subtitle="Only photos without a copy in your Telegram channel"
+              value={notBackedUp}
+              onChange={setNotBackedUp}
+              theme={theme}
+            />
+            <View style={{ height: 10 }} />
+            <TextField
+              value={camera}
+              onChangeText={setCamera}
+              placeholder="Camera model contains…"
+              theme={theme}
+            />
+            {/* An applied device can drop out of getDistinctDevices (its
+                photos trashed since) — merge it back in so the active filter
+                never renders as an unmarked chip row. */}
+            {deviceOptions.length > 0 ? (
+              <View style={{ marginTop: 12 }}>
+                <FilterChipRow<string>
+                  label="Device"
+                  options={deviceOptions}
+                  selected={device}
+                  onSelect={setDevice}
+                  theme={theme}
+                />
+              </View>
+            ) : null}
+            <View style={{ marginTop: 12 }}>
+              <FilterChipRow<"photos" | "videos">
+                label="Media"
+                options={mediaOptions}
+                selected={mediaType}
+                onSelect={setMediaType}
+                theme={theme}
+              />
+            </View>
+            <View style={{ marginTop: 12 }}>
+              <FilterChipRow<"size_desc">
+                label="Sort"
+                options={sortOptions}
+                selected={sort}
+                onSelect={setSort}
+                theme={theme}
+              />
+            </View>
+          </ScrollView>
           <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <Button
               title="Clear"
@@ -1111,25 +1193,85 @@ function FilterSheet({
                 setHasGps(false);
                 setCamera("");
                 setNotBackedUp(false);
+                setDevice(null);
+                setMediaType(null);
+                setSort(null);
                 onApply(null);
               }}
             />
             <Button
               title="Apply"
               theme={theme}
-              onPress={() =>
-                onApply({
+              onPress={() => {
+                const next: SearchFilters = {
                   takenWithinDays: days,
                   hasGps,
                   camera: camera.trim() || null,
                   notBackedUp,
-                })
-              }
+                  device,
+                  mediaType,
+                  sort,
+                };
+                // All-empty apply == no filters — pass null so the FILTERED
+                // badge stays honest (it renders whenever `filters` is set).
+                onApply(hasAnyFilter(next) ? next : null);
+              }}
             />
           </View>
         </View>
       </View>
     </Modal>
+  );
+}
+
+// One row of single-select filter chips, styled after the "Date range" chips
+// above (styles.filterChip, primaryContainer when selected). Tapping the
+// already-selected chip clears back to null ("Any"/"Newest" are null-valued
+// chips; for Device, cleared means no chip highlighted).
+function FilterChipRow<T extends string>({
+  label,
+  options,
+  selected,
+  onSelect,
+  theme,
+}: {
+  label: string;
+  options: { label: string; value: T | null }[];
+  selected: T | null;
+  onSelect: (v: T | null) => void;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  return (
+    <>
+      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+        {label}
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+        {options.map((o) => (
+          <Pressable
+            key={o.label}
+            onPress={() => onSelect(selected === o.value ? null : o.value)}
+            style={[
+              styles.filterChip,
+              {
+                backgroundColor:
+                  selected === o.value ? theme.colors.primaryContainer : theme.colors.surfaceHighest,
+              },
+            ]}
+          >
+            <Text
+              style={{
+                color: selected === o.value ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                fontSize: 12.5,
+                fontWeight: "600",
+              }}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </>
   );
 }
 
