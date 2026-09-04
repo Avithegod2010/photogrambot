@@ -45,3 +45,7 @@ tdlib.secrets.json
 
 # Local module build output
 modules/*/android/build/
+
+# Release signing — secrets, never commit
+android/pb-release.keystore
+android/pb-release-signing.properties
