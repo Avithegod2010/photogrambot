@@ -40,13 +40,18 @@ export async function pollUpdates(): Promise<UpdatesResult> {
     // ingest the configured channel so foreign chats can't collide with
     // our message_id namespace.
     if (channelId && String(msg.chat.id) !== channelId) continue;
-    // Bot commands (/status /sync /pause /resume /delete) — only honored when
-    // a channel is configured AND the message came from it; with the filter
-    // above skipped (no channelId), commands stay disabled too.
+    // Bot commands (/status /sync /pause /resume /delete) — channel posts
+    // ONLY. Channel-post restriction is the authorization model: in a private
+    // channel only admins can post, so every command sender is an admin. If
+    // the configured chat were a group, member messages arrive as u.message
+    // and commands stay dead (security audit: chat-membership alone would let
+    // any member drive the device). Private chats can't match a -100 channel
+    // id, so they're excluded by the filter above anyway.
     if (
       channelId &&
-      msg.text &&
-      (await handleRemoteCommand(msg, String(msg.chat.id)))
+      u.channel_post &&
+      u.channel_post.text &&
+      (await handleRemoteCommand(u.channel_post, String(u.channel_post.chat.id)))
     ) {
       commands++;
       continue;
