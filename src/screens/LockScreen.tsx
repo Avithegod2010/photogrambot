@@ -1,9 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useTheme } from "../useTheme";
 import { Button } from "../components/ui";
 import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../lib/applock";
+import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
+
+function fmtBackoff(ms: number): string {
+  const s = Math.ceil(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}:${String(s % 60).padStart(2, "0")}` : `0:${String(s).padStart(2, "0")}`;
+}
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const theme = useTheme();
@@ -14,6 +21,11 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [pinAvailable, setPinAvailable] = useState(false);
   const [entry, setEntry] = useState("");
   const [showPad, setShowPad] = useState(false);
+  // Failed-unlock backoff: while backoffMs > 0 the PIN pad is dead (the pad
+  // is what an attacker can brute) but biometric stays live — a biometric
+  // success proves ownership and clears the counter.
+  const [backoffMs, setBackoffMs] = useState(0);
+  const backoffTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -23,9 +35,34 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       } catch {
         setHasHardware(false);
       }
+      setBackoffMs(await getBackoffRemaining());
     })();
     void authenticate();
+    return () => {
+      if (backoffTimer.current) clearInterval(backoffTimer.current);
+    };
   }, []);
+
+  // 1 s countdown while backoff is active; cleared as soon as it hits zero.
+  useEffect(() => {
+    if (backoffMs <= 0) {
+      if (backoffTimer.current) {
+        clearInterval(backoffTimer.current);
+        backoffTimer.current = null;
+      }
+      return;
+    }
+    if (backoffTimer.current) return;
+    backoffTimer.current = setInterval(() => {
+      void getBackoffRemaining().then((ms) => setBackoffMs(ms));
+    }, 1000);
+    return () => {
+      if (backoffTimer.current) {
+        clearInterval(backoffTimer.current);
+        backoffTimer.current = null;
+      }
+    };
+  }, [backoffMs > 0]);
 
   async function authenticate() {
     setBusy(true);
@@ -37,6 +74,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
         disableDeviceFallback: false,
       });
       if (res.success) {
+        await clearFailures();
         onUnlock();
       } else {
         setFailed(true);
@@ -56,15 +94,22 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
   async function submitPin() {
     if (entry.length < 4) return;
+    if (backoffMs > 0) return;
     const result: PinVerifyResult = await verifyPin(entry);
     setEntry("");
     if (result === "real") {
+      await clearFailures();
       onUnlock();
     } else if (result === "decoy") {
+      // A decoy hit proves knowledge too — clear, and keep the decoy session
+      // indistinguishable from a real unlock (both pass the same backoff).
+      await clearFailures();
       setDecoyActive(true);
       onUnlock();
     } else {
       setPinWrong(true);
+      await recordFailure();
+      setBackoffMs(await getBackoffRemaining());
     }
   }
 
@@ -77,11 +122,13 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       </View>
       <Text style={[styles.title, { color: theme.colors.onSurface }]}>PhotogramBot is locked</Text>
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
-        {pinWrong
-          ? "Wrong PIN"
-          : hasHardware === false
-            ? "Unlock to access your photos"
-            : "Authenticate to access your photos"}
+        {backoffMs > 0
+          ? `Too many attempts — try again in ${fmtBackoff(backoffMs)}`
+          : pinWrong
+            ? "Wrong PIN"
+            : hasHardware === false
+              ? "Unlock to access your photos"
+              : "Authenticate to access your photos"}
       </Text>
       <Button
         title={failed ? "Try again" : "Unlock"}
@@ -109,7 +156,8 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
                 ) : (
                   <Pressable
                     key={i}
-                    style={[styles.padKey, { backgroundColor: theme.colors.surfaceContainer }]}
+                    style={[styles.padKey, { backgroundColor: theme.colors.surfaceContainer, opacity: backoffMs > 0 ? 0.4 : 1 }]}
+                    disabled={backoffMs > 0}
                     onPress={() => {
                       if (key === "⌫") setEntry((e) => e.slice(0, -1));
                       else pressDigit(key);
