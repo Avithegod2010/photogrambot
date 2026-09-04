@@ -185,8 +185,12 @@ export async function sendMessage(
       {
         chat_id: String(chatId),
         text,
+        // call() posts a JSON body — reply_parameters must be a nested
+        // object here, NOT a JSON string (that form is only correct for
+        // the multipart sendFile paths). A string yields a silent 400 and
+        // every status reply would vanish.
         ...(options.replyToMessageId
-          ? { reply_parameters: JSON.stringify({ message_id: options.replyToMessageId }) }
+          ? { reply_parameters: { message_id: options.replyToMessageId } }
           : {}),
       },
       options.token
