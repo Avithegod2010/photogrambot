@@ -315,13 +315,18 @@ async function sendFileViaTask(
   let uploadUri = fileUri;
   try {
     const src = new File(fileUri);
-    if (src.name !== file.filename) {
-      // Multipart part names come from the file itself — stage an exactly-named
-      // copy in cache so Telegram shows the right document name.
+    if (src.name !== file.filename || fileUri.startsWith("content://")) {
+      // Two reasons to stage an exactly-named copy in cache: multipart part
+      // names come from the file itself, and the native upload task can't
+      // handle content:// source URIs (videos from MediaStore) — file://
+      // copies upload fine, which is why photos (file://) work and videos
+      // (content://) fail. Round 19 device-session root cause.
       const dest = new File(Paths.cache, `pb_upload_${Date.now()}_${file.filename}`);
       if (!dest.exists) {
         src.copy(dest);
         staged = dest;
+        uploadUri = dest.uri;
+      } else {
         uploadUri = dest.uri;
       }
     }
@@ -341,7 +346,7 @@ async function sendFileViaTask(
     try {
       // uploadAsync has no timeout — a stalled native upload would hang a
       // queue worker forever. Race it against a hard timeout that cancels the
-      // task; retry-vs-FormData-fallback is decided by gotBytes below.
+      // task; retry-vs-reraise is decided by gotBytes below.
       let timer: ReturnType<typeof setTimeout> | null = null;
       const result = await Promise.race([
         task.uploadAsync(),
@@ -361,11 +366,50 @@ async function sendFileViaTask(
   } catch (e) {
     if (e instanceof TelegramError) throw e;
     if (gotBytes || file.signal?.aborted) throw e;
-    // Local read failure (e.g. unreadable content:// URI) — fall back to FormData fetch.
-    const form = new FormData();
-    for (const [k, v] of Object.entries(params)) form.append(k, v);
-    form.append(fieldName, { uri: fileUri, name: file.filename, type: file.mime } as any);
-    return uploadForm(method, form, file.token);
+    // Retry once from a fresh cache copy. The old FormData-fetch fallback is
+    // DEAD under expo/fetch (its convertFormData rejects RN-style {uri} parts
+    // with "Unsupported FormDataPart implementation") and it masked whatever
+    // the primary attempt failed with — a staged retry surfaces the real
+    // error instead.
+    let fallbackFile: File | null = null;
+    try {
+      fallbackFile = new File(Paths.cache, `pb_fallback_${Date.now()}_${file.filename}`);
+      if (fallbackFile.exists) fallbackFile.delete();
+      new File(uploadUri).copy(fallbackFile);
+      const task = new File(fallbackFile.uri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
+        uploadType: UploadType.MULTIPART,
+        fieldName,
+        mimeType: file.mime,
+        parameters: params,
+        signal: file.signal,
+      });
+      try {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const result = await Promise.race([
+          task.uploadAsync(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              task.cancel();
+              reject(new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s`));
+            }, UPLOAD_TIMEOUT_MS);
+          }),
+        ]).finally(() => {
+          if (timer) clearTimeout(timer);
+        });
+        return parseTgResult(result.body, result.status);
+      } finally {
+        task.release();
+      }
+    } catch (e2) {
+      if (e2 instanceof TelegramError) throw e2;
+      // Chain the ORIGINAL failure — the retry only proves the copy/re-upload
+      // route also failed (e.g. source genuinely unreadable).
+      throw new Error(`${e instanceof Error ? e.message : String(e)} (retry: ${e2 instanceof Error ? e2.message : String(e2)})`);
+    } finally {
+      if (fallbackFile) {
+        try { fallbackFile.delete(); } catch {}
+      }
+    }
   } finally {
     if (staged) {
       try { staged.delete(); } catch {}
