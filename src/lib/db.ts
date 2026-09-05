@@ -36,6 +36,7 @@ export interface PhotoRow {
   status: PhotoStatus;
   error: string | null;
   upload_type: string | null;
+  phash: string | null;
 }
 
 export interface AlbumRow {
@@ -172,6 +173,11 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["duration", "INTEGER"],
     ["parts", "TEXT"],
     ["profile_id", "TEXT"],
+    // Perceptual dHash (16 hex chars) for the near-duplicate finder — NULL
+    // until the scan first decodes the row. A stored hash is trusted on
+    // rescan (content changes are already covered by content_hash-based
+    // re-sync paths; the pHash is advisory clustering input, not identity).
+    ["phash", "TEXT"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
@@ -978,6 +984,35 @@ export async function getPhotosByUploadStatus(
   return rows.map(rowToPhoto);
 }
 
+// "Free up space" candidates: backed-up rows that still claim a local copy and
+// a size (size is what makes them worth listing — it sums into reclaimable
+// GB). Trashed rows are excluded even though they keep status='uploaded'.
+export async function getFreeUpCandidates(): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND local_id IS NOT NULL
+       AND size IS NOT NULL AND size > 0
+       AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at DESC`
+  );
+  return rows.map(rowToPhoto);
+}
+
+// After the device copy is deleted, the DB row must SURVIVE as the library
+// record of the cloud copy — only the stale local_uri pointer goes (local_id
+// stays so a later restore/re-scan can match the asset again).
+export async function clearLocalUris(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    for (const id of ids) {
+      await d.runAsync("UPDATE photos SET local_uri = NULL WHERE id = ?", [id]);
+    }
+  });
+}
+
 export async function getLibraryCounts(): Promise<{ local: number; cloud: number }> {
   const d = await getDb();
   const row = await d.getFirstAsync<any>(`
@@ -1087,19 +1122,19 @@ export interface PeriodGroup {
 export async function getYearGroups(): Promise<PeriodGroup[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<any>(
-    `SELECT strftime('%Y', taken_at / 1000, 'unixepoch') as key,
+    `SELECT strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') as key,
        COUNT(*) as count,
        MIN(taken_at) as startMs,
        MAX(taken_at) as endMs,
        (SELECT p.preview_file_id FROM photos p
          WHERE p.status IN ('uploaded','local','failed')
          AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y', p.taken_at / 1000, 'unixepoch') = key
+         AND strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') = key
          ORDER BY p.taken_at DESC LIMIT 1) as cover_preview_id,
        (SELECT p.remote_file_id FROM photos p
          WHERE p.status IN ('uploaded','local','failed')
          AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y', p.taken_at / 1000, 'unixepoch') = key
+         AND strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') = key
          ORDER BY p.taken_at DESC LIMIT 1) as cover_file_id
      FROM photos
      WHERE status IN ('uploaded','local','failed')
@@ -1124,22 +1159,22 @@ const MONTH_NAMES = [
 
 export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]> {
   const d = await getDb();
-  const yearFilter = year ? "AND strftime('%Y', taken_at / 1000, 'unixepoch') = ?" : "";
+  const yearFilter = year ? "AND strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') = ?" : "";
   const params: any[] = year ? [String(year)] : [];
   const rows = await d.getAllAsync<any>(
-    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch') as key,
+    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch', 'localtime') as key,
        COUNT(*) as count,
        MIN(taken_at) as startMs,
        MAX(taken_at) as endMs,
        (SELECT p.preview_file_id FROM photos p
          WHERE p.status IN ('uploaded','local','failed')
          AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch') = key
+         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch', 'localtime') = key
          ORDER BY p.taken_at DESC LIMIT 1) as cover_preview_id,
        (SELECT p.remote_file_id FROM photos p
          WHERE p.status IN ('uploaded','local','failed')
          AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch') = key
+         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch', 'localtime') = key
          ORDER BY p.taken_at DESC LIMIT 1) as cover_file_id
      FROM photos
      WHERE status IN ('uploaded','local','failed')
@@ -1201,29 +1236,29 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
   }
   const ph = dates.map(() => "?").join(",");
   const rows = await d.getAllAsync<any>(
-    `SELECT CAST(strftime('%Y', taken_at / 1000, 'unixepoch') AS INTEGER) as year,
+    `SELECT CAST(strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) as year,
         COUNT(*) as count,
         MIN(taken_at) as startMs,
         MAX(taken_at) as endMs,
         (SELECT p2.preview_file_id FROM photos p2
           WHERE p2.status IN ('uploaded','local','failed')
           AND p2.id NOT IN (SELECT photo_id FROM trash)
-          AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch') AS INTEGER) =
-              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch') AS INTEGER)
-          AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch') IN (${ph})
+          AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
+              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
+          AND strftime('%m-%d', p2.taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
           ORDER BY p2.taken_at DESC LIMIT 1) as cover_preview_id,
         (SELECT p3.remote_file_id FROM photos p3
           WHERE p3.status IN ('uploaded','local','failed')
           AND p3.id NOT IN (SELECT photo_id FROM trash)
-          AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch') AS INTEGER) =
-              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch') AS INTEGER)
-          AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch') IN (${ph})
+          AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
+              CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
+          AND strftime('%m-%d', p3.taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
           ORDER BY p3.taken_at DESC LIMIT 1) as cover_file_id
       FROM photos p
       WHERE status IN ('uploaded','local','failed')
       AND id NOT IN (SELECT photo_id FROM trash)
-      AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch') AS INTEGER) < ?
-      AND strftime('%m-%d', taken_at / 1000, 'unixepoch') IN (${ph})
+      AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) < ?
+      AND strftime('%m-%d', taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
       GROUP BY year ORDER BY year DESC`,
     [...dates, ...dates, thisYear, ...dates]
   );
@@ -1316,6 +1351,65 @@ export async function setHashCache(
 export async function clearHashCache(): Promise<void> {
   const d = await getDb();
   await d.runAsync("DELETE FROM hash_cache");
+}
+
+// --- Near-duplicate finder (perceptual hash) persistence ---
+
+// Batched write: the scan hashes hundreds of rows — one UPDATE per row would
+// hammer the JSI bridge; chunk to keep the app responsive.
+export async function setPhashBatch(items: { id: string; phash: string }[]): Promise<void> {
+  if (items.length === 0) return;
+  const d = await getDb();
+  const BATCH = 50;
+  for (let i = 0; i < items.length; i += BATCH) {
+    const chunk = items.slice(i, i + BATCH);
+    await d.withTransactionAsync(async () => {
+      for (const it of chunk) {
+        await d.runAsync(
+          "UPDATE photos SET phash = ? WHERE id = ?",
+          [it.phash, it.id]
+        );
+      }
+    });
+  }
+}
+
+// Rows that already carry a perceptual hash — lets a rescan skip straight to
+// clustering without touching any file bytes.
+export async function getPhashedIds(): Promise<Set<string>> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ id: string }>(
+    "SELECT id FROM photos WHERE phash IS NOT NULL"
+  );
+  return new Set(rows.map((r) => r.id));
+}
+
+// All non-trashed JPEG rows (any of the library statuses) with their phash —
+// the raw material for scanNearDuplicates. Rows are NOT restricted to
+// 'uploaded': a burst's local-only copy is exactly the kind of near-duplicate
+// worth surfacing before it's backed up.
+export async function getJpegRowsForPhash(): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status IN ('uploaded','local','failed')
+       AND id NOT IN (SELECT photo_id FROM trash)
+       AND (mime = 'image/jpeg'
+            OR LOWER(filename) LIKE '%.jpg'
+            OR LOWER(filename) LIKE '%.jpeg')
+     ORDER BY taken_at DESC`
+  );
+  return rows.map(rowToPhoto);
+}
+
+// id→hash pairs in one query — the scan merges freshly decoded hashes over
+// this map, so cached rows need no per-row reads.
+export async function getAllPhashPairs(): Promise<Map<string, string>> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ id: string; phash: string }>(
+    "SELECT id, phash FROM photos WHERE phash IS NOT NULL AND phash != ''"
+  );
+  return new Map(rows.map((r) => [r.id, r.phash]));
 }
 
 export async function exportAllData(): Promise<string> {
