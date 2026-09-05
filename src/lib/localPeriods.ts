@@ -22,15 +22,26 @@ export interface LocalPeriodBucket {
 // skipped (nothing sensible to bucket them under).
 export async function getLocalPeriodBuckets(
   granularity: "months" | "years",
-  year: number | null
+  year: number | null,
+  excludeLocalIds?: Set<string>
 ): Promise<LocalPeriodBucket[]> {
-  const q = new MediaLibrary.Query().orderBy({
-    key: MediaLibrary.AssetField.CREATION_TIME,
-    ascending: false,
-  });
+  // MEDIA_TYPE within-filter keeps audio/other files out (DATE_TAKEN is set
+  // on some non-media rows); the gallery roll applies the same filter.
+  const q = new MediaLibrary.Query()
+    .within(MediaLibrary.AssetField.MEDIA_TYPE, [
+      MediaLibrary.MediaType.IMAGE,
+      MediaLibrary.MediaType.VIDEO,
+    ])
+    .orderBy({
+      key: MediaLibrary.AssetField.CREATION_TIME,
+      ascending: false,
+    });
   const assets = await q.exeForMetadata();
   const map = new Map<string, LocalPeriodBucket>();
   for (const a of assets) {
+    // excludeLocalIds = local_ids already counted in the DB groups — without
+    // this a backed-up photo still on the device is counted twice.
+    if (excludeLocalIds?.has(a.id)) continue;
     const ts = a.creationTime;
     if (!ts) continue;
     const d = new Date(ts);
@@ -77,6 +88,10 @@ export async function getLocalPhotosInRange(
   // Builder has no date-range helper — gte/lte on CREATION_TIME is the
   // documented shape (values are epoch ms).
   const q = new MediaLibrary.Query()
+    .within(MediaLibrary.AssetField.MEDIA_TYPE, [
+      MediaLibrary.MediaType.IMAGE,
+      MediaLibrary.MediaType.VIDEO,
+    ])
     .gte(MediaLibrary.AssetField.CREATION_TIME, startMs)
     .lte(MediaLibrary.AssetField.CREATION_TIME, endMs)
     .orderBy({

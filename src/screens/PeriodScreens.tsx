@@ -32,10 +32,16 @@ export function MonthsOfYearScreen({
     }
     // Same DB+local merge as the gallery's Months jump list — a month with
     // only local photos must still show up (Days shows them, so must this).
+    // Local buckets exclude DB-counted assets; fetches fail independently.
     void (async () => {
+      let dbGroups: PeriodGroup[] = [];
       try {
-        const dbGroups = await getMonthGroups(year);
-        const localBuckets = await getLocalPeriodBuckets("months", year);
+        dbGroups = await getMonthGroups(year);
+      } catch {}
+      try {
+        const { getPeriodCountedLocalIds } = await import("../lib/db");
+        const exclude = await getPeriodCountedLocalIds();
+        const localBuckets = await getLocalPeriodBuckets("months", year, exclude);
         const byKey = new Map<string, PeriodGroup>();
         for (const g of dbGroups) byKey.set(g.key, { ...g });
         for (const b of localBuckets) {
@@ -58,7 +64,7 @@ export function MonthsOfYearScreen({
         }
         setGroups(Array.from(byKey.values()).sort((a, b) => b.startMs - a.startMs));
       } catch {
-        setGroups([]);
+        setGroups(dbGroups);
       }
     })();
   }, [year]);
@@ -179,11 +185,33 @@ export function PeriodPhotosScreen({ route, navigation }: { route: any; navigati
       {loading ? null : (
         <MonthGrid
           photos={photos}
-          onPress={(p) => navigation.navigate("Viewer", { photos, index: photos.indexOf(p) })}
+          onPress={(p) => void openPeriodPhoto(p, photos, navigation)}
         />
       )}
     </View>
   );
+}
+
+// Local-only rows carry local_uri: null (resolved lazily per grid tile) — the
+// Viewer needs the real URI, so resolve it on press like GalleryScreen's
+// onLocalPress does. DB-backed rows navigate as-is.
+async function openPeriodPhoto(
+  p: any,
+  photos: any[],
+  navigation: any
+): Promise<void> {
+  let row = p;
+  if (p.local_id && !p.remote_file_id && !p.preview_file_id && !p.thumb_file_id && !p.local_uri) {
+    let uri: string | null = null;
+    try {
+      uri = await new MediaLibrary.Asset(p.local_id).getUri();
+    } catch {}
+    row = { ...p, local_uri: uri };
+  }
+  navigation.navigate("Viewer", {
+    photos: photos.map((x) => (x.id === row.id ? row : x)),
+    index: photos.findIndex((x) => x.id === row.id),
+  });
 }
 
 export function MonthGrid({
