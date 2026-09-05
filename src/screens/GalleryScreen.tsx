@@ -1337,11 +1337,46 @@ function PeriodJumpList({
       setGroups([]);
       return;
     }
-    if (mode === "years") {
-      import("../lib/db").then(({ getYearGroups }) => getYearGroups()).then(setGroups);
-    } else {
-      import("../lib/db").then(({ getMonthGroups }) => getMonthGroups(null)).then(setGroups);
-    }
+    // Days shows the phone's local roll; Months/Years used to query the
+    // backed-up (DB) library only, so a mostly-local library rendered as
+    // "Nothing here yet." Merge: DB period groups (with channel covers) +
+    // local MediaLibrary buckets. DB wins the cover (a cloud-backed cover
+    // renders via TelegramImage); local buckets contribute count/label only.
+    void (async () => {
+      try {
+        const dbGroups: PeriodGroup[] =
+          mode === "years"
+            ? await import("../lib/db").then(({ getYearGroups }) => getYearGroups())
+            : await import("../lib/db").then(({ getMonthGroups }) => getMonthGroups(null));
+        const { getLocalPeriodBuckets, monthLabel } = await import("../lib/localPeriods");
+        const localBuckets = await getLocalPeriodBuckets(mode, null);
+        const byKey = new Map<string, PeriodGroup>();
+        for (const g of dbGroups) byKey.set(g.key, { ...g });
+        for (const b of localBuckets) {
+          const existing = byKey.get(b.key);
+          if (existing) {
+            existing.count += b.count;
+            existing.startMs = Math.min(existing.startMs, b.startMs);
+            existing.endMs = Math.max(existing.endMs, b.endMs);
+          } else {
+            byKey.set(b.key, {
+              key: b.key,
+              label: mode === "years" ? b.key : monthLabel(b.key),
+              startMs: b.startMs,
+              endMs: b.endMs,
+              count: b.count,
+              cover_preview_id: null,
+              cover_file_id: null,
+            });
+          }
+        }
+        setGroups(
+          Array.from(byKey.values()).sort((a, b) => b.startMs - a.startMs)
+        );
+      } catch {
+        setGroups([]);
+      }
+    })();
   }, [mode]);
 
   return (
@@ -1366,10 +1401,24 @@ function PeriodJumpList({
             }
           }}
         >
-          <TelegramImage
-            fileId={item.cover_preview_id ?? item.cover_file_id}
-            style={{ width: "100%", height: 96 }}
-          />
+          {item.cover_preview_id ?? item.cover_file_id ? (
+            <TelegramImage
+              fileId={item.cover_preview_id ?? item.cover_file_id}
+              style={{ width: "100%", height: 96 }}
+            />
+          ) : (
+            <View
+              style={{
+                width: "100%",
+                height: 96,
+                backgroundColor: theme.colors.surfaceHighest,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 24 }}>🖼</Text>
+            </View>
+          )}
           <Text style={[styles.periodLabel, { color: theme.colors.onSurface }]} numberOfLines={1}>
             {item.label}
           </Text>
