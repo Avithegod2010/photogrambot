@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Sharing from "expo-sharing";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -172,6 +173,9 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     }
   }
 
+  // Gesture callbacks are worklets on the UI runtime — a bare setState there
+  // throws "Tried to synchronously call a Remote Function". Bridge via runOnJS.
+  const openInfo = () => setInfoVisible(true);
   const swipeUp = Gesture.Pan()
     .activeOffsetY([-24, 24])
     .failOffsetX([-36, 36])
@@ -180,7 +184,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       // Google Photos behavior: swipe up OR down on the photo pops the info
       // panel. Disabled while zoomed (the vertical pan is the zoom scroll).
       if (!zoomedRef.current && Math.abs(e.translationY) > 50) {
-        setInfoVisible(true);
+        runOnJS(openInfo)();
       }
     });
 
