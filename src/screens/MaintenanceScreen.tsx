@@ -9,8 +9,11 @@ import {
   checkIntegrity,
   removeBrokenPhotos,
   verifyBackupSample,
+  scanNearDuplicates,
   type DuplicateGroup,
   type IntegrityProgress,
+  type NearDupGroup,
+  type NearDupProgress,
   type VerificationProgress,
   type VerificationResult,
 } from "../lib/maintenance";
@@ -18,6 +21,8 @@ import {
   getAllUploadedPhotoIds,
   getQueueCounts,
   retryFailedUploads,
+  addToTrash,
+  markTrashRemoteDeleted,
   type PhotoRow,
 } from "../lib/db";
 import { formatBytes, formatDate } from "../lib/format";
@@ -27,6 +32,9 @@ import {
   requestCancelRestore,
   type RestoreProgress,
 } from "../lib/restore";
+import { getChannelId } from "../lib/settings";
+import { deleteMessage } from "../lib/telegram";
+import { tokenForPhoto } from "../lib/destinations";
 
 export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -49,6 +57,11 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [nearDups, setNearDups] = useState<NearDupGroup[]>([]);
+  const [scanningNear, setScanningNear] = useState(false);
+  const [nearProgress, setNearProgress] = useState<NearDupProgress | null>(null);
+  const [nearError, setNearError] = useState<string | null>(null);
+  const [nearNote, setNearNote] = useState<string | null>(null);
 
   function confirmRestore() {
     Alert.alert(
@@ -142,6 +155,74 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     await scanDuplicates();
   }
 
+  async function scanNear() {
+    setScanningNear(true);
+    setNearError(null);
+    setNearNote(null);
+    setNearProgress({ decoded: 0, cached: 0, total: 0, skipped: 0, currentFile: null, done: false });
+    try {
+      const result = await scanNearDuplicates(setNearProgress);
+      setNearDups(result.groups);
+      const bits: string[] = [`${result.groups.length} near-duplicate group${result.groups.length === 1 ? "" : "s"}`];
+      if (result.skipped > 0) bits.push(`${result.skipped} skipped (no local copy or > 25 MB)`);
+      if (result.decodeFailed > 0) bits.push(`${result.decodeFailed} undecodable (non-baseline JPEG)`);
+      setNearNote(bits.join(" · "));
+    } catch (e: any) {
+      setNearError(e?.message ?? "Near-duplicate scan failed.");
+    } finally {
+      setScanningNear(false);
+      setNearProgress(null);
+    }
+  }
+
+  function removeNearGroupExceptFirst(group: NearDupGroup, alsoChannel: boolean) {
+    const keep = group.photos[0];
+    const rest = group.photos.slice(1);
+    if (!alsoChannel) {
+      // Local-only cleanup — same semantics as the exact-dup keepOldest.
+      void trashPhotos(
+        rest.map((p) => p.id),
+        false
+      ).then(() => setNearDups((prev) => prev.filter((g) => g !== group)));
+      return;
+    }
+    Alert.alert(
+      `Delete ${rest.length} duplicate copies from the channel too?`,
+      "This permanently removes their messages from Telegram (including for other devices) and moves them to the app's trash so they never re-upload. The newest copy is kept.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete for good",
+          style: "destructive",
+          onPress: () => void (async () => {
+            try {
+              const channelId = await getChannelId();
+              for (const p of rest) {
+                if (channelId && p.message_id) {
+                  const token = await tokenForPhoto(p);
+                  await deleteMessage(channelId, p.message_id, token ?? undefined);
+                  if (p.preview_message_id) {
+                    await deleteMessage(channelId, p.preview_message_id, token ?? undefined);
+                  }
+                }
+                // Trash (not hard-delete): the row must survive so auto-sync
+                // keeps skipping the local file — a hard delete would let the
+                // next scan re-upload the duplicate we just removed.
+                await addToTrash(p.id);
+                await markTrashRemoteDeleted(p.id);
+              }
+              await refreshMeta();
+              setNearDups((prev) => prev.filter((g) => g !== group));
+            } catch (e: any) {
+              Alert.alert("Delete failed", e?.message ?? "Could not delete the duplicates.");
+            }
+          })(),
+        },
+      ],
+      { cancelable: true }
+    );
+  }
+
   useEffect(() => {
     const refreshFailedCount = () =>
       void getQueueCounts().then((c) => setFailedCount(c.failed ?? 0));
@@ -181,8 +262,11 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       </View>
 
       <FlatList
-        data={dupes}
-        keyExtractor={(g) => g.hash}
+        data={[
+          ...dupes.map((g) => ({ type: "exact" as const, key: `x_${g.hash}`, exact: g })),
+          ...nearDups.map((g, i) => ({ type: "near" as const, key: `n_${i}_${g.photos[0]?.id}`, near: g })),
+        ]}
+        keyExtractor={(item) => item.key}
         contentContainerStyle={{ padding: 16, paddingBottom: 60 }}
         ListHeaderComponent={
           <View>
@@ -195,6 +279,19 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                   </Text>
                   <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
                     Inspect the queue, retry or remove individual items
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </View>
+            </Card>
+            <Card theme={theme} onPress={() => navigation.navigate("FreeUpSpace")}>
+              <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                    Free up space
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                    Delete local copies of photos that are safely backed up
                   </Text>
                 </View>
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
@@ -255,6 +352,34 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                 onPress={scanDuplicates}
                 style={{ marginTop: 12 }}
               />
+              <Button
+                title={nearDups.length ? "Rescan near-duplicates" : "Find near-duplicates"}
+                theme={theme}
+                variant="outlined"
+                busy={scanningNear}
+                onPress={scanNear}
+                style={{ marginTop: 10 }}
+              />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginTop: 8 }}>
+                Near-duplicates catches bursts, edits and re-saves by comparing image structure
+                (JPEGs only — PNG/HEIC skipped; thumbnails are downloaded for cloud-only photos).
+              </Text>
+              {nearProgress && !nearProgress.done ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  Hashing {nearProgress.decoded + nearProgress.cached}/{nearProgress.total} —{" "}
+                  {nearProgress.skipped} skipped
+                </Text>
+              ) : null}
+              {nearNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {nearNote}
+                </Text>
+              ) : null}
+              {nearError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {nearError}
+                </Text>
+              ) : null}
               {dupes.length > 0 ? (
                 <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 12 }}>
                   {dupes.length} duplicate group{dupes.length === 1 ? "" : "s"} found
@@ -397,40 +522,90 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               ) : null}
             </Card>
 
-            {dupes.length > 0 ? (
-              <SectionLabel text="Duplicate groups" theme={theme} />
+            {dupes.length > 0 || nearDups.length > 0 ? (
+              <SectionLabel
+                text={
+                  dupes.length > 0 && nearDups.length > 0
+                    ? "Duplicate groups (exact + near)"
+                    : dupes.length > 0
+                      ? "Duplicate groups"
+                      : "Near-duplicate groups"
+                }
+                theme={theme}
+              />
             ) : null}
           </View>
         }
-        renderItem={({ item }) => (
-          <Card theme={theme} style={{ marginBottom: 10 }}>
-            <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 2 }}>
-              {item.count} identical copies
-            </Text>
-            <Text
-              style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginBottom: 8 }}
-              numberOfLines={1}
-            >
-              {formatBytes(item.photos[0]?.size)} each · {item.hash.slice(0, 20)}…
-            </Text>
-            {item.photos.map((p) => (
-              <View key={p.id} style={styles.dupeRow}>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, flex: 1 }} numberOfLines={1}>
-                  {p.filename}
-                  {p.status === "uploaded" ? "  ·  ☁" : ""}
-                </Text>
+        renderItem={({ item }) =>
+          item.type === "exact" ? (
+            <Card theme={theme} style={{ marginBottom: 10 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 2 }}>
+                {item.exact.count} identical copies
+              </Text>
+              <Text
+                style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginBottom: 8 }}
+                numberOfLines={1}
+              >
+                {formatBytes(item.exact.photos[0]?.size)} each · {item.exact.hash.slice(0, 20)}…
+              </Text>
+              {item.exact.photos.map((p) => (
+                <View key={p.id} style={styles.dupeRow}>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, flex: 1 }} numberOfLines={1}>
+                    {p.filename}
+                    {p.status === "uploaded" ? "  ·  ☁" : ""}
+                  </Text>
+                </View>
+              ))}
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 8 }}>
+                <Button
+                  title="Keep newest, trash rest"
+                  variant="danger"
+                  theme={theme}
+                  onPress={() => keepOldest(item.exact)}
+                />
               </View>
-            ))}
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 8 }}>
-              <Button
-                title="Keep newest, trash rest"
-                variant="danger"
-                theme={theme}
-                onPress={() => keepOldest(item)}
-              />
-            </View>
-          </Card>
-        )}
+            </Card>
+          ) : (
+            <Card theme={theme} style={{ marginBottom: 10 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 2 }}>
+                {item.near.photos.length} near-identical copies
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginBottom: 8 }} numberOfLines={1}>
+                Perceptual match · kept copy: {item.near.photos[0]?.filename}
+              </Text>
+              {item.near.photos.map((p, idx) => (
+                <View key={p.id} style={styles.dupeRow}>
+                  <Text
+                    style={{
+                      color: idx === 0 ? theme.colors.onSurface : theme.colors.onSurfaceVariant,
+                      fontSize: 12,
+                      flex: 1,
+                    }}
+                    numberOfLines={1}
+                  >
+                    {idx === 0 ? "★ " : ""}
+                    {p.filename}
+                    {p.status === "uploaded" ? "  ·  ☁" : ""}
+                  </Text>
+                </View>
+              ))}
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                <Button
+                  title="Keep newest, trash rest"
+                  variant="danger"
+                  theme={theme}
+                  onPress={() => removeNearGroupExceptFirst(item.near, false)}
+                />
+                <Button
+                  title="Delete from channel too"
+                  variant="danger"
+                  theme={theme}
+                  onPress={() => removeNearGroupExceptFirst(item.near, true)}
+                />
+              </View>
+            </Card>
+          )
+        }
         ListEmptyComponent={null}
       />
     </View>

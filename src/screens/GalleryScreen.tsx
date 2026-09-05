@@ -545,6 +545,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       status: "local",
       error: null,
       upload_type: null,
+      phash: null,
     };
     navigation.navigate("Viewer", { photos: [photo], index: 0 });
   }

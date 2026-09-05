@@ -2,10 +2,23 @@ import {
   getDuplicateGroups,
   getPhotosByUploadStatus,
   updatePhoto,
+  getJpegRowsForPhash,
+  getPhashedIds,
+  getAllPhashPairs,
+  setPhashBatch,
   type PhotoRow,
   type DuplicateGroup,
 } from "./db";
+import { File, FileMode } from "expo-file-system";
 import { getFile } from "./telegram";
+import { getCachedTelegramFile } from "./media";
+import { tokenForPhoto } from "./destinations";
+import {
+  dcGridFromJpeg,
+  dHashFromDc,
+  clusterByDistance,
+  type HashedItem,
+} from "./phash";
 
 export { getDuplicateGroups, type DuplicateGroup };
 
@@ -131,4 +144,157 @@ export async function verifyBackupSample(
     done: true,
   });
   return { checked, broken, sampledAt: Date.now() };
+}
+
+// --- Near-duplicate finder (perceptual dHash over JPEG DC data) ---
+
+// Two photos whose 64-bit dHashes differ by ≤ this many bits land in one
+// cluster. 8 of 64 is the sweet spot from dHash practice: catches
+// re-encodes/crops-at-same-composition, while unrelated shots of the same
+// scene (different framing) sit ~16+ bits apart.
+const NEARDUP_THRESHOLD = 8;
+
+// DC decode reads the whole file — cap the byte size so a stray 40 MB
+// panorama doesn't stall the scan (bigger files are skipped and reported).
+const MAX_DECODE_BYTES = 25 * 1024 * 1024;
+
+export interface NearDupProgress {
+  decoded: number;
+  cached: number;
+  total: number;
+  skipped: number;
+  currentFile: string | null;
+  done: boolean;
+}
+
+export interface NearDupGroup {
+  photos: PhotoRow[]; // [0] = representative (newest taken_at)
+}
+
+interface ScanResult {
+  groups: NearDupGroup[];
+  skipped: number;
+  decodeFailed: number;
+}
+
+export async function scanNearDuplicates(
+  onProgress?: (p: NearDupProgress) => void
+): Promise<ScanResult> {
+  const rows = await getJpegRowsForPhash();
+  const phashed = await getPhashedIds();
+  const pairs0 = await getAllPhashPairs();
+  const allHashes = new Map<string, string>(pairs0);
+  const byId = new Map<string, PhotoRow>();
+  let skipped = 0;
+  let decodeFailed = 0;
+  let cached = 0;
+  let decoded = 0;
+  const pendingPhash: { id: string; phash: string }[] = [];
+
+  for (const row of rows) {
+    byId.set(row.id, row);
+    onProgress?.({
+      decoded,
+      cached,
+      total: rows.length,
+      skipped,
+      currentFile: row.filename,
+      done: false,
+    });
+    if (phashed.has(row.id)) {
+      cached++;
+      continue;
+    }
+    const bytes = await jpegBytesFor(row);
+    if (!bytes) {
+      skipped++;
+      continue;
+    }
+    let grid = null;
+    try {
+      grid = dcGridFromJpeg(bytes);
+    } catch {
+      grid = null;
+    }
+    if (!grid) {
+      decodeFailed++;
+      continue;
+    }
+    const hash = dHashFromDc(grid);
+    allHashes.set(row.id, hash);
+    pendingPhash.push({ id: row.id, phash: hash });
+    decoded++;
+    if (pendingPhash.length >= 50) {
+      await setPhashBatch(pendingPhash.splice(0));
+    }
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  if (pendingPhash.length > 0) await setPhashBatch(pendingPhash);
+
+  // Cluster over ALL row hashes (fresh + cached) — clustering only fresh
+  // decodes would make a cached rescan erase its own results and keep new
+  // photos from ever matching an older photo's persisted hash.
+  const allItems: HashedItem[] = [];
+  for (const row of rows) {
+    const h = allHashes.get(row.id);
+    if (h) allItems.push({ id: row.id, hash: h });
+    // Yield periodically — clustering is O(n²) over ~2k hashes and the row
+    // loop's own 15 ms sleeps don't apply to cached rows.
+    if (allItems.length % 200 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+  const clusters = clusterByDistance(allItems, NEARDUP_THRESHOLD);
+  const groups: NearDupGroup[] = clusters
+    .map((c) => ({
+      photos: c.members
+        .map((m) => byId.get(m.id))
+        .filter((p): p is PhotoRow => !!p)
+        .sort((a, b) => b.taken_at - a.taken_at), // newest first = representative
+    }))
+    .filter((g) => g.photos.length >= 2); // pairs map may reference rows outside this scan's scope
+  groups.sort((a, b) => b.photos.length - a.photos.length);
+
+  onProgress?.({
+    decoded,
+    cached,
+    total: rows.length,
+    skipped,
+    currentFile: null,
+    done: true,
+  });
+  return { groups, skipped, decodeFailed };
+}
+
+// Bytes for the decoder: prefer the local file (no network); fall back to the
+// channel thumbnail (small JPEG, usually already in the thumb cache).
+async function jpegBytesFor(row: PhotoRow): Promise<Uint8Array | null> {
+  if (row.local_uri) {
+    const local = readBytesIfSmall(row.local_uri);
+    if (local) return local;
+  }
+  const fid = row.thumb_file_id ?? row.preview_file_id;
+  if (fid) {
+    try {
+      const token = await tokenForPhoto(row);
+      const path = await getCachedTelegramFile(fid, "jpg", token);
+      const cached = readBytesIfSmall(path);
+      if (cached) return cached;
+    } catch {}
+  }
+  return null;
+}
+
+function readBytesIfSmall(path: string): Uint8Array | null {
+  let handle: ReturnType<File["open"]> | null = null;
+  try {
+    const f = new File(path);
+    if (!f.exists || f.size > MAX_DECODE_BYTES) return null;
+    handle = f.open(FileMode.ReadOnly);
+    return handle.readBytes(f.size);
+  } catch {
+    return null;
+  } finally {
+    try {
+      handle?.close();
+    } catch {}
+  }
 }

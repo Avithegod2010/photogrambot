@@ -133,6 +133,7 @@ export async function getLocalPhotosInRange(
     status: "local" as const,
     error: null,
     upload_type: null,
+    phash: null,
   }));
 }
 
