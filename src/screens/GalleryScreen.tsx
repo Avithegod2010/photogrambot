@@ -1340,16 +1340,22 @@ function PeriodJumpList({
     // Days shows the phone's local roll; Months/Years used to query the
     // backed-up (DB) library only, so a mostly-local library rendered as
     // "Nothing here yet." Merge: DB period groups (with channel covers) +
-    // local MediaLibrary buckets. DB wins the cover (a cloud-backed cover
-    // renders via TelegramImage); local buckets contribute count/label only.
+    // local MediaLibrary buckets, where local buckets EXCLUDE assets already
+    // counted in the DB groups (otherwise backed-up photos count twice).
+    // DB and local fetches fail independently — a local failure keeps DB data.
     void (async () => {
+      let dbGroups: PeriodGroup[] = [];
       try {
-        const dbGroups: PeriodGroup[] =
+        dbGroups =
           mode === "years"
             ? await import("../lib/db").then(({ getYearGroups }) => getYearGroups())
             : await import("../lib/db").then(({ getMonthGroups }) => getMonthGroups(null));
+      } catch {}
+      try {
+        const { getPeriodCountedLocalIds } = await import("../lib/db");
         const { getLocalPeriodBuckets, monthLabel } = await import("../lib/localPeriods");
-        const localBuckets = await getLocalPeriodBuckets(mode, null);
+        const exclude = await getPeriodCountedLocalIds();
+        const localBuckets = await getLocalPeriodBuckets(mode, null, exclude);
         const byKey = new Map<string, PeriodGroup>();
         for (const g of dbGroups) byKey.set(g.key, { ...g });
         for (const b of localBuckets) {
@@ -1374,7 +1380,8 @@ function PeriodJumpList({
           Array.from(byKey.values()).sort((a, b) => b.startMs - a.startMs)
         );
       } catch {
-        setGroups([]);
+        // Local-bucket failure — DB groups alone still render.
+        setGroups(dbGroups);
       }
     })();
   }, [mode]);

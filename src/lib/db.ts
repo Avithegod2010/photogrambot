@@ -428,6 +428,20 @@ export async function getUploadedLocalIds(): Promise<Set<string>> {
   return new Set(rows.map((r) => r.local_id));
 }
 
+// local_ids of every row the period-group queries count (uploaded/local/
+// failed, not trashed) — lets local-bucket counts exclude already-counted
+// assets so "N photos" on a period card matches the deduped grid.
+export async function getPeriodCountedLocalIds(): Promise<Set<string>> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ local_id: string }>(
+    `SELECT DISTINCT local_id FROM photos
+     WHERE local_id IS NOT NULL
+     AND status IN ('uploaded','local','failed')
+     AND id NOT IN (SELECT photo_id FROM trash)`
+  );
+  return new Set(rows.map((r) => r.local_id));
+}
+
 export interface SearchFilters {
   takenWithinDays?: number | null;
   hasGps?: boolean;
