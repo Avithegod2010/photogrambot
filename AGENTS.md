@@ -153,7 +153,7 @@ This folder (`photogrambot`) is **PhotogramBot**, the Telegram Bot API version.
 
 > **2026-08-31:** Device verification round 1 done — **Phases 0–2 PASS on real hardware** (see checklist status note + Round 12 fixes). UI reworked to the owner's Telephoto-style spec: Gallery tab = local phone roll (cloud-badged), Cloud tab = backed-up library, Collections = albums/favorites/trash, Settings reachable via gallery gear only, ＋ upload button removed. **The app has never been used more than one session — keep walking Phases 3–9 before adding features.** Roadmap priority order below is unchanged otherwise.
 
-> **2026-09-05 (roadmap ideas, none committed to build yet):** owner asked for a ideas menu; recorded here as the backlog. When picking one, it becomes its own planned batch.
+> **2026-09-05 (roadmap ideas, none committed to build yet):** owner asked for a ideas menu; recorded here as the backlog. When picking one, it becomes its own planned batch. **⚠ 2026-09-05 evening: Free-up-space (#1) is IN PROGRESS by a SECOND AI coding concurrently in this repo** (phash.ts + FreeUpSpaceScreen.tsx uncommitted in the tree — never commit or revert another agent's in-flight files; expect AGENTS.md edits from both agents).
 >
 > **Flagship candidates:**
 > 1. **Free up space** (top recommendation) — Google Photos-style: list local photos whose originals are *verified* backed up (builds directly on `verifyBackupSample` in maintenance.ts), select + delete from device, show reclaimable GB. The natural endpoint of a backup app.
