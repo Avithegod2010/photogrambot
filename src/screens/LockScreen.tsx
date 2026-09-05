@@ -92,24 +92,31 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     setEntry(next);
   }
 
+  const verifyingRef = useRef(false);
   async function submitPin() {
+    if (verifyingRef.current) return;
     if (entry.length < 4) return;
     if (backoffMs > 0) return;
-    const result: PinVerifyResult = await verifyPin(entry);
-    setEntry("");
-    if (result === "real") {
-      await clearFailures();
-      onUnlock();
-    } else if (result === "decoy") {
-      // A decoy hit proves knowledge too — clear, and keep the decoy session
-      // indistinguishable from a real unlock (both pass the same backoff).
-      await clearFailures();
-      setDecoyActive(true);
-      onUnlock();
-    } else {
-      setPinWrong(true);
-      await recordFailure();
-      setBackoffMs(await getBackoffRemaining());
+    verifyingRef.current = true;
+    try {
+      const result: PinVerifyResult = await verifyPin(entry);
+      setEntry("");
+      if (result === "real") {
+        await clearFailures();
+        onUnlock();
+      } else if (result === "decoy") {
+        // A decoy hit proves knowledge too — clear, and keep the decoy session
+        // indistinguishable from a real unlock (both pass the same backoff).
+        await clearFailures();
+        setDecoyActive(true);
+        onUnlock();
+      } else {
+        setPinWrong(true);
+        await recordFailure();
+        setBackoffMs(await getBackoffRemaining());
+      }
+    } finally {
+      verifyingRef.current = false;
     }
   }
 
