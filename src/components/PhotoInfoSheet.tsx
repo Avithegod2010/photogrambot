@@ -144,6 +144,15 @@ export function PhotoInfoSheet({
               ) : null}
             </View>
 
+            {p.ai_caption ? (
+              <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>AI description</Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13.5, lineHeight: 19 }}>
+                  {p.ai_caption}
+                </Text>
+              </View>
+            ) : null}
+
             {p.camera || exif ? (
               <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Camera & EXIF</Text>

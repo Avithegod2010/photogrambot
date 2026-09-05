@@ -16,7 +16,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
-import { CloudUploadIcon, HeartIcon, TrashIcon } from "../components/icons";
+import { CloudUploadIcon, DownloadIcon, HeartIcon, InfoIcon, ShareIcon, TrashIcon } from "../components/icons";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
 import { getCachedTelegramFile } from "../lib/media";
@@ -177,7 +177,9 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     .failOffsetX([-36, 36])
     .enabled(!infoVisible)
     .onEnd((e) => {
-      if (e.translationY < -50 && !zoomedRef.current) {
+      // Google Photos behavior: swipe up OR down on the photo pops the info
+      // panel. Disabled while zoomed (the vertical pan is the zoom scroll).
+      if (!zoomedRef.current && Math.abs(e.translationY) > 50) {
         setInfoVisible(true);
       }
     });
@@ -283,9 +285,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
             </Pressable>
             {hasCloudCopy ? (
               <Pressable style={styles.actionBtn} onPress={() => void onSave()}>
-                <Text style={[styles.actionIcon, { color: "#fff" }]}>
-                  {saving ? "…" : "⬇"}
-                </Text>
+                <DownloadIcon color="#fff" size={22} />
                 <Text style={styles.actionLabel}>Save</Text>
               </Pressable>
             ) : (
@@ -301,7 +301,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
             )}
             {isVideo && (photo.remote_file_id ?? photo.thumb_file_id) ? (
               <Pressable style={styles.actionBtn} onPress={() => void onShareVideo()}>
-                <Text style={[styles.actionIcon, { color: "#fff" }]}>↗</Text>
+                <ShareIcon color="#fff" size={22} />
                 <Text style={styles.actionLabel}>Share</Text>
               </Pressable>
             ) : null}
@@ -313,7 +313,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
               <Text style={styles.actionLabel}>Trash</Text>
             </Pressable>
             <Pressable style={styles.actionBtn} onPress={() => setInfoVisible(true)}>
-              <Text style={[styles.actionIcon, { color: "#fff" }]}>ⓘ</Text>
+              <InfoIcon color="#fff" size={22} />
               <Text style={styles.actionLabel}>Info</Text>
             </Pressable>
           </View>
@@ -369,9 +369,7 @@ const styles = StyleSheet.create({
   actionBtn: {
     flex: 1,
     alignItems: "center",
-  },
-  actionIcon: {
-    fontSize: 22,
+    justifyContent: "center",
   },
   actionLabel: {
     color: "#fff",

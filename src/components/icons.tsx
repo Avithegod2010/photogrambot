@@ -145,3 +145,64 @@ export function RetryIcon({ color, size = 24 }: { color: ColorValue; size?: numb
     </Svg>
   );
 }
+
+export function DownloadIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3.5v11.5M12 15l-4.6-4.6M12 15l4.6-4.6"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M4.5 19.5h15"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function ShareIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M14 5.5h4.5V10"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M18.5 5.5 11 13"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <Path
+        d="M10 6H6.5A2.5 2.5 0 0 0 4 8.5v9A2.5 2.5 0 0 0 6.5 20h9a2.5 2.5 0 0 0 2.5-2.5V14"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function InfoIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="8.6" stroke={color} strokeWidth="2" />
+      <Path
+        d="M12 11v5.2"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <Circle cx="12" cy="7.9" r="1.15" fill={color} />
+    </Svg>
+  );
+}

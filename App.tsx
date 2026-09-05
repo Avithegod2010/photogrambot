@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, AppState, Linking, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -31,7 +31,7 @@ import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
 import { getSharedMedia } from "./modules/share-intent";
 import { ShareTargetSheet } from "./src/components/ShareTargetSheet";
-import { PhotoFrameIcon, CloudIcon, SearchIcon } from "./src/components/icons";
+import { PhotoFrameIcon, CloudIcon, SearchIcon, GearIcon } from "./src/components/icons";
 import { requestNotificationPermission } from "./src/lib/notify";
 import { setDecoyActive, isDecoyActive } from "./src/lib/applock";
 import {
@@ -70,6 +70,12 @@ function CloudTab(props: any) {
   );
 }
 
+// Never rendered: the tab's tabBarButton intercepts the press and navigates
+// to the stack-level Settings screen, so no dummy route ever mounts.
+function SettingsTabPlaceholder() {
+  return null;
+}
+
 function Tabs() {
   const theme = useTheme();
   return (
@@ -105,6 +111,25 @@ function Tabs() {
         name="CollectionsTab"
         component={CollectionsScreen}
         options={{ title: "Collections", tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
+      />
+      <Tab.Screen
+        name="SettingsTab"
+        component={SettingsTabPlaceholder}
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color }) => <GearIcon color={color} />,
+          tabBarButton: (props) => (
+            <Pressable
+              {...(props as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+              onPress={() => {
+                // A decoy session must not expose the real settings entry.
+                if (!isDecoyActive()) navigationRef.navigate("Settings");
+              }}
+            />
+          ),
+        }}
       />
     </Tab.Navigator>
   );

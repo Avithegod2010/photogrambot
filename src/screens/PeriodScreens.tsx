@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Dimensions, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { Dimensions, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import * as MediaLibrary from "expo-media-library";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { getMonthGroups, type PeriodGroup } from "../lib/db";
+import { getLocalPeriodBuckets, monthLabel } from "../lib/localPeriods";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage } from "../components/TelegramImage";
 
@@ -28,7 +30,37 @@ export function MonthsOfYearScreen({
       setGroups([]);
       return;
     }
-    getMonthGroups(year).then(setGroups);
+    // Same DB+local merge as the gallery's Months jump list — a month with
+    // only local photos must still show up (Days shows them, so must this).
+    void (async () => {
+      try {
+        const dbGroups = await getMonthGroups(year);
+        const localBuckets = await getLocalPeriodBuckets("months", year);
+        const byKey = new Map<string, PeriodGroup>();
+        for (const g of dbGroups) byKey.set(g.key, { ...g });
+        for (const b of localBuckets) {
+          const existing = byKey.get(b.key);
+          if (existing) {
+            existing.count += b.count;
+            existing.startMs = Math.min(existing.startMs, b.startMs);
+            existing.endMs = Math.max(existing.endMs, b.endMs);
+          } else {
+            byKey.set(b.key, {
+              key: b.key,
+              label: monthLabel(b.key),
+              startMs: b.startMs,
+              endMs: b.endMs,
+              count: b.count,
+              cover_preview_id: null,
+              cover_file_id: null,
+            });
+          }
+        }
+        setGroups(Array.from(byKey.values()).sort((a, b) => b.startMs - a.startMs));
+      } catch {
+        setGroups([]);
+      }
+    })();
   }, [year]);
 
   const tileW = (Dimensions.get("window").width - 32 - 12) / 2;
@@ -59,11 +91,25 @@ export function MonthsOfYearScreen({
             }
           >
             <View style={[styles.cover, { width: tileW, height: tileW * 0.72 }]}>
+            {item.cover_preview_id ?? item.cover_file_id ? (
               <TelegramImage
                 fileId={item.cover_preview_id ?? item.cover_file_id}
                 style={{ width: tileW, height: tileW * 0.72 }}
               />
-            </View>
+            ) : (
+              <View
+                style={{
+                  width: tileW,
+                  height: tileW * 0.72,
+                  backgroundColor: theme.colors.surfaceHighest,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 24 }}>🖼</Text>
+              </View>
+            )}
+          </View>
             <Text style={[styles.label, { color: theme.colors.onSurface }]} numberOfLines={1}>
               {item.label}
             </Text>
@@ -97,10 +143,26 @@ export function PeriodPhotosScreen({ route, navigation }: { route: any; navigati
       setLoading(false);
       return;
     }
-    import("../lib/db")
-      .then(({ getPhotosInRange }) => getPhotosInRange(startMs, endMs))
-      .then(setPhotos)
-      .finally(() => setLoading(false));
+    // Grid spans BOTH sources: DB rows (cloud-backed) + local assets in the
+    // same range. Local rows render through LocalAssetThumb (per-tile URI
+    // resolve); DB rows render through TelegramImage as before.
+    void (async () => {
+      try {
+        const dbRows = await import("../lib/db").then(({ getPhotosInRange }) =>
+          getPhotosInRange(startMs, endMs)
+        );
+        const { getLocalPhotosInRange } = await import("../lib/localPeriods");
+        const localRows = await getLocalPhotosInRange(startMs, endMs);
+        const dbLocalIds = new Set(dbRows.map((r) => r.local_id).filter(Boolean));
+        const merged = [...dbRows, ...localRows.filter((r) => !dbLocalIds.has(r.local_id))];
+        merged.sort((a, b) => b.taken_at - a.taken_at);
+        setPhotos(merged);
+      } catch {
+        setPhotos([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [startMs, endMs]);
 
   return (
@@ -144,12 +206,16 @@ export function MonthGrid({
       contentContainerStyle={{ padding: 2 }}
       renderItem={({ item }) => (
         <Pressable style={{ width: tile, height: tile, padding: 1 }} onPress={() => onPress(item)}>
-          <TelegramImage
-            fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
-            localUri={item.local_uri}
-            profileId={item.profile_id}
-            style={{ width: "100%", height: "100%" }}
-          />
+          {item.local_id && !item.remote_file_id && !item.preview_file_id && !item.thumb_file_id ? (
+            <LocalAssetThumb assetId={item.local_id} style={{ width: "100%", height: "100%" }} />
+          ) : (
+            <TelegramImage
+              fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
+              localUri={item.local_uri}
+              profileId={item.profile_id}
+              style={{ width: "100%", height: "100%" }}
+            />
+          )}
         </Pressable>
       )}
       ListEmptyComponent={
@@ -157,6 +223,31 @@ export function MonthGrid({
           No photos.
         </Text>
       }
+    />
+  );
+}
+
+// Per-tile lazy URI resolve for local rows (same pattern as GalleryScreen's
+// LocalThumb) — MediaLibrary Asset URI resolution is per-asset bridge work.
+function LocalAssetThumb({ assetId, style }: { assetId: string; style: any }) {
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    new MediaLibrary.Asset(assetId)
+      .getUri()
+      .then((u) => {
+        if (alive) setUri(u);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [assetId]);
+  return (
+    <Image
+      source={uri ? { uri } : undefined}
+      style={[style, { backgroundColor: "rgba(128,128,128,0.12)" }]}
+      resizeMode="cover"
     />
   );
 }
