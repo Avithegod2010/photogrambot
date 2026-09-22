@@ -50,15 +50,19 @@ export function ShareTargetSheet({
     const errors: string[] = [];
     try {
       const items = [];
-      for (const uri of uris) {
+      for (let itemIndex = 0; itemIndex < uris.length; itemIndex++) {
+        const uri = uris[itemIndex];
         const rawName = uri.split("/").pop()?.split("?")[0] ?? "";
         try {
           const hasExt = /\.[a-z0-9]{2,5}$/i.test(rawName);
           const name = hasExt
             ? rawName
             : `shared_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`;
-          const dest = new File(Paths.cache, `pb_share_${Date.now()}_${name}`);
-          new File(uri).copy(dest);
+          const unique = `${Date.now()}_${itemIndex}_${Math.random().toString(36).slice(2, 8)}`;
+          const dest = new File(Paths.cache, `pb_share_${unique}_${name}`);
+          // copy() is async — awaiting also makes dest.size truthful below and
+          // prevents the queue racing an incomplete staged file.
+          await new File(uri).copy(dest);
           items.push({
             local_id: `share_${uri}`,
             local_uri: dest.uri,
