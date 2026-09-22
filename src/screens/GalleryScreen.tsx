@@ -1170,10 +1170,24 @@ function FilterSheet({
     { label: "Screen rec", value: "screenrec" },
     { label: "Documents", value: "document" },
   ];
-  const deviceOptions = devices.map((d) => ({ label: d, value: d }));
-  if (device && !devices.includes(device)) {
+  // Never surface a real device name in a decoy session. This also covers an
+  // already-applied device filter that remains in component state while the
+  // modal is reused across lock/unlock transitions.
+  const deviceOptions = isDecoyActive()
+    ? []
+    : devices.map((d) => ({ label: d, value: d }));
+  if (!isDecoyActive() && device && !devices.includes(device)) {
     deviceOptions.push({ label: device, value: device });
   }
+  const draftHasAnyFilter =
+    days !== null ||
+    hasGps ||
+    !!camera.trim() ||
+    notBackedUp ||
+    !!device ||
+    !!mediaType ||
+    !!sort ||
+    !!autoTag;
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
@@ -1284,7 +1298,7 @@ function FilterSheet({
             </View>
           </ScrollView>
           <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            {(hasAnyFilter(initial) || searchText.trim().length > 0) && !saveVisible ? (
+            {(draftHasAnyFilter || searchText.trim().length > 0) && !saveVisible ? (
               <Button
                 title="Save search"
                 variant="text"

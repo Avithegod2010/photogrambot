@@ -321,14 +321,14 @@ async function sendFileViaTask(
       // handle content:// source URIs (videos from MediaStore) — file://
       // copies upload fine, which is why photos (file://) work and videos
       // (content://) fail. Round 19 device-session root cause.
-      const dest = new File(Paths.cache, `pb_upload_${Date.now()}_${file.filename}`);
-      if (!dest.exists) {
-        src.copy(dest);
-        staged = dest;
-        uploadUri = dest.uri;
-      } else {
-        uploadUri = dest.uri;
-      }
+      const unique = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const dest = new File(Paths.cache, `pb_upload_${unique}_${file.filename}`);
+      // File.copy is async (copySync is the sync variant). Awaiting it makes
+      // the upload task see a complete staged file and avoids timestamp-path
+      // collisions uploading a stale copy.
+      await src.copy(dest);
+      staged = dest;
+      uploadUri = dest.uri;
     }
     const task = new File(uploadUri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
       uploadType: UploadType.MULTIPART,
@@ -375,7 +375,7 @@ async function sendFileViaTask(
     try {
       fallbackFile = new File(Paths.cache, `pb_fallback_${Date.now()}_${file.filename}`);
       if (fallbackFile.exists) fallbackFile.delete();
-      new File(uploadUri).copy(fallbackFile);
+      await new File(uploadUri).copy(fallbackFile);
       const task = new File(fallbackFile.uri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
         uploadType: UploadType.MULTIPART,
         fieldName,

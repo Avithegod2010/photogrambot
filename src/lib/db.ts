@@ -1610,7 +1610,12 @@ export async function importAllData(json: string, replace: boolean): Promise<num
         [t.photo_id, t.trashed_at, t.remote_deleted ?? 0]
       );
     }
-    for (const s of data.saved_searches ?? []) {
+    const importedSavedSearches = Array.isArray(data.saved_searches)
+      ? data.saved_searches.slice(0, 5000)
+      : [];
+    for (const rawSearch of importedSavedSearches) {
+      if (!rawSearch || typeof rawSearch !== "object" || Array.isArray(rawSearch)) continue;
+      const s = rawSearch as Record<string, unknown>;
       // Unknown/absent name rows are skipped — name is UNIQUE NOT NULL.
       if (typeof s.name !== "string" || !s.name.trim()) continue;
       let importedFilters: SearchFilters | null = null;
