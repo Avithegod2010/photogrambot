@@ -28,6 +28,7 @@ import { UploadQueueScreen } from "./src/screens/UploadQueueScreen";
 import { FreeUpSpaceScreen } from "./src/screens/FreeUpSpaceScreen";
 import { DestinationsScreen } from "./src/screens/DestinationsScreen";
 import { SearchResultsScreen } from "./src/screens/SearchResultsScreen";
+import { SimilarScreen } from "./src/screens/SimilarScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
@@ -181,6 +182,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           <Stack.Screen name="FreeUpSpace" component={FreeUpSpaceScreen} />
           <Stack.Screen name="Destinations" component={DestinationsScreen} />
           <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
+          <Stack.Screen name="Similar" component={SimilarScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     );

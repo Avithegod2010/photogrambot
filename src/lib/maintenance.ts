@@ -265,6 +265,20 @@ export async function scanNearDuplicates(
   return { groups, skipped, decodeFailed };
 }
 
+// Computes the same persisted dHash used by the near-duplicate scanner for a
+// single photo. SimilarScreen uses this for a photo opened before the user has
+// run the full maintenance scan (including local-only viewer entries).
+export async function computePhotoPhash(row: PhotoRow): Promise<string | null> {
+  const bytes = await jpegBytesFor(row);
+  if (!bytes) return null;
+  try {
+    const grid = dcGridFromJpeg(bytes);
+    return grid ? dHashFromDc(grid) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Bytes for the decoder: prefer the local file (no network); fall back to the
 // channel thumbnail (small JPEG, usually already in the thumb cache).
 async function jpegBytesFor(row: PhotoRow): Promise<Uint8Array | null> {
