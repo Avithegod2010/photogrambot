@@ -328,6 +328,14 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
         photo={photo}
         visible={infoVisible}
         onClose={() => setInfoVisible(false)}
+        onFindSimilar={
+          !isVideo
+            ? () => {
+                setInfoVisible(false);
+                navigation.navigate("Similar", { photo });
+              }
+            : undefined
+        }
         theme={theme}
       />
     </View>

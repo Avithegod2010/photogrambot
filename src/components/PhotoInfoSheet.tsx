@@ -27,11 +27,13 @@ export function PhotoInfoSheet({
   photo,
   visible,
   onClose,
+  onFindSimilar,
   theme,
 }: {
   photo: PhotoRow | null;
   visible: boolean;
   onClose: () => void;
+  onFindSimilar?: () => void;
   theme: ReturnType<typeof useTheme>;
 }) {
   if (!photo) return null;
@@ -170,6 +172,15 @@ export function PhotoInfoSheet({
               </View>
             ) : null}
 
+            {onFindSimilar ? (
+              <Pressable
+                style={[styles.similarButton, { backgroundColor: theme.colors.surface }]}
+                onPress={onFindSimilar}
+              >
+                <Text style={[styles.similarButtonText, { color: theme.colors.primary }]}>Find similar photos</Text>
+              </Pressable>
+            ) : null}
+
             {hasGps && !exif ? null : null}
           </ScrollView>
         </View>
@@ -283,5 +294,15 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: "500",
     lineHeight: 19,
+  },
+  similarButton: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  similarButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

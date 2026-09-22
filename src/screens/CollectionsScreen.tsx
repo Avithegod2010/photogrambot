@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
   FlatList,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -146,9 +147,11 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                           text: "Delete",
                           style: "destructive",
                           onPress: () => {
-                            void deleteSavedSearch(s.id).finally(() => {
-                              getSavedSearches().then(setSavedSearches).catch(() => {});
-                            });
+                            void deleteSavedSearch(s.id)
+                              .then(() => getSavedSearches().then(setSavedSearches))
+                              .catch((e: any) =>
+                                Alert.alert("Delete search", e?.message ?? "Couldn’t delete this search.")
+                              );
                           },
                         },
                       ],
@@ -295,12 +298,16 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             theme={theme}
             disabled={!renameName.trim()}
             onPress={async () => {
-              if (renameTarget) {
+              if (!renameTarget) return;
+              try {
                 await renameSavedSearch(renameTarget.id, renameName);
-                getSavedSearches().then(setSavedSearches).catch(() => {});
+                const rows = await getSavedSearches();
+                setSavedSearches(rows);
+                setRenameTarget(null);
+                setRenameName("");
+              } catch (e: any) {
+                Alert.alert("Rename search", e?.message ?? "Couldn’t rename this search.");
               }
-              setRenameTarget(null);
-              setRenameName("");
             }}
           />
         </View>
@@ -779,6 +786,58 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
   const title: string = route.params?.title ?? (filter === "cloud" ? "Cloud" : "Local");
   const [photos, setPhotos] = useState<PhotoRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const listRef = useRef<FlatList<PhotoRow>>(null);
+  const [trackHeight, setTrackHeight] = useState(0);
+  const [scrubLabel, setScrubLabel] = useState<string | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+
+  const timeline = useMemo(() => {
+    const markers: { index: number; label: string }[] = [];
+    let previous = "";
+    for (let index = 0; index < photos.length; index++) {
+      const date = new Date(photos[index].taken_at || 0);
+      const label = Number.isFinite(date.getTime())
+        ? date.toLocaleDateString(undefined, { month: "short", year: "numeric" })
+        : "Unknown date";
+      if (label !== previous) {
+        markers.push({ index, label });
+        previous = label;
+      }
+    }
+    return markers;
+  }, [photos]);
+
+  const scrubTo = useCallback(
+    (locationY: number) => {
+      if (photos.length === 0 || trackHeight <= 0) return;
+      const ratio = Math.max(0, Math.min(1, locationY / trackHeight));
+      const index = Math.min(photos.length - 1, Math.round(ratio * (photos.length - 1)));
+      listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.45 });
+      let marker = timeline[0];
+      for (const candidate of timeline) {
+        if (candidate.index > index) break;
+        marker = candidate;
+      }
+      setScrubLabel(marker?.label ?? null);
+    },
+    [photos.length, timeline, trackHeight]
+  );
+
+  const scrubResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (event) => {
+          setScrubbing(true);
+          scrubTo(event.nativeEvent.locationY);
+        },
+        onPanResponderMove: (event) => scrubTo(event.nativeEvent.locationY),
+        onPanResponderRelease: () => setScrubbing(false),
+        onPanResponderTerminate: () => setScrubbing(false),
+      }),
+    [scrubTo]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -819,10 +878,19 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
       </View>
       {loading ? null : (
         <FlatList
+          ref={listRef}
           data={photos}
           numColumns={3}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{ padding: 2, paddingBottom: 40 }}
+          getItemLayout={(_, index) => {
+            const length = tile;
+            return { length, offset: Math.floor(index / 3) * length, index };
+          }}
+          contentContainerStyle={{
+            padding: 2,
+            paddingRight: filter === "cloud" && timeline.length > 0 ? 42 : 2,
+            paddingBottom: 40,
+          }}
           renderItem={({ item }) => {
             const thumb = resolvePhotoThumb(item);
             return (
@@ -866,6 +934,36 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
           }
         />
       )}
+      {filter === "cloud" && photos.length > 0 ? (
+        <View
+          style={styles.timelineScrubber}
+          onLayout={(event) => setTrackHeight(event.nativeEvent.layout.height)}
+          {...scrubResponder.panHandlers}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Cloud timeline scrubber"
+        >
+          <View style={[styles.timelineRail, { backgroundColor: theme.colors.outlineVariant }]} />
+          {timeline
+            .filter((_, index) => timeline.length <= 8 || index % Math.ceil(timeline.length / 8) === 0)
+            .map((marker) => (
+              <View
+                key={`${marker.index}:${marker.label}`}
+                pointerEvents="none"
+                style={[styles.timelineMarker, { top: `${(marker.index / Math.max(1, photos.length - 1)) * 100}%` }]}
+              >
+                <View style={[styles.timelineDot, { backgroundColor: theme.colors.primary }]} />
+                <Text style={[styles.timelineText, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
+                  {marker.label}
+                </Text>
+              </View>
+            ))}
+          {scrubbing && scrubLabel ? (
+            <View style={[styles.timelineBubble, { backgroundColor: theme.colors.primary }]} pointerEvents="none">
+              <Text style={{ color: theme.colors.onPrimary, fontSize: 12, fontWeight: "700" }}>{scrubLabel}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1014,5 +1112,46 @@ const styles = StyleSheet.create({
   selAction: {
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  timelineScrubber: {
+    position: "absolute",
+    top: 112,
+    right: 0,
+    bottom: 28,
+    width: 56,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timelineRail: {
+    position: "absolute",
+    top: 2,
+    bottom: 2,
+    width: 3,
+    borderRadius: 99,
+  },
+  timelineMarker: {
+    position: "absolute",
+    left: 3,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    transform: [{ translateY: -7 }],
+  },
+  timelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 99,
+  },
+  timelineText: {
+    fontSize: 9,
+    maxWidth: 45,
+  },
+  timelineBubble: {
+    position: "absolute",
+    right: 52,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 10,
   },
 });
