@@ -157,6 +157,13 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_queue_state ON upload_queue(state);
+    CREATE TABLE IF NOT EXISTS saved_searches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      query TEXT NOT NULL DEFAULT '',
+      filters TEXT NOT NULL DEFAULT 'null',
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS kv (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL
@@ -459,6 +466,45 @@ export interface SearchFilters {
   device?: string | null;
   mediaType?: "photos" | "videos" | null;
   sort?: "size_desc" | null;
+  // One of AUTO_TAGS (src/lib/autotags.ts) — validated by the UI/whitelist
+  // before it reaches here.
+  autoTag?: string | null;
+}
+
+// Saved-search filters can come from an imported backup, so never trust the
+// JSON shape merely because it was cast to SearchFilters. Keep this normalizer
+// intentionally small and allow-list every field consumed by searchPhotos.
+export function normalizeSearchFilters(value: unknown): SearchFilters | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const out: SearchFilters = {};
+  if (typeof input.takenWithinDays === "number" && Number.isFinite(input.takenWithinDays)) {
+    const days = Math.round(input.takenWithinDays);
+    if (days > 0) out.takenWithinDays = Math.min(days, 365);
+  }
+  if (input.hasGps === true) out.hasGps = true;
+  if (typeof input.camera === "string") {
+    const camera = input.camera.trim().slice(0, 60);
+    if (camera) out.camera = camera;
+  }
+  if (input.notBackedUp === true) out.notBackedUp = true;
+  if (typeof input.device === "string") {
+    const device = input.device.trim().slice(0, 200);
+    if (device) out.device = device;
+  }
+  if (input.mediaType === "photos" || input.mediaType === "videos") {
+    out.mediaType = input.mediaType;
+  }
+  if (input.sort === "size_desc") out.sort = input.sort;
+  if (
+    input.autoTag === "screenshot" ||
+    input.autoTag === "screenrec" ||
+    input.autoTag === "whatsapp" ||
+    input.autoTag === "document"
+  ) {
+    out.autoTag = input.autoTag;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export async function searchPhotos(
@@ -467,36 +513,44 @@ export async function searchPhotos(
   limit = 500
 ): Promise<PhotoRow[]> {
   const d = await getDb();
+  const safeFilters = normalizeSearchFilters(filters);
   const cleaned = query.trim();
   const conds: string[] = ["p.id NOT IN (SELECT photo_id FROM trash)"];
   const params: any[] = [];
-  if (filters?.takenWithinDays && filters.takenWithinDays > 0) {
+  if (safeFilters?.takenWithinDays && safeFilters.takenWithinDays > 0) {
     conds.push("p.taken_at >= ?");
-    params.push(Date.now() - filters.takenWithinDays * 86400000);
+    params.push(Date.now() - safeFilters.takenWithinDays * 86400000);
   }
-  if (filters?.hasGps) {
+  if (safeFilters?.hasGps) {
     conds.push("p.latitude IS NOT NULL AND p.longitude IS NOT NULL");
   }
-  if (filters?.camera && filters.camera.trim()) {
+  if (safeFilters?.camera && safeFilters.camera.trim()) {
     conds.push("LOWER(p.camera) LIKE ?");
-    params.push(`%${filters.camera.trim().toLowerCase()}%`);
+    params.push(`%${safeFilters.camera.trim().toLowerCase()}%`);
   }
-  if (filters?.notBackedUp) {
+  if (safeFilters?.notBackedUp) {
     conds.push("p.status != 'uploaded'");
   }
-  if (filters?.device && filters.device.trim()) {
+  if (safeFilters?.device && safeFilters.device.trim()) {
     conds.push("p.device = ?");
-    params.push(filters.device.trim());
+    params.push(safeFilters.device.trim());
   }
-  if (filters?.mediaType === "photos") {
+  if (safeFilters?.mediaType === "photos") {
     // Null-mime rows are excluded from the photos view (accepted trade-off —
     // device backups always record mime; only edge-case legacy rows lack it).
     conds.push("p.mime LIKE 'image/%'");
-  } else if (filters?.mediaType === "videos") {
+  } else if (safeFilters?.mediaType === "videos") {
     conds.push("p.mime LIKE 'video/%'");
   }
+  if (safeFilters?.autoTag && safeFilters.autoTag.trim()) {
+    // Token match against the space-joined tags string — padding with spaces
+    // via SQL concat keeps "screenshot" from matching "screenshots". The tag
+    // value is a bound parameter, never interpolated into the SQL text.
+    conds.push("(' ' || COALESCE(p.tags, '') || ' ') LIKE ?");
+    params.push(`% ${safeFilters.autoTag.trim()} %`);
+  }
   const orderBy =
-    filters?.sort === "size_desc"
+    safeFilters?.sort === "size_desc"
       ? "ORDER BY COALESCE(p.size, 0) DESC"
       : "ORDER BY p.taken_at DESC";
   const where = conds.join(" AND ");
@@ -545,6 +599,75 @@ export async function getLargestUploaded(n = 3): Promise<PhotoRow[]> {
     [n]
   );
   return rows.map(rowToPhoto);
+}
+
+export interface SavedSearchRow {
+  id: number;
+  name: string;
+  query: string;
+  filters: SearchFilters | null;
+  created_at: number;
+}
+
+// Upsert by name — re-saving an existing name updates its query/filters in
+// place (matches the mental model of pinning a filter combo).
+export async function saveSearch(
+  name: string,
+  query: string,
+  filters: SearchFilters | null
+): Promise<number> {
+  const d = await getDb();
+  const trimmed = name.trim().slice(0, 60);
+  if (!trimmed) throw new Error("Search name is required");
+  const existing = await d.getFirstAsync<{ id: number }>(
+    "SELECT id FROM saved_searches WHERE name = ?",
+    [trimmed]
+  );
+  if (existing) {
+    await d.runAsync(
+      "UPDATE saved_searches SET query = ?, filters = ? WHERE id = ?",
+      [query.trim().slice(0, 200), JSON.stringify(normalizeSearchFilters(filters)), existing.id]
+    );
+    return existing.id;
+  }
+  const res = await d.runAsync(
+    "INSERT INTO saved_searches (name, query, filters, created_at) VALUES (?,?,?,?)",
+    [trimmed, query.trim().slice(0, 200), JSON.stringify(normalizeSearchFilters(filters)), Date.now()]
+  );
+  return res.lastInsertRowId ?? 0;
+}
+
+export async function getSavedSearches(): Promise<SavedSearchRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{
+    id: number;
+    name: string;
+    query: string;
+    filters: string;
+    created_at: number;
+  }>("SELECT id, name, query, filters, created_at FROM saved_searches ORDER BY created_at DESC");
+  return rows.map((r) => {
+    let filters: SearchFilters | null = null;
+    try {
+      filters = normalizeSearchFilters(JSON.parse(r.filters));
+    } catch {
+      // Corrupt filters JSON (bad import) degrades to a text-only search.
+      filters = null;
+    }
+    return { ...r, filters };
+  });
+}
+
+export async function deleteSavedSearch(id: number): Promise<void> {
+  const d = await getDb();
+  await d.runAsync("DELETE FROM saved_searches WHERE id = ?", [id]);
+}
+
+export async function renameSavedSearch(id: number, name: string): Promise<void> {
+  const d = await getDb();
+  const trimmed = name.trim().slice(0, 60);
+  if (!trimmed) throw new Error("Search name is required");
+  await d.runAsync("UPDATE saved_searches SET name = ? WHERE id = ?", [trimmed, id]);
 }
 
 export async function ftsIndexPhoto(p: PhotoRow): Promise<void> {
@@ -1418,6 +1541,7 @@ export async function exportAllData(): Promise<string> {
   const albums = await d.getAllAsync<any>("SELECT * FROM albums");
   const albumPhotos = await d.getAllAsync<any>("SELECT * FROM album_photos");
   const trash = await d.getAllAsync<any>("SELECT * FROM trash");
+  const savedSearches = await d.getAllAsync<any>("SELECT * FROM saved_searches");
   const kv = await d.getAllAsync<any>("SELECT * FROM kv");
   return JSON.stringify({
     format: "photogrambot-backup",
@@ -1427,6 +1551,7 @@ export async function exportAllData(): Promise<string> {
     albums,
     album_photos: albumPhotos,
     trash,
+    saved_searches: savedSearches,
     kv,
   });
 }
@@ -1441,6 +1566,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync("DELETE FROM album_photos");
       await d.runAsync("DELETE FROM albums");
       await d.runAsync("DELETE FROM trash");
+      await d.runAsync("DELETE FROM saved_searches");
       await d.runAsync("DELETE FROM photos_fts");
       await d.runAsync("DELETE FROM photos");
     }
@@ -1482,6 +1608,28 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync(
         "INSERT OR IGNORE INTO trash (photo_id, trashed_at, remote_deleted) VALUES (?,?,?)",
         [t.photo_id, t.trashed_at, t.remote_deleted ?? 0]
+      );
+    }
+    for (const s of data.saved_searches ?? []) {
+      // Unknown/absent name rows are skipped — name is UNIQUE NOT NULL.
+      if (typeof s.name !== "string" || !s.name.trim()) continue;
+      let importedFilters: SearchFilters | null = null;
+      if (typeof s.filters === "string" && s.filters.length <= 4096) {
+        try {
+          importedFilters = normalizeSearchFilters(JSON.parse(s.filters));
+        } catch {
+          importedFilters = null;
+        }
+      }
+      await d.runAsync(
+        `INSERT INTO saved_searches (name, query, filters, created_at) VALUES (?,?,?,?)
+         ON CONFLICT(name) DO UPDATE SET query = excluded.query, filters = excluded.filters`,
+        [
+          s.name.trim().slice(0, 60),
+          typeof s.query === "string" ? s.query.slice(0, 200) : "",
+          JSON.stringify(importedFilters),
+          typeof s.created_at === "number" ? s.created_at : Date.now(),
+        ]
       );
     }
     for (const k of data.kv ?? []) {

@@ -10,10 +10,12 @@ import {
   removeBrokenPhotos,
   verifyBackupSample,
   scanNearDuplicates,
+  autoTagBackfill,
   type DuplicateGroup,
   type IntegrityProgress,
   type NearDupGroup,
   type NearDupProgress,
+  type AutoTagProgress,
   type VerificationProgress,
   type VerificationResult,
 } from "../lib/maintenance";
@@ -62,6 +64,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [nearProgress, setNearProgress] = useState<NearDupProgress | null>(null);
   const [nearError, setNearError] = useState<string | null>(null);
   const [nearNote, setNearNote] = useState<string | null>(null);
+  const [tagging, setTagging] = useState(false);
+  const [tagProgress, setTagProgress] = useState<AutoTagProgress | null>(null);
+  const [tagNote, setTagNote] = useState<string | null>(null);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   function confirmRestore() {
     Alert.alert(
@@ -172,6 +178,26 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     } finally {
       setScanningNear(false);
       setNearProgress(null);
+    }
+  }
+
+  async function runAutoTag() {
+    setTagging(true);
+    setTagError(null);
+    setTagNote(null);
+    setTagProgress({ current: 0, total: 0, tagged: 0, currentFile: null, done: false });
+    try {
+      const result = await autoTagBackfill(setTagProgress);
+      setTagNote(
+        result.tagged === 0
+          ? `All ${result.scanned} photos already tagged.`
+          : `Tagged ${result.tagged} photo${result.tagged === 1 ? "" : "s"} — searchable now.`
+      );
+    } catch (e: any) {
+      setTagError(e?.message ?? "Auto-tagging failed.");
+    } finally {
+      setTagging(false);
+      setTagProgress(null);
     }
   }
 
@@ -383,6 +409,40 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {dupes.length > 0 ? (
                 <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 12 }}>
                   {dupes.length} duplicate group{dupes.length === 1 ? "" : "s"} found
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Auto-tags" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Tags screenshots, WhatsApp saves, screen recordings and documents by filename
+                pattern so they're filterable (Gallery → ☰ → Type). New backups are tagged
+                automatically; this backfills your existing library.
+              </Text>
+              <Button
+                title="Tag library"
+                theme={theme}
+                variant="outlined"
+                busy={tagging}
+                onPress={runAutoTag}
+                style={{ marginTop: 12 }}
+              />
+              {tagProgress ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  {tagProgress.done
+                    ? `Scanned ${tagProgress.total} — ${tagProgress.tagged} tagged`
+                    : `Tagging ${tagProgress.current}/${tagProgress.total || "…"} — ${tagProgress.tagged} tagged`}
+                </Text>
+              ) : null}
+              {tagNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {tagNote}
+                </Text>
+              ) : null}
+              {tagError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {tagError}
                 </Text>
               ) : null}
             </Card>

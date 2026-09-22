@@ -24,16 +24,19 @@ import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
 import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
-import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, type MonthBucket, type SearchFilters } from "../lib/db";
+import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, saveSearch, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
-import { GearIcon, HeartIcon, TrashIcon } from "../components/icons";
+import { GearIcon, HeartIcon, TrashIcon, SparkleIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto, listProfiles } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { Button, Dialog, TextField } from "../components/ui";
+import { nlToSearch } from "../lib/ai";
+import { getAiApiKey } from "../lib/settings";
+import { AUTO_TAGS } from "../lib/autotags";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
 
@@ -78,6 +81,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }, [selection, searchResults, photos]);
   const [filters, setFilters] = useState<SearchFilters | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
+  const [nlLoading, setNlLoading] = useState(false);
+  const [saveSearchVisible, setSaveSearchVisible] = useState(false);
+  const [saveSearchName, setSaveSearchName] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [albumDialogVisible, setAlbumDialogVisible] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
@@ -341,6 +347,57 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
     const results = await useLibraryStore.getState().search(search, f ?? undefined);
     if (seq === searchSeq.current) setSearchResults(results);
+  }
+
+  // NL search applies text AND filters in ONE query run — applyFilters alone
+  // would run the search against the stale `search` closure, then runSearch's
+  // debounce would fire a second query with the opposite half applied.
+  async function applyNaturalSearch(text: string, f: SearchFilters | null) {
+    setSearch(text);
+    setFilters(f);
+    if (decoy) {
+      setSearchResults(null);
+      return;
+    }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const seq = ++searchSeq.current;
+    if (!text.trim() && !hasAnyFilter(f)) {
+      setSearchResults(null);
+      return;
+    }
+    const results = await useLibraryStore.getState().search(text, f ?? undefined);
+    if (seq === searchSeq.current) setSearchResults(results);
+  }
+
+  async function runNaturalLanguageSearch() {
+    if (nlLoading) return;
+    const apiKey = await getAiApiKey().catch(() => null);
+    if (!apiKey) {
+      Alert.alert("AI search", "Add your Gemini API key in Settings → AI captions first.");
+      return;
+    }
+    setNlLoading(true);
+    try {
+      // Device names ride along in the prompt — never expose them in a decoy.
+      const devices = isDecoyActive() ? [] : await getDistinctDevices().catch(() => []);
+      const { searchText, filters: aiFilters } = await nlToSearch(search.trim(), {
+        apiKey,
+        model: useSettingsStore.getState().prefs.aiModel || "gemini-2.5-flash",
+        devices,
+        autoTags: [...AUTO_TAGS],
+      });
+      const hasAnything =
+        searchText !== null || hasAnyFilter(aiFilters);
+      if (!hasAnything) {
+        Alert.alert("AI search", "Couldn't find a filterable meaning — try more specific words.");
+        return;
+      }
+      await applyNaturalSearch(searchText ?? "", aiFilters);
+    } catch (e: any) {
+      Alert.alert("AI search", e?.message ?? "Couldn't understand that search");
+    } finally {
+      setNlLoading(false);
+    }
   }
 
   async function shareSelected() {
@@ -651,6 +708,15 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             <Text style={{ color: theme.colors.primary, fontSize: 11, fontWeight: "700" }}>FILTERED</Text>
           </Pressable>
         ) : null}
+        {!decoy ? (
+          <Pressable onPress={() => void runNaturalLanguageSearch()} hitSlop={6} disabled={nlLoading}>
+            {nlLoading ? (
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            ) : (
+              <SparkleIcon color={theme.colors.primary} size={18} />
+            )}
+          </Pressable>
+        ) : null}
         <Pressable onPress={() => setFilterSheetVisible(true)} hitSlop={6} style={{ paddingHorizontal: 4 }}>
           <Text style={{ color: theme.colors.onSurfaceVariant }}>☰</Text>
         </Pressable>
@@ -851,9 +917,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         visible={filterSheetVisible}
         theme={theme}
         initial={filters}
+        searchText={search}
         onApply={(f) => {
           setFilterSheetVisible(false);
           void applyFilters(f);
+        }}
+        onSaveSearch={async (name, f, q) => {
+          await saveSearch(name, q, f);
+          setFilterSheetVisible(false);
         }}
         onClose={() => setFilterSheetVisible(false)}
       />
@@ -1013,7 +1084,8 @@ function hasAnyFilter(f: SearchFilters | null | undefined): boolean {
       !!f.notBackedUp ||
       !!(f.device && f.device.trim()) ||
       !!f.mediaType ||
-      !!f.sort)
+      !!f.sort ||
+      !!(f.autoTag && f.autoTag.trim()))
   );
 }
 
@@ -1021,13 +1093,17 @@ function FilterSheet({
   visible,
   theme,
   initial,
+  searchText,
   onApply,
+  onSaveSearch,
   onClose,
 }: {
   visible: boolean;
   theme: ReturnType<typeof useTheme>;
   initial: SearchFilters | null;
+  searchText: string;
   onApply: (f: SearchFilters | null) => void;
+  onSaveSearch: (name: string, filters: SearchFilters | null, searchText: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [days, setDays] = useState<number | null>(initial?.takenWithinDays ?? null);
@@ -1039,6 +1115,10 @@ function FilterSheet({
     initial?.mediaType ?? null
   );
   const [sort, setSort] = useState<"size_desc" | null>(initial?.sort ?? null);
+  const [autoTag, setAutoTag] = useState<string | null>(initial?.autoTag ?? null);
+  const [saveVisible, setSaveVisible] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
   // Device chips come from the DB, fetched once per open (cached in state for
   // the open, not per render). In a decoy session the row stays hidden — real
   // device names would leak the hidden library, same reasoning as the decoy
@@ -1056,6 +1136,9 @@ function FilterSheet({
     setDevice(initial?.device ?? null);
     setMediaType(initial?.mediaType ?? null);
     setSort(initial?.sort ?? null);
+    setAutoTag(initial?.autoTag ?? null);
+    setSaveVisible(false);
+    setSaveName("");
     setDevices([]);
     if (!isDecoyActive()) {
       getDistinctDevices()
@@ -1079,6 +1162,13 @@ function FilterSheet({
   const sortOptions: { label: string; value: "size_desc" | null }[] = [
     { label: "Newest", value: null },
     { label: "Largest", value: "size_desc" },
+  ];
+  const autoTagOptions: { label: string; value: string | null }[] = [
+    { label: "Any", value: null },
+    { label: "Screenshots", value: "screenshot" },
+    { label: "WhatsApp", value: "whatsapp" },
+    { label: "Screen rec", value: "screenrec" },
+    { label: "Documents", value: "document" },
   ];
   const deviceOptions = devices.map((d) => ({ label: d, value: d }));
   if (device && !devices.includes(device)) {
@@ -1175,6 +1265,15 @@ function FilterSheet({
               />
             </View>
             <View style={{ marginTop: 12 }}>
+              <FilterChipRow<string>
+                label="Type"
+                options={autoTagOptions}
+                selected={autoTag}
+                onSelect={setAutoTag}
+                theme={theme}
+              />
+            </View>
+            <View style={{ marginTop: 12 }}>
               <FilterChipRow<"size_desc">
                 label="Sort"
                 options={sortOptions}
@@ -1185,6 +1284,14 @@ function FilterSheet({
             </View>
           </ScrollView>
           <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            {(hasAnyFilter(initial) || searchText.trim().length > 0) && !saveVisible ? (
+              <Button
+                title="Save search"
+                variant="text"
+                theme={theme}
+                onPress={() => setSaveVisible(true)}
+              />
+            ) : null}
             <Button
               title="Clear"
               variant="text"
@@ -1197,6 +1304,7 @@ function FilterSheet({
                 setDevice(null);
                 setMediaType(null);
                 setSort(null);
+                setAutoTag(null);
                 onApply(null);
               }}
             />
@@ -1212,6 +1320,7 @@ function FilterSheet({
                   device,
                   mediaType,
                   sort,
+                  autoTag,
                 };
                 // All-empty apply == no filters — pass null so the FILTERED
                 // badge stays honest (it renders whenever `filters` is set).
@@ -1220,6 +1329,51 @@ function FilterSheet({
             />
           </View>
         </View>
+        <Dialog visible={saveVisible} title="Save this search" theme={theme}>
+          <TextField
+            value={saveName}
+            onChangeText={setSaveName}
+            placeholder="e.g. Drone folder + location"
+            theme={theme}
+          />
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+            <Button
+              title="Cancel"
+              variant="text"
+              theme={theme}
+              onPress={() => {
+                setSaveVisible(false);
+                setSaveName("");
+              }}
+            />
+            <Button
+              title="Save"
+              theme={theme}
+              disabled={saving || saveName.trim().length === 0}
+              onPress={() => {
+                const next: SearchFilters = {
+                  takenWithinDays: days,
+                  hasGps,
+                  camera: camera.trim() || null,
+                  notBackedUp,
+                  device,
+                  mediaType,
+                  sort,
+                  autoTag,
+                };
+                setSaving(true);
+                onSaveSearch(saveName.trim().slice(0, 60), hasAnyFilter(next) ? next : null, searchText)
+                  .then(() => {
+                    setSaveVisible(false);
+                    setSaveName("");
+                    Alert.alert("Saved search", "Find it in Collections → Smart collections.");
+                  })
+                  .catch((e: any) => Alert.alert("Save search", e?.message ?? "Couldn't save"))
+                  .finally(() => setSaving(false));
+              }}
+            />
+          </View>
+        </Dialog>
       </View>
     </Modal>
   );

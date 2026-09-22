@@ -2,6 +2,7 @@ import { File, Directory, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { downloadFile } from "./telegram";
+import { classifyAutoTags } from "./autotags";
 
 function cacheDir(): Directory {
   const dir = new Directory(Paths.cache, "photogram");
@@ -241,5 +242,8 @@ export function buildTags(
     const cameraTag = sanitize(camera);
     if (cameraTag) tags.push(cameraTag);
   }
+  // Filename/mime auto-classification (screenshot/whatsapp/…) — AUTO_TAGS are
+  // already in the [a-z0-9_] charset, so they pass the pipeline as-is.
+  tags.push(...classifyAutoTags(filename, mime));
   return tags;
 }

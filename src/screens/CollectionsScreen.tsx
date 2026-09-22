@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, type PhotoRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
 import { getCachedTelegramFile } from "../lib/media";
@@ -23,7 +23,8 @@ import { tokenForPhoto } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { unlockHiddenAlbum } from "../lib/biometrics";
 import { isDecoyActive } from "../lib/applock";
-import { HeartIcon, TrashIcon } from "../components/icons";
+import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
+import { formatSearchFilterSummary } from "../lib/filterSummary";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
 
@@ -34,7 +35,22 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [tab, setTab] = useState<"albums" | "trash">("albums");
   const [newAlbumVisible, setNewAlbumVisible] = useState(false);
   const [albumName, setAlbumName] = useState("");
+  const [savedSearches, setSavedSearches] = useState<SavedSearchRow[]>([]);
+  const [renameTarget, setRenameTarget] = useState<SavedSearchRow | null>(null);
+  const [renameName, setRenameName] = useState("");
   const decoy = isDecoyActive();
+
+  useFocusEffect(
+    useCallback(() => {
+      if (decoy) {
+        setSavedSearches([]);
+        return;
+      }
+      getSavedSearches()
+        .then(setSavedSearches)
+        .catch(() => {});
+    }, [decoy])
+  );
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
   const visibleAlbums = decoy ? [] : albums;
@@ -98,6 +114,61 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               </Text>
             </Pressable>
           </View>
+
+          {!decoy && savedSearches.length > 0 ? (
+            <View style={styles.albumGrid}>
+              {savedSearches.map((s) => (
+                <Pressable
+                  key={s.id}
+                  style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                  onPress={() =>
+                    navigation.navigate("SearchResults", {
+                      title: s.name,
+                      query: s.query,
+                      filtersJson: JSON.stringify(s.filters ?? null),
+                    })
+                  }
+                  onLongPress={() =>
+                    // Android Alert renders at most 3 buttons; dismissal via
+                    // cancelable backdrop, never a 4th Cancel button.
+                    Alert.alert(
+                      s.name,
+                      undefined,
+                      [
+                        {
+                          text: "Rename",
+                          onPress: () => {
+                            setRenameTarget(s);
+                            setRenameName(s.name);
+                          },
+                        },
+                        {
+                          text: "Delete",
+                          style: "destructive",
+                          onPress: () => {
+                            void deleteSavedSearch(s.id).finally(() => {
+                              getSavedSearches().then(setSavedSearches).catch(() => {});
+                            });
+                          },
+                        },
+                      ],
+                      { cancelable: true }
+                    )
+                  }
+                >
+                  <View style={styles.albumTilePlaceholder}>
+                    <SearchIcon color={theme.colors.primary} size={36} />
+                  </View>
+                  <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
+                    {s.name}
+                  </Text>
+                  <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
+                    {formatSearchFilterSummary(s.filters, s.query)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
           <SectionLabel text="Your albums" theme={theme} />
           {visibleAlbums.length === 0 ? (
@@ -197,6 +268,39 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               await newAlbum(albumName.trim());
               setAlbumName("");
               setNewAlbumVisible(false);
+            }}
+          />
+        </View>
+      </Dialog>
+
+      <Dialog visible={!!renameTarget} theme={theme} title="Rename search">
+        <TextField
+          value={renameName}
+          onChangeText={setRenameName}
+          placeholder="Search name"
+          theme={theme}
+        />
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Button
+            title="Cancel"
+            theme={theme}
+            variant="text"
+            onPress={() => {
+              setRenameTarget(null);
+              setRenameName("");
+            }}
+          />
+          <Button
+            title="Rename"
+            theme={theme}
+            disabled={!renameName.trim()}
+            onPress={async () => {
+              if (renameTarget) {
+                await renameSavedSearch(renameTarget.id, renameName);
+                getSavedSearches().then(setSavedSearches).catch(() => {});
+              }
+              setRenameTarget(null);
+              setRenameName("");
             }}
           />
         </View>
