@@ -206,3 +206,20 @@ export function InfoIcon({ color, size = 24 }: { color: ColorValue; size?: numbe
     </Svg>
   );
 }
+
+// Four-point sparkle (AI search) — the smaller star rotated 45°, both
+// concave-diamond shaped via quadratic curves.
+export function SparkleIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M14 3.2 15.6 8.4 20.8 10 15.6 11.6 14 16.8 12.4 11.6 7.2 10 12.4 8.4z"
+        fill={color}
+      />
+      <Path
+        d="M7 13.8 8.1 17 11.3 18.1 8.1 19.2 7 22.4 5.9 19.2 2.7 18.1 5.9 17z"
+        fill={color}
+      />
+    </Svg>
+  );
+}

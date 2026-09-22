@@ -19,6 +19,7 @@ import {
   clusterByDistance,
   type HashedItem,
 } from "./phash";
+import { classifyAutoTags } from "./autotags";
 
 export { getDuplicateGroups, type DuplicateGroup };
 
@@ -297,4 +298,71 @@ function readBytesIfSmall(path: string): Uint8Array | null {
       handle?.close();
     } catch {}
   }
+}
+
+// --- Auto-tag backfill (filename/mime classification) ---
+
+export interface AutoTagProgress {
+  current: number;
+  total: number;
+  tagged: number;
+  currentFile: string | null;
+  done: boolean;
+}
+
+export interface AutoTagResult {
+  tagged: number;
+  scanned: number;
+}
+
+// Appends missing AUTO_TAG classifications to photos.tags for the existing
+// library (new uploads get them via buildTags). Rows already fully tagged are
+// skipped untouched; one FTS rebuild at the end covers all changed rows.
+export async function autoTagBackfill(
+  onProgress?: (p: AutoTagProgress) => void
+): Promise<AutoTagResult> {
+  const { getDb, ftsRebuild } = await import("./db");
+  const d = await getDb();
+  const rows = await d.getAllAsync<{
+    id: string;
+    filename: string;
+    mime: string | null;
+    tags: string | null;
+  }>("SELECT id, filename, mime, tags FROM photos WHERE filename != ''");
+  const pending: { id: string; tags: string }[] = [];
+  for (const row of rows) {
+    const existing = new Set((row.tags ?? "").split(/\s+/).filter(Boolean));
+    const missing = classifyAutoTags(row.filename, row.mime).filter((t) => !existing.has(t));
+    if (missing.length === 0) continue;
+    const base = (row.tags ?? "").trim();
+    pending.push({ id: row.id, tags: base ? `${base} ${missing.join(" ")}` : missing.join(" ") });
+  }
+  let tagged = 0;
+  const BATCH = 200;
+  for (let i = 0; i < pending.length; i += BATCH) {
+    const batch = pending.slice(i, i + BATCH);
+    await d.withTransactionAsync(async () => {
+      for (const item of batch) {
+        await d.runAsync("UPDATE photos SET tags = ? WHERE id = ?", [item.tags, item.id]);
+      }
+    });
+    tagged += batch.length;
+    onProgress?.({
+      current: Math.min(i + BATCH, pending.length),
+      total: pending.length,
+      tagged,
+      currentFile: null,
+      done: false,
+    });
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  if (tagged > 0) await ftsRebuild();
+  onProgress?.({
+    current: pending.length,
+    total: pending.length,
+    tagged,
+    currentFile: null,
+    done: true,
+  });
+  return { tagged, scanned: rows.length };
 }
