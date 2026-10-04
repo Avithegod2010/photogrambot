@@ -18,7 +18,7 @@ const widgetConfig: WithAndroidWidgetsParams = {
 const config: ExpoConfig = {
   name: "PhotogramBot",
   slug: "photogrambot",
-  version: "0.1.0",
+  version: "1.0.0",
   scheme: "photogrambot",
   orientation: "portrait",
   icon: "./assets/icon.png",
