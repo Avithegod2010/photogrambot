@@ -121,6 +121,36 @@ export interface RestoreResult {
   source: "pinned" | "local";
 }
 
+export interface BackupOffer {
+  messageId: number;
+  exportedAt: string | null;
+  encrypted: boolean;
+}
+
+/**
+ * Look for a pinned PhotogramBot backup in the configured channel — the
+ * migration-wizard entry point on a fresh install. Best-effort: any error
+ * (offline, no pinned message, permissions) simply yields no offer.
+ */
+export async function findChannelBackupOffer(): Promise<BackupOffer | null> {
+  try {
+    const channelId = await getChannelId();
+    if (!channelId) return null;
+    const pinned = await getChatPinnedMessage(channelId);
+    if (!pinned?.document) return null;
+    const caption = pinned.caption ?? "";
+    if (!caption.includes("#db_backup")) return null;
+    const iso = caption.match(/\d{4}-\d{2}-\d{2}T[^\s"]+/)?.[0] ?? null;
+    return {
+      messageId: pinned.message_id,
+      exportedAt: iso,
+      encrypted: caption.includes("#encrypted"),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function restoreFromChannelPinned(replace: boolean): Promise<RestoreResult> {
   const channelId = await getChannelId();
   if (!channelId) throw new Error("Channel not configured");

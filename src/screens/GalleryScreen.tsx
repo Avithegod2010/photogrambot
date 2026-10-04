@@ -603,6 +603,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       error: null,
       upload_type: null,
       phash: null,
+      asset_mtime: null,
     };
     navigation.navigate("Viewer", { photos: [photo], index: 0 });
   }

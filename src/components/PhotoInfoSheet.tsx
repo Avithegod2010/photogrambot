@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Alert,
   Dimensions,
   Linking,
   Modal,
@@ -13,7 +14,9 @@ import {
 import MapView, { Marker } from "react-native-maps";
 import { useTheme } from "../useTheme";
 import { formatBytes, formatDate } from "../lib/format";
-import type { PhotoRow } from "../lib/db";
+import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db";
+import { isDecoyActive } from "../lib/applock";
+import { savePhotoToDevice } from "../lib/restore";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -36,6 +39,49 @@ export function PhotoInfoSheet({
   onFindSimilar?: () => void;
   theme: ReturnType<typeof useTheme>;
 }) {
+  const [versions, setVersions] = React.useState<PhotoVersionRow[] | null>(null);
+  const [savingVersionId, setSavingVersionId] = React.useState<number | null>(null);
+
+  // Version history loads per open; decoy sessions must never read it.
+  React.useEffect(() => {
+    if (!visible || !photo || isDecoyActive()) {
+      setVersions(null);
+      return;
+    }
+    let alive = true;
+    getPhotoVersions(photo.id)
+      .then((rows) => {
+        if (alive) setVersions(rows);
+      })
+      .catch(() => {
+        if (alive) setVersions([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [visible, photo?.id]);
+
+  async function saveVersion(v: PhotoVersionRow) {
+    if (!photo || savingVersionId !== null) return;
+    setSavingVersionId(v.id);
+    try {
+      // Rebuild the row the restore path expects, pointing at the version's
+      // channel copies. Versions are always plain photos — never split videos.
+      await savePhotoToDevice({
+        ...photo,
+        parts: null,
+        remote_file_id: v.remote_file_id,
+        preview_file_id: v.preview_file_id,
+        thumb_file_id: v.thumb_file_id,
+        size: v.size,
+      });
+    } catch (e: any) {
+      Alert.alert("Save failed", e?.message ?? "Could not save the version.");
+    } finally {
+      setSavingVersionId(null);
+    }
+  }
+
   if (!photo) return null;
   const p = photo;
   const exif: TechnicalExif | null = (() => {
@@ -145,6 +191,46 @@ export function PhotoInfoSheet({
                 <Row label="SHA-256" value={`${p.content_hash.slice(0, 24)}…`} theme={theme} mono />
               ) : null}
             </View>
+
+            {versions && versions.length > 0 ? (
+              <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
+                  Version history
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+                  Previous uploads of this photo are kept as replies in your channel.
+                </Text>
+                {versions.map((v) => (
+                  <View key={v.id} style={styles.versionRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.colors.onSurface, fontSize: 13.5, fontWeight: "600" }}>
+                        Version {v.version}
+                        {v.version === 1 ? " (original)" : ""}
+                      </Text>
+                      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+                        {formatDate(v.uploaded_at)}
+                        {v.size ? ` · ${formatBytes(v.size)}` : ""}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => void saveVersion(v)}
+                      disabled={savingVersionId !== null}
+                      hitSlop={8}
+                    >
+                      <Text
+                        style={{
+                          color: savingVersionId === null ? theme.colors.primary : theme.colors.outline,
+                          fontWeight: "700",
+                          fontSize: 13,
+                        }}
+                      >
+                        {savingVersionId === v.id ? "Saving…" : "Save"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
 
             {p.ai_caption ? (
               <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
@@ -304,5 +390,13 @@ const styles = StyleSheet.create({
   similarButtonText: {
     fontSize: 14,
     fontWeight: "700",
+  },
+  versionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(128,128,128,0.25)",
   },
 });

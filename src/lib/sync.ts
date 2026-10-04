@@ -3,8 +3,10 @@ import * as Network from "expo-network";
 import * as Battery from "expo-battery";
 import { loadPrefs, savePrefs, type Prefs } from "./settings";
 import { isVideoMime } from "./format";
-import { enqueueUploads, processQueue } from "./uploader";
+import { enqueueUploads, enqueueVersionUpload, processQueue } from "./uploader";
 import { isRemotePaused } from "./remote";
+import { getPhotosByLocalIds, updatePhoto, type PhotoRow } from "./db";
+import { hashFileCached } from "./hash";
 
 export interface DeviceFolder {
   id: string;
@@ -134,6 +136,7 @@ export async function scanAndEnqueueAll(
       if (items.length > 0) {
         enqueued += await enqueueUploads(items, "sync");
       }
+      enqueued += await detectEditedPhotos(assets);
       if (onProgress) onProgress(scanned, enqueued);
     } catch {}
   }
@@ -179,6 +182,7 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
         })),
         "sync"
       );
+      enqueued += await detectEditedPhotos(assets);
     } catch {}
   }
   return enqueued;
@@ -190,4 +194,77 @@ export async function runSyncNow(
   const result = await scanAndEnqueueAll(onProgress);
   void processQueue();
   return result;
+}
+
+/**
+ * Version-history detection: for assets that are ALREADY backed up and whose
+ * MediaLibrary modificationTime moved past the stored baseline, hash the file
+ * and enqueue a version upload when the content actually changed. Runs inside
+ * every scan pass (recent watch scans catch fresh edits; the full sweep sets
+ * baselines for the whole library on its first run).
+ */
+export async function detectEditedPhotos(
+  assets: MediaLibrary.AssetMetadata[]
+): Promise<number> {
+  if (assets.length === 0) return 0;
+  // Photos only — video edits would go through the splitter and rewrite the
+  // whole version chain (documented limitation for now).
+  const images = assets.filter((m) => m.mediaType === MediaLibrary.MediaType.IMAGE);
+  if (images.length === 0) return 0;
+  const rows = await getPhotosByLocalIds(images.map((m) => m.id));
+  if (rows.length === 0) return 0;
+  const byLocalId = new Map<string, PhotoRow>();
+  for (const row of rows) {
+    if (row.local_id) byLocalId.set(row.local_id, row);
+  }
+  let enqueued = 0;
+  for (const meta of images) {
+    const row = byLocalId.get(meta.id);
+    if (!row || row.status !== "uploaded" || !row.message_id) continue;
+    const mtime = meta.modificationTime ?? null;
+    if (mtime == null) continue;
+    if (row.asset_mtime == null) {
+      // First scan after this feature landed — record the baseline without
+      // hashing. A historical edit predating this build stays unattributed.
+      await updatePhoto(row.id, { asset_mtime: mtime });
+      continue;
+    }
+    if (mtime <= row.asset_mtime + 0.5) continue;
+    let localUri: string | null = null;
+    try {
+      localUri = await new MediaLibrary.Asset(meta.id).getUri();
+    } catch {
+      continue;
+    }
+    if (!localUri) continue;
+    let hash: string | null = null;
+    try {
+      hash = await hashFileCached(meta.id, localUri, mtime);
+    } catch {
+      continue;
+    }
+    if (hash && hash !== row.content_hash) {
+      const ok = await enqueueVersionUpload(
+        { ...row, filename: meta.filename ?? row.filename },
+        localUri,
+        {
+          width: meta.width ?? row.width,
+          height: meta.height ?? row.height,
+          taken_at: meta.creationTime ?? row.taken_at,
+        },
+        hash
+      );
+      if (ok) {
+        // Advance the baseline only when a queue row actually took the job —
+        // otherwise the next scan retries with the (cached) hash it computed.
+        await updatePhoto(row.id, { asset_mtime: mtime });
+        enqueued++;
+      }
+    } else {
+      // Metadata-only touch (EXIF rewrite, album move…) — advance the baseline
+      // so this asset isn't rehashed on every scan.
+      await updatePhoto(row.id, { asset_mtime: mtime });
+    }
+  }
+  return enqueued;
 }
