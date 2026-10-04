@@ -225,8 +225,8 @@ npx expo run:android
 **Device work owed**:
 Everything in the Device Verification Checklist (Phases 3–9) remains owed from previous rounds, plus the Batch A/B/C checks.
 
-**Release build blocker**:
-`assembleRelease` fails ~46-50 min on TLS handshake to dl.google.com (JVM-TLS-specific; curl works; a 4th attempt with full log capture may still be running — check `/tmp/pb-release-build.log`). Whole `android/` folder UNTRACKED (signing machine-local). Consider committing android/ or a setup script before public release.
+**Release kit status (updated 2026-10-05)**:
+`android/` is now COMMITTED (self-contained build for fresh clones — build outputs `.cxx`/`build`/`.gradle`, `local.properties`, and the release signing identity `pb-release.keystore` + `pb-release-signing.properties` are precisely gitignored; release builds fall back to the debug keystore when the signing files are absent). README.md + owner MIT LICENSE added; version is 1.0.0 (`android/version.properties` is the versionCode source of truth — bump per release artifact). Remaining release blockers: `assembleRelease` fails ~46-50 min on TLS handshake to dl.google.com (JVM-TLS-specific; curl works), and no in-app updater yet.
 
 **Coordination**:
 Batches A/B/C are committed; nothing in-flight. `.mimosa/` and `.tmp-harness/` are gitignored. A second AI also commits here — re-read this file before starting work, and verify `git status` before committing.
