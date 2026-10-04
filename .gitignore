@@ -49,3 +49,9 @@ modules/*/android/build/
 # Release signing — secrets, never commit
 android/pb-release.keystore
 android/pb-release-signing.properties
+
+# Local security-scan tooling state (Mimosa plugin)
+.mimosa/
+
+# Throwaway test harnesses and scratch builds
+.tmp-harness/

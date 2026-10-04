@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, type PhotoRow, type SavedSearchRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
 import { getCachedTelegramFile } from "../lib/media";
@@ -47,6 +47,9 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
         setSavedSearches([]);
         return;
       }
+      void syncTripAlbums()
+        .then(() => useLibraryStore.getState().refreshMeta())
+        .catch(() => {});
       getSavedSearches()
         .then(setSavedSearches)
         .catch(() => {});
@@ -55,6 +58,8 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
   const visibleAlbums = decoy ? [] : albums;
+  const visibleTripAlbums = visibleAlbums.filter((album) => !!album.query);
+  const visibleManualAlbums = visibleAlbums.filter((album) => !album.query);
   const visibleFavorites = decoy ? [] : favorites;
   const visibleTrash = decoy ? [] : trash;
 
@@ -173,14 +178,55 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           ) : null}
 
+          {visibleTripAlbums.length > 0 ? (
+            <>
+              <SectionLabel text="Trips & events" theme={theme} />
+              <View style={styles.albumGrid}>
+                {visibleTripAlbums.map((a) => (
+                  <Pressable
+                    key={a.id}
+                    style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                    onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, isTrip: true })}
+                    onLongPress={() =>
+                      Alert.alert(
+                        a.name,
+                        `${a.count} photos grouped by time and location`,
+                        [
+                          {
+                            text: "Select photos",
+                            onPress: () => navigation.navigate("Album", { albumId: a.id, albumName: a.name, isTrip: true, selectMode: true }),
+                          },
+                        ],
+                        { cancelable: true }
+                      )
+                    }
+                  >
+                    <View style={styles.albumTilePlaceholder}>
+                      <TelegramImage
+                        fileId={a.cover_preview_id ?? a.cover_file_id}
+                        style={{ width: tile, height: tile * 0.8 }}
+                      />
+                    </View>
+                    <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
+                      {a.name}
+                    </Text>
+                    <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
+                      {a.count} photos
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
+
           <SectionLabel text="Your albums" theme={theme} />
-          {visibleAlbums.length === 0 ? (
+          {visibleManualAlbums.length === 0 ? (
             <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
               No albums yet. Tap ＋ to create one and organize your backed-up photos.
             </Text>
           ) : (
             <View style={styles.albumGrid}>
-              {visibleAlbums.map((a) => (
+              {visibleManualAlbums.map((a) => (
                 <Pressable
                   key={a.id}
                   style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
@@ -480,6 +526,9 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const insets = useSafeAreaInsets();
   const albumId: number = route.params?.albumId ?? -1;
   const albumName: string = route.params?.albumName ?? "Album";
+  // Generated trip albums derive membership from albums.query and are rebuilt
+  // by syncTripAlbums, so per-photo removal does not apply to them.
+  const isTrip: boolean = !!route.params?.isTrip && albumId !== -1;
   const needsUnlock: boolean = !!route.params?.locked && albumId !== -1;
   const [unlocked, setUnlocked] = useState(!needsUnlock);
   const { favorites, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
@@ -663,7 +712,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
-        {albumId !== -1 && selection.size > 0 ? (
+        {albumId !== -1 && !isTrip && selection.size > 0 ? (
           <Pressable
             onPress={() => {
               const ids = Array.from(selection);
