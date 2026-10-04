@@ -134,6 +134,7 @@ export async function getLocalPhotosInRange(
     error: null,
     upload_type: null,
     phash: null,
+    asset_mtime: null,
   }));
 }
 

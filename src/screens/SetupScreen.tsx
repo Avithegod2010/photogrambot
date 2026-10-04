@@ -10,19 +10,77 @@ import {
 import { useSetupStore } from "../store/useSetupStore";
 import { useTheme } from "../useTheme";
 import { Button, Card, SectionLabel, TextField } from "../components/ui";
+import { restoreFromChannelPinned } from "../lib/backup";
+import { setBackupPassphrase } from "../lib/settings";
+import { countAllPhotoVersions, getAlbums, getSavedSearches } from "../lib/db";
+import { runSyncNow } from "../lib/sync";
 
 export function SetupScreen() {
   const theme = useTheme();
   const { verifyAndSave, saveChannel, detectChannel, busy, error, token, channelId } =
     useSetupStore();
+  const migrationOffer = useSetupStore((s) => s.migrationOffer);
+  const finishMigration = useSetupStore((s) => s.finishMigration);
 
   const [tokenInput, setTokenInput] = useState("");
   const [channelInput, setChannelInput] = useState("");
-  const [step, setStep] = useState<"token" | "channel">(token && !channelId ? "channel" : "token");
+  const [step, setStep] = useState<"token" | "channel" | "restore" | "done">(
+    token && !channelId ? "channel" : "token"
+  );
   const [localError, setLocalError] = useState<string | null>(null);
   const [detectedTitle, setDetectedTitle] = useState<string | null>(null);
+  const [passInput, setPassInput] = useState("");
+  const [restoring, setRestoring] = useState(false);
+  const [summary, setSummary] = useState<{
+    photos: number;
+    versions: number;
+    albums: number;
+    searches: number;
+  } | null>(null);
 
   const shownError = localError ?? error;
+
+  async function afterChannelSaved(ok: boolean, message: string) {
+    if (!ok) {
+      setLocalError(message);
+      return;
+    }
+    // A pinned channel backup on an empty library = a new phone — offer to
+    // restore instead of dropping the user into an empty gallery.
+    if (useSetupStore.getState().migrationOffer) setStep("restore");
+  }
+
+  async function onRestore() {
+    setLocalError(null);
+    if (!passInput) {
+      setLocalError("Enter the backup passphrase you set on the old phone.");
+      return;
+    }
+    setRestoring(true);
+    try {
+      await setBackupPassphrase(passInput);
+      const result = await restoreFromChannelPinned(true);
+      const [versions, albums, searches] = await Promise.all([
+        countAllPhotoVersions(),
+        getAlbums(),
+        getSavedSearches(),
+      ]);
+      setSummary({
+        photos: result.restored,
+        versions,
+        albums: albums.length,
+        searches: searches.length,
+      });
+      setStep("done");
+      // Relink pass: scan this device; every asset whose content hash matches
+      // a restored row adopts it, the rest stay cloud-only.
+      void runSyncNow();
+    } catch (e: any) {
+      setLocalError(e?.message ?? "Restore failed.");
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   async function onVerifyToken() {
     setLocalError(null);
@@ -46,7 +104,7 @@ export function SetupScreen() {
     }
     setDetectedTitle(found.title ?? found.id);
     const ok = await saveChannel(found.id);
-    if (!ok) setLocalError("Found a chat but could not verify it. Try pasting the ID manually.");
+    await afterChannelSaved(ok, "Found a chat but could not verify it. Try pasting the ID manually.");
   }
 
   async function onManualChannel() {
@@ -56,7 +114,8 @@ export function SetupScreen() {
       setLocalError("Channel/group IDs look like -1001234567890.");
       return;
     }
-    await saveChannel(id);
+    const ok = await saveChannel(id);
+    await afterChannelSaved(ok, "Could not reach this chat. Make sure the bot is an admin there.");
   }
 
   return (
@@ -100,7 +159,9 @@ export function SetupScreen() {
               style={styles.cta}
             />
           </Card>
-        ) : (
+        ) : null}
+
+        {step === "channel" ? (
           <Card theme={theme}>
             <SectionLabel text="Step 2 · Backup channel" theme={theme} />
             <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
@@ -140,7 +201,64 @@ export function SetupScreen() {
               style={styles.cta}
             />
           </Card>
-        )}
+        ) : null}
+
+        {step === "restore" && migrationOffer ? (
+          <Card theme={theme}>
+            <SectionLabel text="Step 3 · Restore from backup" theme={theme} />
+            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+              This channel already holds a PhotogramBot backup
+              {migrationOffer.exportedAt ? ` from ${migrationOffer.exportedAt.slice(0, 10)}` : ""}
+              {migrationOffer.encrypted ? " (encrypted)" : ""}. Restore your whole library —
+              photos, albums, favorites and version history — to this phone.
+            </Text>
+            <TextField
+              value={passInput}
+              onChangeText={setPassInput}
+              placeholder="Backup passphrase"
+              theme={theme}
+              secureTextEntry
+            />
+            {shownError ? (
+              <Text style={[styles.error, { color: theme.colors.error }]}>{shownError}</Text>
+            ) : null}
+            <Button
+              title="Restore library"
+              onPress={onRestore}
+              theme={theme}
+              busy={restoring}
+              style={styles.cta}
+            />
+            <Button
+              title="Skip — set up as new"
+              onPress={finishMigration}
+              theme={theme}
+              variant="text"
+              style={styles.cta}
+            />
+          </Card>
+        ) : null}
+
+        {step === "done" && migrationOffer ? (
+          <Card theme={theme}>
+            <SectionLabel text="Restore complete" theme={theme} />
+            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+              Restored {summary?.photos ?? 0} photos, {summary?.versions ?? 0} version history
+              entries, {summary?.albums ?? 0} albums and {summary?.searches ?? 0} saved searches
+              from your channel backup.
+            </Text>
+            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+              PhotogramBot is scanning this device now — photos found on this phone are relinked
+              automatically. Anything not on this phone stays safely in your cloud.
+            </Text>
+            <Button
+              title="Open PhotogramBot"
+              onPress={finishMigration}
+              theme={theme}
+              style={styles.cta}
+            />
+          </Card>
+        ) : null}
 
         <Text style={[styles.footer, { color: theme.colors.onSurfaceVariant }]}>
           Your token is stored encrypted on this device. Photos go directly from your phone to

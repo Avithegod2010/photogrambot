@@ -16,6 +16,7 @@ import {
   removeFromAlbum,
   deletePhoto,
   getStats,
+  getVersionMessageIds,
   type PhotoRow,
   type AlbumWithCover,
   type SearchFilters,
@@ -146,6 +147,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           if (previewMsgId) {
             await deleteMessage(channelId, previewMsgId, token ?? undefined);
           }
+          // Superseded version uploads live as replies in the same thread —
+          // clean them best-effort so the channel holds no orphan copies.
+          try {
+            for (const v of await getVersionMessageIds(id)) {
+              if (v.message_id) {
+                try {
+                  await deleteMessage(channelId, v.message_id, token ?? undefined);
+                } catch {}
+              }
+              if (v.preview_message_id) {
+                try {
+                  await deleteMessage(channelId, v.preview_message_id, token ?? undefined);
+                } catch {}
+              }
+            }
+          } catch {}
         }
         await markTrashRemoteDeleted(id);
       }
@@ -169,6 +186,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (photo?.message_id && channelId) {
         const token = await tokenForPhoto(photo);
         await deleteMessage(channelId, photo.message_id, token ?? undefined);
+        // Best-effort cleanup of the version thread too.
+        try {
+          for (const v of await getVersionMessageIds(id)) {
+            if (v.message_id) {
+              try {
+                await deleteMessage(channelId, v.message_id, token ?? undefined);
+              } catch {}
+            }
+            if (v.preview_message_id) {
+              try {
+                await deleteMessage(channelId, v.preview_message_id, token ?? undefined);
+              } catch {}
+            }
+          }
+        } catch {}
       }
       await deletePhoto(id);
     }

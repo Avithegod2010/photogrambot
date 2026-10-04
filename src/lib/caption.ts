@@ -18,6 +18,8 @@ export interface CaptionMeta {
   deviceName?: string | null;
   hash?: string | null;
   aiDescription?: string | null;
+  // Set on version-history uploads — the channel-visible "which edit is this" marker.
+  versionTag?: number | null;
 }
 
 export interface TechnicalExif {
@@ -49,6 +51,9 @@ function formatSize(bytes?: number | null): string {
 
 export function buildCaption(meta: CaptionMeta): string {
   const parts: string[] = [];
+  if (meta.versionTag && meta.versionTag > 1) {
+    parts.push(`✏️ <b>Edited version #v${meta.versionTag}</b> — replies to the previous upload`);
+  }
   parts.push(`📁 <b>File:</b> <code>${escapeHtml(meta.filename)}</code>`);
   if (meta.path) {
     parts.push(`📍 <b>Path:</b> <code>${escapeHtml(meta.path)}</code>`);
@@ -110,11 +115,12 @@ export function buildCaption(meta: CaptionMeta): string {
   return out.join("\n");
 }
 
-export function buildPreviewCaption(hash: string | null, sizeBytes: number): string {
+export function buildPreviewCaption(hash: string | null, sizeBytes: number, versionTag?: number | null): string {
   const sizeStr = formatSize(sizeBytes);
+  const tag = versionTag && versionTag > 1 ? ` #v${versionTag}` : "";
   return hash
-    ? `<b>[Preview ${sizeStr}]</b> #hash: ${hash}`.slice(0, 1024)
-    : `<b>[Preview ${sizeStr}]</b>`.slice(0, 1024);
+    ? `<b>[Preview ${sizeStr}]</b> #hash: ${hash}${tag}`.slice(0, 1024)
+    : `<b>[Preview ${sizeStr}]</b>${tag}`.slice(0, 1024);
 }
 
 // Large files (>8 MB) hash as "md5:<32 hex>"; small ones as bare 64-hex SHA-256.

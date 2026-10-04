@@ -6,7 +6,8 @@ import {
   setChannelId,
 } from "../lib/settings";
 import { getMe, getChat, detectChannelFromUpdates, TelegramError, TgUser } from "../lib/telegram";
-import { getDb } from "../lib/db";
+import { getDb, getStats } from "../lib/db";
+import { findChannelBackupOffer, type BackupOffer } from "../lib/backup";
 import { ensurePermissions } from "../lib/sync";
 
 export type SetupStep = "loading" | "unconfigured" | "ready" | "error";
@@ -19,12 +20,14 @@ interface SetupState {
   botUsername: string | null;
   busy: boolean;
   error: string | null;
+  migrationOffer: BackupOffer | null;
   initialize: () => Promise<void>;
   verifyAndSave: (token: string) => Promise<boolean>;
   saveChannel: (channelId: string) => Promise<boolean>;
   detectChannel: () => Promise<{ id: string; title?: string } | null>;
   requestMediaPermissions: () => Promise<boolean>;
   reset: () => Promise<void>;
+  finishMigration: () => void;
 }
 
 export const useSetupStore = create<SetupState>((set, get) => ({
@@ -35,6 +38,7 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   botUsername: null,
   busy: false,
   error: null,
+  migrationOffer: null,
 
   initialize: async () => {
     set({ busy: true, error: null });
@@ -107,12 +111,23 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     try {
       const chat = await getChat(channelId.trim());
       await setChannelId(channelId.trim());
+      // Fresh-install migration: an empty library plus a pinned channel
+      // backup means this is a new phone that can restore instead of
+      // starting over. Hold the setup wizard open for the restore step.
+      let migrationOffer: BackupOffer | null = null;
+      try {
+        const stats = await getStats();
+        if (stats.total === 0) {
+          migrationOffer = await findChannelBackupOffer();
+        }
+      } catch {}
       set({
         channelId: channelId.trim(),
         channelTitle: chat.title ?? chat.username ?? channelId,
-        step: "ready",
+        step: migrationOffer ? "unconfigured" : "ready",
         busy: false,
         error: null,
+        migrationOffer,
       });
       return true;
     } catch (e: any) {
@@ -152,6 +167,11 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       channelTitle: null,
       botUsername: null,
       error: null,
+      migrationOffer: null,
     });
+  },
+
+  finishMigration: () => {
+    set({ migrationOffer: null, step: "ready" });
   },
 }));

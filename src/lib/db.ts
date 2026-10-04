@@ -37,6 +37,9 @@ export interface PhotoRow {
   error: string | null;
   upload_type: string | null;
   phash: string | null;
+  // MediaLibrary modificationTime (seconds) captured at the last scan — the
+  // edit-detection baseline for photo version history. NULL = never scanned.
+  asset_mtime: number | null;
 }
 
 export interface AlbumRow {
@@ -70,6 +73,9 @@ export interface QueueRow {
   profile_id: string | null;
   error: string | null;
   created_at: number;
+  // Set only for upload_type='version' rows — the channel message being
+  // superseded, so the new upload lands as a reply in the same thread.
+  reply_to_message_id: number | null;
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -186,11 +192,33 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // rescan (content changes are already covered by content_hash-based
     // re-sync paths; the pHash is advisory clustering input, not identity).
     ["phash", "TEXT"],
+    ["asset_mtime", "REAL"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
     ["profile_id", "TEXT"],
+    ["reply_to_message_id", "INTEGER"],
   ]);
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS photo_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      content_hash TEXT,
+      remote_file_id TEXT,
+      preview_file_id TEXT,
+      thumb_file_id TEXT,
+      message_id INTEGER,
+      preview_message_id INTEGER,
+      size INTEGER,
+      width INTEGER,
+      height INTEGER,
+      version INTEGER NOT NULL,
+      uploaded_at INTEGER,
+      profile_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_photo_versions_photo
+      ON photo_versions(photo_id, version);
+  `);
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
     ["query", "TEXT"],
@@ -396,6 +424,117 @@ export async function getPhotoByMessageId(messageId: number): Promise<PhotoRow |
     [messageId, messageId]
   );
   return row ? rowToPhoto(row) : null;
+}
+
+export interface PhotoVersionRow {
+  id: number;
+  photo_id: string;
+  content_hash: string | null;
+  remote_file_id: string | null;
+  preview_file_id: string | null;
+  thumb_file_id: string | null;
+  message_id: number | null;
+  preview_message_id: number | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  version: number;
+  uploaded_at: number | null;
+  profile_id: string | null;
+}
+
+export async function getPhotosByLocalIds(localIds: string[]): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const out: PhotoRow[] = [];
+  // SQLite's host-parameter ceiling is 999 on old builds — chunk to stay safe.
+  for (let i = 0; i < localIds.length; i += 400) {
+    const chunk = localIds.slice(i, i + 400);
+    if (chunk.length === 0) continue;
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await d.getAllAsync<any>(
+      `SELECT * FROM photos WHERE local_id IN (${placeholders})`,
+      chunk
+    );
+    out.push(...rows.map(rowToPhoto));
+  }
+  return out;
+}
+
+/**
+ * Copy the photo row's CURRENT channel state into photo_versions as the given
+ * version number. Single-statement INSERT..SELECT so the snapshot cannot
+ * interleave with the updatePhoto that follows it in the version-upload path.
+ * Returns false when the row has no channel copy (nothing worth versioning).
+ */
+export async function snapshotPhotoVersion(photoId: string, version: number): Promise<boolean> {
+  const d = await getDb();
+  const res = await d.runAsync(
+    `INSERT INTO photo_versions
+      (photo_id, content_hash, remote_file_id, preview_file_id, thumb_file_id,
+       message_id, preview_message_id, size, width, height, version, uploaded_at, profile_id)
+     SELECT id, content_hash, remote_file_id, preview_file_id, thumb_file_id,
+       message_id, preview_message_id, size, width, height, ?, uploaded_at, profile_id
+     FROM photos WHERE id = ? AND message_id IS NOT NULL`,
+    [version, photoId]
+  );
+  return res.changes > 0;
+}
+
+export async function countPhotoVersions(photoId: string): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM photo_versions WHERE photo_id = ?",
+    [photoId]
+  );
+  return row?.n ?? 0;
+}
+
+export async function getPhotoVersions(photoId: string): Promise<PhotoVersionRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<PhotoVersionRow>(
+    "SELECT * FROM photo_versions WHERE photo_id = ? ORDER BY version DESC",
+    [photoId]
+  );
+  return rows;
+}
+
+/** Every channel message pair that belongs to superseded versions of a photo —
+ * used so trash/delete-forever can clean the whole version chain. */
+export async function getVersionMessageIds(
+  photoId: string
+): Promise<{ message_id: number | null; preview_message_id: number | null }[]> {
+  const d = await getDb();
+  return d.getAllAsync<{ message_id: number | null; preview_message_id: number | null }>(
+    "SELECT message_id, preview_message_id FROM photo_versions WHERE photo_id = ? AND (message_id IS NOT NULL OR preview_message_id IS NOT NULL)",
+    [photoId]
+  );
+}
+
+export async function countAllPhotoVersions(): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM photo_versions"
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Point a backed-up photo row at THIS device's local asset. Used when the
+ * same content is already in the cloud under another local id — the restored
+ * library / new-phone case — so the library keeps live local links instead of
+ * dead ids from the previous device.
+ */
+export async function relinkPhotoToLocalDevice(
+  photoId: string,
+  localId: string,
+  localUri: string | null
+): Promise<void> {
+  const d = await getDb();
+  await d.runAsync("UPDATE photos SET local_id = ?, local_uri = ? WHERE id = ?", [
+    localId,
+    localUri,
+    photoId,
+  ]);
 }
 
 export interface GalleryPage {
@@ -1020,14 +1159,15 @@ export async function enqueueUpload(item: {
   content_hash: string | null;
   upload_type: string;
   profile_id?: string | null;
+  reply_to_message_id?: number | null;
 }): Promise<number> {
   const d = await getDb();
   let res;
   try {
     res = await d.runAsync(
       `INSERT INTO upload_queue (local_id, local_uri, filename, folder, size, taken_at, added_at,
-        content_hash, upload_type, state, retries, created_at, profile_id)
-       VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?)`,
+        content_hash, upload_type, state, retries, created_at, profile_id, reply_to_message_id)
+       VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?,?)`,
       [
         item.local_id,
         item.local_uri,
@@ -1040,6 +1180,7 @@ export async function enqueueUpload(item: {
         item.upload_type,
         Date.now(),
         item.profile_id ?? null,
+        item.reply_to_message_id ?? null,
       ]
     );
   } catch (e) {
@@ -1696,6 +1837,7 @@ export async function exportAllData(): Promise<string> {
   const albumPhotos = await d.getAllAsync<any>("SELECT * FROM album_photos");
   const trash = await d.getAllAsync<any>("SELECT * FROM trash");
   const savedSearches = await d.getAllAsync<any>("SELECT * FROM saved_searches");
+  const photoVersions = await d.getAllAsync<any>("SELECT * FROM photo_versions");
   const kv = await d.getAllAsync<any>("SELECT * FROM kv");
   return JSON.stringify({
     format: "photogrambot-backup",
@@ -1706,6 +1848,7 @@ export async function exportAllData(): Promise<string> {
     album_photos: albumPhotos,
     trash,
     saved_searches: savedSearches,
+    photo_versions: photoVersions,
     kv,
   });
 }
@@ -1721,6 +1864,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync("DELETE FROM albums");
       await d.runAsync("DELETE FROM trash");
       await d.runAsync("DELETE FROM saved_searches");
+      await d.runAsync("DELETE FROM photo_versions");
       await d.runAsync("DELETE FROM photos_fts");
       await d.runAsync("DELETE FROM photos");
     }
@@ -1762,6 +1906,35 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync(
         "INSERT OR IGNORE INTO trash (photo_id, trashed_at, remote_deleted) VALUES (?,?,?)",
         [t.photo_id, t.trashed_at, t.remote_deleted ?? 0]
+      );
+    }
+    // Version rows reference photos that must already be imported — keep only
+    // sane, bounded rows and let the FK/IGNORE handle anything dangling.
+    const importedVersions = Array.isArray(data.photo_versions)
+      ? data.photo_versions.slice(0, 20_000)
+      : [];
+    for (const v of importedVersions) {
+      if (!v || typeof v.photo_id !== "string" || !Number.isFinite(v.version)) continue;
+      await d.runAsync(
+        `INSERT OR IGNORE INTO photo_versions
+          (photo_id, content_hash, remote_file_id, preview_file_id, thumb_file_id,
+           message_id, preview_message_id, size, width, height, version, uploaded_at, profile_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          v.photo_id,
+          typeof v.content_hash === "string" ? v.content_hash : null,
+          typeof v.remote_file_id === "string" ? v.remote_file_id : null,
+          typeof v.preview_file_id === "string" ? v.preview_file_id : null,
+          typeof v.thumb_file_id === "string" ? v.thumb_file_id : null,
+          Number.isFinite(v.message_id) ? v.message_id : null,
+          Number.isFinite(v.preview_message_id) ? v.preview_message_id : null,
+          Number.isFinite(v.size) ? v.size : null,
+          Number.isFinite(v.width) ? v.width : null,
+          Number.isFinite(v.height) ? v.height : null,
+          Math.max(1, Math.floor(v.version)),
+          Number.isFinite(v.uploaded_at) ? v.uploaded_at : null,
+          typeof v.profile_id === "string" ? v.profile_id : null,
+        ]
       );
     }
     const importedSavedSearches = Array.isArray(data.saved_searches)

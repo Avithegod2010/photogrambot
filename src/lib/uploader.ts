@@ -15,7 +15,12 @@ import {
   recoverStaleRunning,
   kvGet,
   kvSet,
+  snapshotPhotoVersion,
+  countPhotoVersions,
+  relinkPhotoToLocalDevice,
+  deletePhoto,
   type QueueRow,
+  type PhotoRow,
 } from "./db";
 import { getBotToken, getChannelId, loadPrefs, getDeviceId, getAiApiKey, DEFAULT_AI_PROMPT } from "./settings";
 import {
@@ -172,6 +177,37 @@ export async function enqueueUploads(
     }
   }
   return enqueued;
+}
+
+/**
+ * Queue an upload of an EDITED copy of an already-backed-up photo. The new
+ * channel message is posted as a reply to the current upload and, on success,
+ * the superseded channel state is snapshotted into photo_versions. Returns
+ * false when a queue row for this asset is already active (the caller leaves
+ * the edit-detection baseline untouched so the next scan retries).
+ */
+export async function enqueueVersionUpload(
+  photo: PhotoRow,
+  localUri: string,
+  dims: { width: number | null; height: number | null; taken_at: number },
+  newHash: string
+): Promise<boolean> {
+  if (!photo.local_id || !photo.message_id) return false;
+  if (await hasActiveQueuedUpload(photo.local_id)) return false;
+  const queueId = await enqueueUpload({
+    local_id: photo.local_id,
+    local_uri: localUri,
+    filename: photo.filename,
+    folder: photo.folder,
+    size: photo.size,
+    taken_at: dims.taken_at,
+    added_at: Date.now(),
+    content_hash: newHash,
+    upload_type: "version",
+    profile_id: photo.profile_id,
+    reply_to_message_id: photo.message_id,
+  });
+  return queueId > 0;
 }
 
 export async function processQueue(): Promise<void> {
@@ -418,6 +454,9 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
   const channelId = dest.channelId;
   await updateQueueItem(item.id, { state: "running" });
   const photoId = `local_${item.local_id}`;
+  if (item.upload_type === "version") {
+    return uploadVersionItem(item, photoId, channelId, token);
+  }
   try {
     const file = new File(item.local_uri);
     if (!file.exists) {
@@ -457,6 +496,16 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
             message_id: existing.message_id,
             uploaded_at: Date.now(),
           });
+        } else {
+          // Identical content is already backed up under a different local id
+          // — the restored-library / new-phone case. Relink the cloud row to
+          // this device's asset and drop the placeholder local-only row that
+          // enqueueUploads created, so the library keeps no dead ids from the
+          // previous device and no phantom "not backed up" entries.
+          try {
+            await relinkPhotoToLocalDevice(existing.id, item.local_id, item.local_uri);
+            await deletePhoto(photoId);
+          } catch {}
         }
         return "duplicate";
       }
@@ -653,6 +702,191 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
 export async function getResumeOffset(): Promise<number> {
   const v = await kvGet("updates_offset");
   return v ? parseInt(v, 10) : 0;
+}
+
+/**
+ * Upload an edited copy of a backed-up photo as a version: the preview and
+ * document are sent as replies to the current channel messages, the replaced
+ * upload is snapshotted into photo_versions, and the photo row is repointed
+ * at the new messages. Failure never degrades the photo row — it keeps its
+ * previous uploaded state.
+ */
+async function uploadVersionItem(
+  item: QueueRow,
+  photoId: string,
+  channelId: string,
+  token: string
+): Promise<UploadOutcome> {
+  try {
+    const photo = await getPhoto(photoId);
+    if (!photo || photo.status !== "uploaded" || !photo.message_id) {
+      await updateQueueItem(item.id, { state: "failed", error: "Original photo is not backed up" });
+      return "failed";
+    }
+    const file = new File(item.local_uri);
+    if (!file.exists) {
+      await updateQueueItem(item.id, { state: "failed", error: "File missing on device" });
+      return "failed";
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      await updateQueueItem(item.id, { state: "skipped", error: "Edited photo larger than 50 MB" });
+      return "skipped";
+    }
+    if (isVideoMime(guessMime(item.filename))) {
+      // Video edits are not version-tracked (splitter path rewrites the whole
+      // chain) — detection never enqueues them; this is a safety net.
+      await updateQueueItem(item.id, { state: "skipped", error: "Video edits are not versioned yet" });
+      return "skipped";
+    }
+
+    // Always hash the file as it is NOW — the hash captured at detection time
+    // is stale if the asset changed again while this row sat in the queue
+    // (hashFileCached makes the common case a cache hit).
+    let mtime: number | null = null;
+    try {
+      mtime = file.info().modificationTime ?? null;
+    } catch {}
+    const hash = await hashFileCached(item.local_id, item.local_uri, mtime);
+    if (!hash) {
+      await updateQueueItem(item.id, { state: "failed", error: "Could not hash the edited file" });
+      return "failed";
+    }
+    if (hash === photo.content_hash) {
+      // The edit was reverted (or was metadata-only) before the upload ran.
+      await updateQueueItem(item.id, { state: "done", error: null });
+      return "done";
+    }
+
+    const prefs = await loadPrefs();
+    const deviceId = await getDeviceId();
+    const threadId = await topicIdFor(channelId, item.folder, token);
+    const snapshotCount = await countPhotoVersions(photoId);
+    const replacedVersion = snapshotCount + 1;
+    const newVersionTag = snapshotCount + 2;
+
+    let previewFileId: string | null = null;
+    let previewMessageId: number | null = null;
+    if (prefs.uploadPreviews) {
+      try {
+        const preview = await generatePreview(item.local_uri, prefs.previewTargetKB);
+        if (preview) {
+          // Direct send rather than the shared preview batch — media groups
+          // cannot carry a per-photo reply, and the version thread needs one.
+          const previewMessage = await sendPhoto(channelId, preview.uri, {
+            caption: buildPreviewCaption(hash, preview.size, newVersionTag),
+            filename: `preview_${item.filename.replace(/\.[^.]+$/, "")}.jpg`,
+            token,
+            messageThreadId: threadId ?? undefined,
+            replyToMessageId: photo.preview_message_id ?? photo.message_id,
+          });
+          previewFileId =
+            previewMessage?.photo?.[previewMessage.photo.length - 1]?.file_id ?? null;
+          previewMessageId = previewMessage?.message_id ?? null;
+          try {
+            new File(preview.uri).delete();
+          } catch {}
+        }
+      } catch {}
+    }
+
+    let metaFull: Awaited<ReturnType<typeof getAssetMeta>> | null = null;
+    try {
+      metaFull = await getAssetMeta(item.local_id);
+    } catch {
+      metaFull = null;
+    }
+    const mime = metaFull?.mime ?? guessMime(item.filename);
+    const tags = buildTags(
+      item.filename,
+      item.folder,
+      metaFull?.takenAt || item.taken_at || Date.now(),
+      mime,
+      metaFull?.camera ?? null
+    );
+    const caption = buildCaption({
+      filename: item.filename,
+      path: metaFull?.localUri,
+      size: metaFull?.size ?? file.size,
+      width: metaFull?.width ?? null,
+      height: metaFull?.height ?? null,
+      mime,
+      dateTaken: metaFull?.takenAt || item.taken_at || Date.now(),
+      dateAdded: metaFull?.addedAt ?? item.added_at,
+      camera: metaFull?.camera ?? null,
+      technical: metaFull?.technical ?? null,
+      gps: metaFull?.gps ?? null,
+      tags,
+      device: deviceId,
+      deviceName: null,
+      hash,
+      versionTag: newVersionTag,
+    });
+
+    const controller = new AbortController();
+    const cancelFn = () => controller.abort();
+    activeCancels.add(cancelFn);
+    let message: TgMessage;
+    try {
+      message = await sendDocument(channelId, item.local_uri, {
+        caption,
+        filename: item.filename,
+        mime,
+        onProgress: emitFileProgress,
+        signal: controller.signal,
+        messageThreadId: threadId ?? undefined,
+        token,
+        replyToMessageId: photo.message_id,
+      });
+    } finally {
+      activeCancels.delete(cancelFn);
+    }
+    const doc = message.document;
+    // Snapshot BEFORE repointing the row; a false return means the photo lost
+    // its channel state mid-upload (e.g. trashed) — don't touch the row.
+    const snapOk = await snapshotPhotoVersion(photoId, replacedVersion);
+    if (!snapOk) {
+      await updateQueueItem(item.id, { state: "done", error: "Photo no longer backed up" });
+      return "done";
+    }
+    await updatePhoto(photoId, {
+      status: "uploaded",
+      remote_file_id: doc?.file_id ?? null,
+      thumb_file_id: doc?.thumbnail?.file_id ?? null,
+      preview_file_id: previewFileId,
+      message_id: message.message_id,
+      preview_message_id: previewMessageId,
+      uploaded_at: Date.now(),
+      content_hash: hash,
+      size: metaFull?.size ?? file.size,
+      width: metaFull?.width ?? null,
+      height: metaFull?.height ?? null,
+      error: null,
+    });
+    await updateQueueItem(item.id, { state: "done", error: null });
+    return "done";
+  } catch (e: any) {
+    const message = e?.message ?? "Version upload failed";
+    if (cancelRequested) {
+      // User cancelled — put the item back without burning a retry.
+      await updateQueueItem(item.id, { state: "pending", error: "Cancelled" });
+      return "requeued";
+    }
+    const retries = item.retries + 1;
+    const permanent =
+      (e instanceof TelegramError && PERMANENT_CODES.has(e.code)) ||
+      /entity too large/i.test(message);
+    if (permanent || retries >= MAX_RETRIES) {
+      await updateQueueItem(item.id, { state: "failed", retries, error: message });
+      return "failed";
+    }
+    await updateQueueItem(item.id, {
+      state: "pending",
+      retries,
+      error: message,
+      next_attempt_at: Date.now() + computeBackoffMs(e, retries),
+    });
+    return "requeued";
+  }
 }
 
 export async function setResumeOffset(offset: number): Promise<void> {
