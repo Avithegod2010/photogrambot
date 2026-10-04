@@ -44,6 +44,7 @@ export interface AlbumRow {
   name: string;
   created_at: number;
   locked?: number | null;
+  query?: string | null;
 }
 
 export interface TrashRow {
@@ -192,6 +193,7 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   ]);
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
+    ["query", "TEXT"],
   ]);
   await migrateFtsSchema(db);
   await db.execAsync(`
@@ -807,6 +809,8 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     id: r.id,
     name: r.name,
     created_at: r.created_at,
+    locked: r.locked,
+    query: r.query ?? null,
     count: r.count,
     cover_file_id: r.cover_file_id,
     cover_preview_id: r.cover_preview_id,
@@ -815,6 +819,19 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
 
 export async function getAlbumPhotos(albumId: number): Promise<PhotoRow[]> {
   const d = await getDb();
+  const album = await d.getFirstAsync<{ query: string | null }>("SELECT query FROM albums WHERE id = ?", [albumId]);
+  const trip = parseTripQuery(album?.query);
+  if (trip) {
+    if (trip.photoIds.length === 0) return [];
+    const placeholders = trip.photoIds.map(() => "?").join(",");
+    const rows = await d.getAllAsync<any>(
+      `SELECT p.* FROM photos p
+       WHERE p.id IN (${placeholders}) AND p.id NOT IN (SELECT photo_id FROM trash)
+       ORDER BY p.taken_at DESC`,
+      trip.photoIds
+    );
+    return rows.map(rowToPhoto);
+  }
   const rows = await d.getAllAsync<any>(
     `SELECT p.* FROM album_photos ap JOIN photos p ON p.id = ap.photo_id
      WHERE ap.album_id = ? AND p.id NOT IN (SELECT photo_id FROM trash)
@@ -822,6 +839,137 @@ export async function getAlbumPhotos(albumId: number): Promise<PhotoRow[]> {
     [albumId]
   );
   return rows.map(rowToPhoto);
+}
+
+interface TripAlbumQuery {
+  kind: "trip";
+  key: string;
+  startAt: number;
+  endAt: number;
+  photoIds: string[];
+  centerLat: number | null;
+  centerLon: number | null;
+}
+
+function parseTripQuery(value: string | null | undefined): TripAlbumQuery | null {
+  if (!value || value.length > 100_000) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<TripAlbumQuery>;
+    if (
+      parsed?.kind !== "trip" ||
+      typeof parsed.key !== "string" ||
+      !Number.isFinite(parsed.startAt) ||
+      !Number.isFinite(parsed.endAt) ||
+      !Array.isArray(parsed.photoIds)
+    ) {
+      return null;
+    }
+    const photoIds = parsed.photoIds.filter((id): id is string => typeof id === "string").slice(0, 5000);
+    return {
+      kind: "trip",
+      key: parsed.key,
+      startAt: parsed.startAt!,
+      endAt: parsed.endAt!,
+      photoIds,
+      centerLat: typeof parsed.centerLat === "number" ? parsed.centerLat : null,
+      centerLon: typeof parsed.centerLon === "number" ? parsed.centerLon : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Rebuild generated trip albums while preserving all manually-created albums. */
+export async function syncTripAlbums(): Promise<number> {
+  const d = await getDb();
+  const { clusterTrips } = await import("./trips");
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status IN ('uploaded','local','failed')
+       AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at ASC`
+  );
+  const clusters = clusterTrips(rows.map(rowToPhoto));
+  const existingRows = await d.getAllAsync<{ id: number; name: string; query: string | null }>(
+    "SELECT id, name, query FROM albums WHERE query IS NOT NULL AND query != ''"
+  );
+  const generatedIds = new Set(existingRows.map((row) => row.id));
+  const usedNames = new Set(
+    (await d.getAllAsync<{ id: number; name: string }>("SELECT id, name FROM albums"))
+      .filter((row) => !generatedIds.has(row.id))
+      .map((row) => row.name)
+  );
+  const existing = new Map<string, number>();
+  for (const row of existingRows) {
+    const parsed = parseTripQuery(row.query);
+    if (parsed) existing.set(parsed.key, row.id);
+  }
+  const assignedNames = new Set<string>();
+  const baseOccurrences = new Map<string, number>();
+  const activeKeys = new Set(clusters.map((cluster) => cluster.key));
+  const existingById = new Map(existingRows.map((row) => [row.id, row]));
+  await d.withTransactionAsync(async () => {
+    // Remove stale generated albums first so their unique names cannot block
+    // a current cluster that reuses the same date label. A generated album
+    // whose query no longer parses is garbage (corrupt import) — drop it too.
+    for (const row of existingRows) {
+      const parsed = parseTripQuery(row.query);
+      if (!parsed || !activeKeys.has(parsed.key)) {
+        await d.runAsync("DELETE FROM albums WHERE id = ?", [row.id]);
+      }
+    }
+    for (const cluster of clusters) {
+      const query = JSON.stringify(cluster);
+      const existingId = existing.get(cluster.key);
+      let displayName = cluster.name;
+      const occurrence = (baseOccurrences.get(cluster.name) ?? 0) + 1;
+      baseOccurrences.set(cluster.name, occurrence);
+      if (occurrence > 1) displayName = `${cluster.name} · ${occurrence}`;
+      if (usedNames.has(displayName) || assignedNames.has(displayName)) {
+        let suffix = occurrence > 1 ? occurrence + 1 : 2;
+        while (usedNames.has(`${cluster.name} · ${suffix}`) || assignedNames.has(`${cluster.name} · ${suffix}`)) suffix++;
+        displayName = `${cluster.name} · ${suffix}`;
+      }
+      assignedNames.add(displayName);
+      let albumId: number;
+      if (existingId != null) {
+        const current = existingById.get(existingId);
+        if (current && current.query === query) {
+          // Membership is byte-identical to the stored query, and album_photos
+          // is fully derived from that query — skip the rewrite churn that a
+          // rebuild would otherwise pay on every Collections visit. The count
+          // re-check heals drift from merges that bypass this function (e.g.
+          // importAllData with replace:false matching album ids).
+          const count = await d.getFirstAsync<{ n: number }>(
+            "SELECT COUNT(*) as n FROM album_photos WHERE album_id = ?",
+            [existingId]
+          );
+          if ((count?.n ?? 0) === cluster.photoIds.length) {
+            if (current.name !== displayName) {
+              await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [displayName, existingId]);
+            }
+            continue;
+          }
+        }
+        albumId = existingId;
+        await d.runAsync("UPDATE albums SET name = ?, query = ? WHERE id = ?", [displayName, query, existingId]);
+      } else {
+        const result = await d.runAsync(
+          "INSERT INTO albums (name, created_at, query) VALUES (?,?,?)",
+          [displayName, Date.now(), query]
+        );
+        albumId = result.lastInsertRowId ?? 0;
+      }
+      await d.runAsync("DELETE FROM album_photos WHERE album_id = ?", [albumId]);
+      for (const photoId of cluster.photoIds) {
+        await d.runAsync(
+          "INSERT OR IGNORE INTO album_photos (album_id, photo_id, added_at) VALUES (?,?,?)",
+          [albumId, photoId, Date.now()]
+        );
+      }
+    }
+  });
+  return clusters.length;
 }
 
 export async function addToAlbum(albumId: number, photoIds: string[]): Promise<void> {
@@ -847,7 +995,13 @@ export async function getPhotoAlbums(photoId: string): Promise<AlbumRow[]> {
     "SELECT a.* FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE ap.photo_id = ?",
     [photoId]
   );
-  return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    created_at: r.created_at,
+    locked: r.locked,
+    query: r.query ?? null,
+  }));
 }
 
 export async function setAlbumLocked(id: number, locked: boolean): Promise<void> {
@@ -1594,8 +1748,8 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       count += res.changes > 0 ? 1 : 0;
     }
     for (const a of data.albums ?? []) {
-      await d.runAsync("INSERT OR IGNORE INTO albums (id, name, created_at) VALUES (?,?,?)", [
-        a.id, a.name, a.created_at,
+      await d.runAsync("INSERT OR IGNORE INTO albums (id, name, created_at, locked, query) VALUES (?,?,?,?,?)", [
+        a.id, a.name, a.created_at, a.locked ?? null, typeof a.query === "string" ? a.query.slice(0, 100_000) : null,
       ]);
     }
     for (const ap of data.album_photos ?? []) {
