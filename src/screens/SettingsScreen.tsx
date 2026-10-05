@@ -21,6 +21,13 @@ import { getStorageSummary, type StorageSummary } from "../lib/db";
 import { runSyncNow } from "../lib/sync";
 import { getBackgroundSyncInfo } from "../lib/background";
 import {
+  getFreeDiskBytes,
+  isStorageCritical,
+  thumbCacheBytes,
+  pruneThumbCache,
+  LOW_STORAGE_THRESHOLD_BYTES,
+} from "../lib/storage";
+import {
   getAiApiKey,
   setAiApiKey,
   getBackupPassphrase,
@@ -70,6 +77,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [breakInEvents, setBreakInEvents] = useState<BreakInEvent[] | null>(null);
   const [storage, setStorage] = useState<StorageSummary | null>(null);
   const [capDraft, setCapDraft] = useState(String(prefs.overnightCap));
+  const [freeBytes, setFreeBytes] = useState<number | null>(null);
+  const [thumbBytes, setThumbBytes] = useState<number | null>(null);
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -88,7 +97,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
   useEffect(() => {
     void getStorageSummary().then(setStorage);
+    void getFreeDiskBytes().then(setFreeBytes);
+    void thumbCacheBytes().then(setThumbBytes);
   }, [stats]);
+
+  async function onClearThumbCache() {
+    await pruneThumbCache();
+    setThumbBytes(await thumbCacheBytes());
+  }
 
   useEffect(() => {
     if (!prefs.autoSync) {
@@ -670,6 +686,48 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
         <SectionLabel text="Storage" theme={theme} />
         {storage ? <StorageCard storage={storage} theme={theme} /> : null}
+        {freeBytes !== null ? (
+          <Card theme={theme}>
+            <View style={styles.configRow}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13.5 }}>
+                Free space on device
+              </Text>
+              <Text
+                style={{
+                  color:
+                    freeBytes < LOW_STORAGE_THRESHOLD_BYTES
+                      ? theme.colors.error
+                      : theme.colors.onSurface,
+                  fontWeight: "600",
+                }}
+              >
+                {formatBytes(freeBytes)}
+              </Text>
+            </View>
+            {freeBytes < LOW_STORAGE_THRESHOLD_BYTES ? (
+              <Text style={[styles.statusText, { color: theme.colors.error, marginTop: 0 }]}>
+                Critically low — automatic backups are paused until more space is available. Manual syncs still work.
+              </Text>
+            ) : null}
+            <View style={styles.divider} />
+            <View style={styles.configRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13.5 }}>
+                  Thumbnail cache
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                  {formatBytes(thumbBytes ?? 0)} — re-downloaded on demand, always safe to clear
+                </Text>
+              </View>
+              <Button
+                title="Clear"
+                variant="outlined"
+                theme={theme}
+                onPress={() => void onClearThumbCache()}
+              />
+            </View>
+          </Card>
+        ) : null}
 
         <SectionLabel text="About" theme={theme} />
         <Card theme={theme}>

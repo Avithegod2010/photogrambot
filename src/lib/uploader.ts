@@ -505,7 +505,10 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       await updateQueueItem(item.id, { content_hash: hash });
     }
 
-    if (hash) {
+    if (hash && item.upload_type !== "repair") {
+      // Repair rows (self-repair, R27) re-upload their OWN row after the cloud
+      // copy went unreachable — the hash matches by definition, so the
+      // duplicate short-circuit must not swallow the re-upload.
       const existing = await getPhotoByHash(hash);
       if (existing) {
         await updateQueueItem(item.id, { state: "duplicate" });
@@ -548,7 +551,13 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
     // hash, but its perceptual hash barely moves. Fail-open — an uncomputable
     // pHash uploads normally. Version uploads are exempt (edits are the point).
     let newPhash: string | null = null;
-    if (prefs.nearDupGuard && !looksLikeVideo && hash && item.upload_type !== "version") {
+    if (
+      prefs.nearDupGuard &&
+      !looksLikeVideo &&
+      hash &&
+      item.upload_type !== "version" &&
+      item.upload_type !== "repair"
+    ) {
       try {
         newPhash = await computePhotoPhash({
           id: photoId,
@@ -583,6 +592,15 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
     }
 
     await updatePhoto(photoId, { status: "uploading", content_hash: hash });
+    // Repair rows remember the replaced (unreachable) channel posts so they
+    // can be deleted once the fresh upload lands.
+    let repairOldMessageIds: number[] = [];
+    if (item.upload_type === "repair") {
+      const before = await getPhoto(photoId);
+      for (const id of [before?.message_id, before?.preview_message_id]) {
+        if (typeof id === "number") repairOldMessageIds.push(id);
+      }
+    }
     const threadId = await topicIdFor(channelId, item.folder, token);
 
     let metaFull: Awaited<ReturnType<typeof getAssetMeta>> | null = null;
@@ -731,6 +749,16 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       error: null,
       phash: newPhash,
     });
+    if (repairOldMessageIds.length > 0) {
+      // Best-effort orphan cleanup — the replaced posts are unreachable
+      // duplicates; failures leave harmless extra copies in the channel.
+      const { deleteMessage } = await import("./telegram");
+      for (const id of repairOldMessageIds) {
+        try {
+          await deleteMessage(channelId, id, token);
+        } catch {}
+      }
+    }
     await updateQueueItem(item.id, { state: "done", error: null });
     return "done";
   } catch (e: any) {
