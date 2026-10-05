@@ -274,6 +274,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ uploadPreviews: v })}
             theme={theme}
           />
+          <ToggleRow
+            title="Skip near-duplicate uploads"
+            subtitle="Before uploading, check the photo against your backed-up library and skip it when it looks like a re-save or recompression of something you already have. Heavily-cropped or filtered edits are still uploaded."
+            value={prefs.nearDupGuard}
+            onChange={(v) => void update({ nearDupGuard: v })}
+            theme={theme}
+          />
           <View style={styles.divider} />
           <ToggleRow
             title="Video support (Beta)"
@@ -568,6 +575,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
                 Saved on this device. Enter the same passphrase on a new phone before restoring.
               </Text>
+              <ToggleRow
+                title="Include bot token in backups"
+                subtitle="Store the bot connection inside the encrypted backup. A device that restores before setup adopts it automatically; a device with a working token keeps its own."
+                value={prefs.dbBackupIncludeToken}
+                onChange={(v) => void update({ dbBackupIncludeToken: v })}
+                theme={theme}
+              />
             </>
           ) : null}
           <View style={styles.buttonGrid}>
@@ -587,7 +601,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>PhotogramBot</Text>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 4, lineHeight: 18 }}>
-            Version 0.2.0 · Photos are backed up to your own Telegram channel via your own bot.
+            Version 1.0.0 · Photos are backed up to your own Telegram channel via your own bot.
             No servers, no tracking. Telegram Bot API limits: originals up to 50 MB, downloads
             up to 20 MB.
           </Text>

@@ -19,6 +19,7 @@ import {
   countPhotoVersions,
   relinkPhotoToLocalDevice,
   deletePhoto,
+  getAllPhashPairs,
   type QueueRow,
   type PhotoRow,
 } from "./db";
@@ -36,6 +37,8 @@ import { captionImageWithGemini } from "./ai";
 import { buildCaption, buildPreviewCaption } from "./caption";
 import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
+import { computePhotoPhash } from "./maintenance";
+import { hammingHex } from "./phash";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo, type VideoPart } from "./vsplit";
 import { notifyUploadProgress, notifyUploadComplete, notifyUploadsFailed } from "./notify";
@@ -50,6 +53,23 @@ const MAX_RETRIES = 5;
 const UPLOAD_CONCURRENCY = 2;
 const PROGRESS_EMIT_MS = 250;
 const PERMANENT_CODES = new Set([400, 404, 413]);
+// Near-duplicate upload guard: a Hamming distance this small means the file is
+// almost certainly a re-save/recompression of something already backed up.
+// Deliberately TIGHT — the near-dup FINDER clusters at 8 for human review, but
+// an automatic skip must not eat distinct burst frames.
+const NEARDUP_GUARD_DISTANCE = 4;
+// The uploaded-pHash map is small (16 bytes/row); cache it for a minute so a
+// sync burst doesn't re-read the whole table per photo.
+const PHASH_PAIR_CACHE_MS = 60_000;
+let phashPairCache: { map: Map<string, string>; at: number } | null = null;
+
+async function getPhashPairsCached(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (!phashPairCache || now - phashPairCache.at > PHASH_PAIR_CACHE_MS) {
+    phashPairCache = { map: await getAllPhashPairs(), at: now };
+  }
+  return phashPairCache.map;
+}
 let processing = false;
 let cancelRequested = false;
 
@@ -522,6 +542,46 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       }
     }
 
+    // Near-duplicate upload guard: a re-save/recompression of an already
+    // backed-up photo (WhatsApp round-trip, screenshot of the grid, editor
+    // re-export) never changes content enough to register as a duplicate by
+    // hash, but its perceptual hash barely moves. Fail-open — an uncomputable
+    // pHash uploads normally. Version uploads are exempt (edits are the point).
+    let newPhash: string | null = null;
+    if (prefs.nearDupGuard && !looksLikeVideo && hash && item.upload_type !== "version") {
+      try {
+        newPhash = await computePhotoPhash({
+          id: photoId,
+          local_uri: item.local_uri,
+          local_id: item.local_id,
+          remote_file_id: null,
+          preview_file_id: null,
+          thumb_file_id: null,
+        } as PhotoRow);
+      } catch {
+        newPhash = null;
+      }
+      if (newPhash) {
+        const pairs = await getPhashPairsCached();
+        let bestDistance = 65;
+        let bestId: string | null = null;
+        for (const [rowId, other] of pairs) {
+          const distance = hammingHex(newPhash, other);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestId = rowId;
+          }
+        }
+        if (bestId && bestId !== photoId && bestDistance <= NEARDUP_GUARD_DISTANCE) {
+          await updateQueueItem(item.id, {
+            state: "duplicate",
+            error: `Near-duplicate of an already backed up photo (distance ${bestDistance}) — skipped`,
+          });
+          return "duplicate";
+        }
+      }
+    }
+
     await updatePhoto(photoId, { status: "uploading", content_hash: hash });
     const threadId = await topicIdFor(channelId, item.folder, token);
 
@@ -669,6 +729,7 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       ai_caption: aiDescription,
       profile_id: item.profile_id,
       error: null,
+      phash: newPhash,
     });
     await updateQueueItem(item.id, { state: "done", error: null });
     return "done";

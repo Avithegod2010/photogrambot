@@ -34,9 +34,12 @@ import {
   requestCancelRestore,
   type RestoreProgress,
 } from "../lib/restore";
-import { getChannelId } from "../lib/settings";
+import { getChannelId, getAiApiKey } from "../lib/settings";
 import { deleteMessage } from "../lib/telegram";
 import { tokenForPhoto } from "../lib/destinations";
+import { embedIndexBackfill } from "../lib/semsearch";
+import { getEmbeddingCoverage } from "../lib/db";
+import type { EmbedBackfillProgress } from "../lib/semsearch";
 
 export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -56,6 +59,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
   const [restoreResult, setRestoreResult] = useState<string | null>(null);
   const [failedCount, setFailedCount] = useState(0);
+  const [semBusy, setSemBusy] = useState(false);
+  const [semProgress, setSemProgress] = useState<EmbedBackfillProgress | null>(null);
+  const [semNote, setSemNote] = useState<string | null>(null);
+  const [semError, setSemError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryResult, setRetryResult] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -198,6 +205,37 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     } finally {
       setTagging(false);
       setTagProgress(null);
+    }
+  }
+
+  async function runEmbedIndex() {
+    setSemBusy(true);
+    setSemError(null);
+    setSemNote(null);
+    setSemProgress(null);
+    try {
+      const apiKey = await getAiApiKey();
+      if (!apiKey) {
+        setSemError("Add a Gemini API key in Settings → AI captions first.");
+        return;
+      }
+      const coverage = await getEmbeddingCoverage();
+      if (coverage.missing === 0) {
+        setSemNote(`All ${coverage.embedded} backed-up photos are indexed.`);
+        return;
+      }
+      setSemProgress({ done: 0, total: coverage.missing });
+      const result = await embedIndexBackfill(apiKey, setSemProgress, coverage.missing);
+      setSemNote(
+        `Indexed ${result.embedded} photo${result.embedded === 1 ? "" : "s"}${
+          result.failed ? ` — ${result.failed} skipped (API errors, run again later)` : ""
+        }. Meaning-based search now fills in when word search comes up empty.`
+      );
+    } catch (e: any) {
+      setSemError(e?.message ?? "Indexing failed.");
+    } finally {
+      setSemBusy(false);
+      setSemProgress(null);
     }
   }
 
@@ -443,6 +481,39 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {tagError ? (
                 <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {tagError}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Semantic search" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Indexes what each backed-up photo is about — AI captions, names, folders and tags —
+                so searching can find photos by meaning ("food at night", "someone holding a baby")
+                even when no word matches. Uses your Gemini key; the first pass takes a while on
+                big libraries and new photos are picked up by running it again.
+              </Text>
+              <Button
+                title={semProgress ? "Indexing…" : "Build search index"}
+                theme={theme}
+                variant="outlined"
+                busy={semBusy}
+                onPress={runEmbedIndex}
+                style={{ marginTop: 12 }}
+              />
+              {semProgress ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  Indexed {semProgress.done}/{semProgress.total || "…"}
+                </Text>
+              ) : null}
+              {semNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {semNote}
+                </Text>
+              ) : null}
+              {semError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {semError}
                 </Text>
               ) : null}
             </Card>
