@@ -33,12 +33,30 @@ export function localBackupPath(): string {
 async function serializeBackup(): Promise<string> {
   const json = await exportAllData();
   const prefs = await loadPrefs();
-  if (!prefs.dbBackupEncrypt) return json;
+  const data = JSON.parse(json) as Record<string, unknown>;
+  if (prefs.dbBackupIncludeToken) {
+    const token = await getBotToken();
+    if (token) data.bot_token = token;
+  }
+  const payload = JSON.stringify(data);
+  if (!prefs.dbBackupEncrypt) return payload;
   const passphrase = await getBackupPassphrase();
   if (!passphrase) {
     throw new Error("Backup encryption is on but no passphrase is set — add one in Settings");
   }
-  return encryptText(json, passphrase);
+  return encryptText(payload, passphrase);
+}
+
+/**
+ * A backup that carries the bot token (opt-in) lets a device that has NOT
+ * been set up yet adopt the old connection. A device that already has a
+ * working token always keeps its own.
+ */
+async function adoptBackupToken(data: Record<string, unknown>): Promise<void> {
+  const token = data?.bot_token;
+  if (typeof token !== "string" || !/^\d+:[A-Za-z0-9_-]{30,}$/.test(token)) return;
+  const current = await getBotToken();
+  if (!current) await setBotToken(token);
 }
 
 async function deserializeBackup(text: string): Promise<string> {
@@ -77,6 +95,11 @@ export async function importFromLocalFile(replace: boolean): Promise<number> {
   const count = await importAllData(json, replace);
   if (token) await setBotToken(token);
   if (channelId) await setChannelId(channelId);
+  else {
+    try {
+      await adoptBackupToken(JSON.parse(json) as Record<string, unknown>);
+    } catch {}
+  }
   return count;
 }
 
@@ -88,6 +111,7 @@ export async function importFromJsonString(raw: string, replace: boolean): Promi
   const savedChannel = await getChannelId();
   const count = await importAllData(json, replace);
   if (savedToken) await setBotToken(savedToken);
+  else await adoptBackupToken(data);
   if (savedChannel) await setChannelId(savedChannel);
   return count;
 }

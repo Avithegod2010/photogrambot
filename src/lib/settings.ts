@@ -36,6 +36,8 @@ export interface Prefs {
   aiPrompt: string;
   includeVideos: boolean;
   dbBackupEncrypt: boolean;
+  dbBackupIncludeToken: boolean;
+  nearDupGuard: boolean;
   multiDestination: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
@@ -65,6 +67,8 @@ export const defaultPrefs: Prefs = {
   aiPrompt: DEFAULT_AI_PROMPT,
   includeVideos: false,
   dbBackupEncrypt: false,
+  dbBackupIncludeToken: false,
+  nearDupGuard: true,
   multiDestination: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,

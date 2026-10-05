@@ -218,6 +218,12 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_photo_versions_photo
       ON photo_versions(photo_id, version);
+    CREATE TABLE IF NOT EXISTS photo_embeddings (
+      photo_id TEXT PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      dim INTEGER NOT NULL,
+      vec BLOB NOT NULL
+    );
   `);
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
@@ -508,6 +514,96 @@ export async function getVersionMessageIds(
     "SELECT message_id, preview_message_id FROM photo_versions WHERE photo_id = ? AND (message_id IS NOT NULL OR preview_message_id IS NOT NULL)",
     [photoId]
   );
+}
+
+export async function setPhotoEmbedding(
+  photoId: string,
+  model: string,
+  vec: Uint8Array
+): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    `INSERT INTO photo_embeddings (photo_id, model, dim, vec) VALUES (?,?,?,?)
+     ON CONFLICT(photo_id) DO UPDATE SET model = excluded.model, dim = excluded.dim, vec = excluded.vec`,
+    [photoId, model, vec.length, vec]
+  );
+}
+
+export interface EmbeddingRow {
+  photo_id: string;
+  vec: Uint8Array;
+}
+
+/** Ranked-search corpus: embeddings of photos that are uploaded and live. */
+export async function getEmbeddingCorpus(): Promise<EmbeddingRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<{ photo_id: string; vec: Uint8Array }>(
+    `SELECT e.photo_id, e.vec FROM photo_embeddings e
+     JOIN photos p ON p.id = e.photo_id
+     WHERE p.status = 'uploaded' AND p.id NOT IN (SELECT photo_id FROM trash)`
+  );
+  return rows;
+}
+
+export async function getEmbeddingCoverage(): Promise<{ embedded: number; missing: number }> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ embedded: number; missing: number }>(
+    `SELECT
+       (SELECT COUNT(*) FROM photo_embeddings) AS embedded,
+       (SELECT COUNT(*) FROM photos
+          WHERE status = 'uploaded'
+            AND id NOT IN (SELECT photo_id FROM trash)
+            AND id NOT IN (SELECT photo_id FROM photo_embeddings)) AS missing`
+  );
+  return { embedded: row?.embedded ?? 0, missing: row?.missing ?? 0 };
+}
+
+export async function clearEmbeddings(): Promise<void> {
+  const d = await getDb();
+  await d.runAsync("DELETE FROM photo_embeddings");
+}
+
+export interface SemanticCorpusItem {
+  id: string;
+  text: string;
+}
+
+/**
+ * Next slice of photos that still lack an embedding. Because embedded rows
+ * drop out of this query, callers can always take offset 0 and loop until it
+ * returns empty.
+ */
+export async function getSemanticCorpus(limit = 20): Promise<SemanticCorpusItem[]> {
+  const d = await getDb();
+  return d.getAllAsync<SemanticCorpusItem>(
+    `SELECT p.id,
+       TRIM(COALESCE(p.ai_caption, '') || ' ' || p.filename || ' ' ||
+            COALESCE(p.folder, '') || ' ' || COALESCE(p.tags, '')) AS text
+     FROM photos p
+     WHERE p.status = 'uploaded'
+       AND p.id NOT IN (SELECT photo_id FROM trash)
+       AND p.id NOT IN (SELECT photo_id FROM photo_embeddings)
+     ORDER BY p.taken_at DESC
+     LIMIT ?`,
+    [limit]
+  );
+}
+
+/** Photos by id, returned in the SAME order as the input ids (ranked results). */
+export async function getPhotosByIds(ids: string[]): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const found = new Map<string, PhotoRow>();
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    if (chunk.length === 0) continue;
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await d.getAllAsync<any>(
+      `SELECT * FROM photos WHERE id IN (${placeholders}) AND id NOT IN (SELECT photo_id FROM trash)`,
+      chunk
+    );
+    for (const r of rows) found.set(r.id as string, rowToPhoto(r));
+  }
+  return ids.map((id) => found.get(id)).filter((p): p is PhotoRow => !!p);
 }
 
 export async function countAllPhotoVersions(): Promise<number> {

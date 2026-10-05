@@ -35,6 +35,7 @@ import { tokenForPhoto, listProfiles } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { Button, Dialog, TextField } from "../components/ui";
 import { nlToSearch } from "../lib/ai";
+import { searchSemantic } from "../lib/semsearch";
 import { getAiApiKey } from "../lib/settings";
 import { AUTO_TAGS } from "../lib/autotags";
 import type { PeriodGroup } from "../lib/db";
@@ -352,21 +353,40 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   // NL search applies text AND filters in ONE query run — applyFilters alone
   // would run the search against the stale `search` closure, then runSearch's
   // debounce would fire a second query with the opposite half applied.
-  async function applyNaturalSearch(text: string, f: SearchFilters | null) {
+  async function applyNaturalSearch(text: string, f: SearchFilters | null): Promise<PhotoRow[] | null> {
     setSearch(text);
     setFilters(f);
     if (decoy) {
       setSearchResults(null);
-      return;
+      return null;
     }
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const seq = ++searchSeq.current;
     if (!text.trim() && !hasAnyFilter(f)) {
       setSearchResults(null);
-      return;
+      return null;
     }
     const results = await useLibraryStore.getState().search(text, f ?? undefined);
     if (seq === searchSeq.current) setSearchResults(results);
+    return results;
+  }
+
+  // Meaning-based safety net: when word/structured search finds nothing, rank
+  // the whole library by embedding similarity to the query (needs the index
+  // built in Maintenance; silently does nothing otherwise).
+  async function runSemanticFallback(text: string): Promise<boolean> {
+    if (decoy || !text.trim()) return false;
+    const apiKey = await getAiApiKey().catch(() => null);
+    if (!apiKey) return false;
+    try {
+      const rows = await searchSemantic(apiKey, text.trim(), 60);
+      if (rows.length === 0) return false;
+      const seq = ++searchSeq.current;
+      if (seq === searchSeq.current) setSearchResults(rows);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function runNaturalLanguageSearch() {
@@ -389,10 +409,20 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       const hasAnything =
         searchText !== null || hasAnyFilter(aiFilters);
       if (!hasAnything) {
+        const sem = await runSemanticFallback(search.trim());
+        if (sem) return;
         Alert.alert("AI search", "Couldn't find a filterable meaning — try more specific words.");
         return;
       }
-      await applyNaturalSearch(searchText ?? "", aiFilters);
+      const structured = await applyNaturalSearch(searchText ?? "", aiFilters);
+      if (structured !== null && structured.length === 0) {
+        const sem = await runSemanticFallback(search.trim());
+        if (sem) return;
+        Alert.alert(
+          "AI search",
+          "No matches. For meaning-based search, build the index in Settings → Maintenance → Semantic search."
+        );
+      }
     } catch (e: any) {
       Alert.alert("AI search", e?.message ?? "Couldn't understand that search");
     } finally {

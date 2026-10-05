@@ -51,6 +51,43 @@ export async function captionImageWithGemini(opts: AiCaptionOptions): Promise<st
   return text.replace(/\s+/g, " ").slice(0, 200);
 }
 
+export interface EmbedTextOptions {
+  apiKey: string;
+  text: string;
+  taskType?: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
+  model?: string;
+}
+
+/** One text → one embedding vector. Returns null on any API failure so
+ * backfill loops can skip-and-continue instead of dying mid-index. */
+export async function embedText(opts: EmbedTextOptions): Promise<number[] | null> {
+  const model = opts.model || "gemini-embedding-001";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${model}:embedContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: `models/${model}`,
+        content: { parts: [{ text: opts.text.slice(0, 2000) }] },
+        taskType: opts.taskType ?? "RETRIEVAL_DOCUMENT",
+        outputDimensionality: 768,
+      }),
+      signal: controller.signal,
+    });
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+  clearTimeout(timer);
+  if (!res.ok) return null;
+  const json: any = await res.json().catch(() => null);
+  const values = json?.embedding?.values;
+  return Array.isArray(values) && values.length > 0 ? (values as number[]) : null;
+}
+
 export interface NlSearchOptions {
   apiKey: string;
   model: string;
