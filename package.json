@@ -29,6 +29,7 @@
     "expo-system-ui": "~57.0.2",
     "expo-task-manager": "~57.0.13",
     "expo-video": "~57.0.2",
+    "jszip": "^3.10.2",
     "react": "19.2.3",
     "react-native": "0.86.2",
     "react-native-android-widget": "^0.22.1",

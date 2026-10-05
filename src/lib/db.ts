@@ -1520,6 +1520,27 @@ export async function getPhotosByUploadStatus(
   return rows.map(rowToPhoto);
 }
 
+// Monthly ZIP export (#8): uploaded, downloadable rows taken inside the
+// given calendar month (local time), oldest first. Trashed rows excluded.
+export async function getUploadedPhotosInMonth(
+  year: number,
+  month: number // 0-based
+): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const start = new Date(year, month, 1).getTime();
+  const end = new Date(year, month + 1, 1).getTime();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND remote_file_id IS NOT NULL
+       AND taken_at >= ? AND taken_at < ?
+       AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at ASC`,
+    [start, end]
+  );
+  return rows.map(rowToPhoto);
+}
+
 // "Free up space" candidates: backed-up rows that still claim a local copy and
 // a size (size is what makes them worth listing — it sums into reclaimable
 // GB). Trashed rows are excluded even though they keep status='uploaded'.
