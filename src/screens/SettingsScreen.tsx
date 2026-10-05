@@ -29,6 +29,11 @@ import {
 } from "../lib/settings";
 import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
 import {
+  getBreakInLog,
+  clearBreakInLog,
+  type BreakInEvent,
+} from "../lib/breakin";
+import {
   uploadBackupToChannel,
   restoreFromChannelPinned,
   exportToLocalFile,
@@ -61,12 +66,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [pinDraft, setPinDraft] = useState("");
   const [pinExists, setPinExists] = useState(false);
   const [decoyExists, setDecoyExists] = useState(false);
+  const [breakInCount, setBreakInCount] = useState(0);
+  const [breakInEvents, setBreakInEvents] = useState<BreakInEvent[] | null>(null);
   const [storage, setStorage] = useState<StorageSummary | null>(null);
   const [capDraft, setCapDraft] = useState(String(prefs.overnightCap));
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
     void getDecoyExists().then(setDecoyExists);
+    void getBreakInLog().then((l) => setBreakInCount(l.length));
   }, []);
 
   useEffect(() => {
@@ -484,6 +492,23 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 6 }}>
                 The decoy PIN opens an empty gallery — use it when someone insists on seeing the app.
               </Text>
+              <View style={styles.divider} />
+              <Pressable
+                style={styles.destRow}
+                onPress={() => void getBreakInLog().then(setBreakInEvents)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
+                    Break-in log
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                    {breakInCount === 0
+                      ? "No failed unlock attempts recorded"
+                      : `${breakInCount} unlock event${breakInCount === 1 ? "" : "s"} recorded`}
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </Pressable>
             </>
           ) : null}
         </Card>
@@ -683,6 +708,59 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         </View>
       </Dialog>
 
+      <Dialog
+        visible={breakInEvents !== null}
+        theme={theme}
+        title="Break-in log"
+        message={
+          breakInEvents && breakInEvents.length > 0
+            ? "Failed unlock attempts and decoy-PIN uses, newest first."
+            : "No failed unlock attempts recorded."
+        }
+      >
+        {breakInEvents && breakInEvents.length > 0 ? (
+          <View style={{ maxHeight: 320 }}>
+            <ScrollView nestedScrollEnabled>
+              {breakInEvents
+                .slice()
+                .reverse()
+                .slice(0, 30)
+                .map((e, i) => (
+                  <Text
+                    key={`${e.t}-${i}`}
+                    style={{ color: theme.colors.onSurface, fontSize: 13, paddingVertical: 4 }}
+                  >
+                    {fmtEventTime(e.t)} · {BREAK_IN_LABELS[e.kind]}
+                  </Text>
+                ))}
+              {breakInEvents.length > 30 ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, paddingVertical: 4 }}>
+                  …and {breakInEvents.length - 30} older events.
+                </Text>
+              ) : null}
+            </ScrollView>
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <Button
+                title="Clear log"
+                variant="text"
+                theme={theme}
+                onPress={() => {
+                  void clearBreakInLog().then(() => {
+                    setBreakInCount(0);
+                    setBreakInEvents([]);
+                  });
+                }}
+              />
+              <Button title="Close" theme={theme} onPress={() => setBreakInEvents(null)} />
+            </View>
+          </View>
+        ) : (
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 14 }}>
+            <Button title="Close" theme={theme} onPress={() => setBreakInEvents(null)} />
+          </View>
+        )}
+      </Dialog>
+
       {busyLabel ? (
         <View style={[styles.busyOverlay, { backgroundColor: theme.colors.scrim }]}>
           <Card theme={theme} style={{ alignItems: "center", minWidth: 240 }}>
@@ -702,6 +780,18 @@ function Stat({ label, value, theme }: { label: string; value: string; theme: Re
       <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>{label}</Text>
     </View>
   );
+}
+
+const BREAK_IN_LABELS: Record<BreakInEvent["kind"], string> = {
+  pin_fail: "Wrong PIN",
+  biometric_fail: "Failed biometric",
+  decoy_unlock: "Decoy PIN used",
+};
+
+function fmtEventTime(t: number): string {
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function StorageCard({

@@ -11,6 +11,10 @@
 //   /resume          — release the pause, then one scan
 //   /delete          — REPLY to a backed-up photo's message → trashes it
 //                      locally and deletes the channel message
+//   /wipe            — arm the local wipe; /wipe confirm within 5 minutes
+//                      erases every backed-up photo's LOCAL copy from this
+//                      device (anti-theft: channel archive survives). Two-step
+//                      so a stray message can't mass-delete.
 //
 // Security: every command is authenticated by the channel — only messages
 // inside the configured channel chat are honored (updates.ts already drops
@@ -31,6 +35,8 @@ import { tokenForPhoto } from "./destinations";
 import { formatBytes } from "./format";
 
 const PAUSE_KEY = "remote_paused";
+const WIPE_ARM_KEY = "wipe_armed_at";
+const WIPE_ARM_WINDOW_MS = 5 * 60 * 1000;
 
 export async function isRemotePaused(): Promise<boolean> {
   return (await kvGet(PAUSE_KEY)) === "1";
@@ -74,7 +80,7 @@ export async function handleRemoteCommand(
   const text = (msg.text ?? "").trim();
   if (!text.startsWith("/")) return false;
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
-  if (!["/status", "/sync", "/pause", "/resume", "/delete"].includes(cmd)) {
+  if (!["/status", "/sync", "/pause", "/resume", "/delete", "/wipe"].includes(cmd)) {
     return false; // unknown slash command — not ours; let ingestion proceed
   }
 
@@ -105,6 +111,51 @@ export async function handleRemoteCommand(
       `Sync complete: ${r.scanned} photos scanned, ${r.enqueued} new queued.`,
       { replyToMessageId: msg.message_id }
     );
+  } else if (cmd === "/wipe") {
+    const arg = text.split(/\s+/).slice(1)[0]?.toLowerCase();
+    if (arg !== "confirm") {
+      // Arm — a second explicit message is required before anything deletes.
+      await kvSet(WIPE_ARM_KEY, String(Date.now()));
+      await sendMessage(
+        chatId,
+        "This erases the LOCAL copies of ALL backed-up photos from this device. " +
+          "The originals stay in this channel and the app index keeps working. " +
+          "To confirm, send /wipe confirm within 5 minutes.",
+        { replyToMessageId: msg.message_id }
+      );
+      return true;
+    }
+    const armedAt = parseInt((await kvGet(WIPE_ARM_KEY)) ?? "0", 10) || 0;
+    if (Date.now() - armedAt > WIPE_ARM_WINDOW_MS) {
+      await sendMessage(
+        chatId,
+        "No wipe is armed (or the 5-minute window passed). Send /wipe first, then /wipe confirm.",
+        { replyToMessageId: msg.message_id }
+      );
+      return true;
+    }
+    await kvSet(WIPE_ARM_KEY, "0");
+    await sendMessage(chatId, "Wiping local copies of backed-up photos…", {
+      replyToMessageId: msg.message_id,
+    });
+    try {
+      const { wipeLocalCopies } = await import("./maintenance");
+      const r = await wipeLocalCopies();
+      await sendMessage(
+        chatId,
+        `Wipe complete: ${r.deleted} local copies deleted` +
+          (r.freedBytes > 0 ? ` (${formatBytes(r.freedBytes)} freed)` : "") +
+          (r.kept > 0 ? `, ${r.kept} kept (cloud copy failed verification or delete was declined)` : "") +
+          ".",
+        { replyToMessageId: msg.message_id }
+      );
+    } catch (e: any) {
+      // A failed wipe is reported, not retried automatically — the owner can
+      // send /wipe again. Photos whose verification failed stay on device.
+      await sendMessage(chatId, `Wipe failed: ${e?.message ?? "unknown error"}.`, {
+        replyToMessageId: msg.message_id,
+      });
+    }
   } else if (cmd === "/delete") {
     const target = msg.reply_to_message;
     if (!target) {
