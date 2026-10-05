@@ -174,11 +174,13 @@ export async function unpinChatMessage(chatId: string | number, messageId: numbe
 
 // Plain-text status replies for remote control. HTML parse mode would force
 // escaping every dynamic fragment — not worth it for bot-operator output.
+// Returns whether the send landed — the weekly digest keys its schedule off
+// this, so a failed post retries on the next app start instead of going silent.
 export async function sendMessage(
   chatId: string | number,
   text: string,
   options: { replyToMessageId?: number; token?: string } = {}
-): Promise<void> {
+): Promise<boolean> {
   try {
     await call(
       "sendMessage",
@@ -195,8 +197,10 @@ export async function sendMessage(
       },
       options.token
     );
+    return true;
   } catch {
     // Status replies are best-effort — a failed reply must never crash the poll loop.
+    return false;
   }
 }
 

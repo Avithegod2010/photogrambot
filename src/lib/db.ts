@@ -1514,6 +1514,30 @@ export async function getFreeUpCandidates(): Promise<PhotoRow[]> {
   return rows.map(rowToPhoto);
 }
 
+// "Screenshot sunset" (#7): backed-up screenshots older than `days` whose
+// local copy can still be reclaimed. The screenshot tag is set by the
+// filename auto-classifier (classifyAutoTags); the space-padded token match
+// targets the exact tags "screenshot"/"screenshots" — a folder merely NAMED
+// "Screenshots" sanitizes to the plural tag, which is why both spellings are
+// checked. Oldest first: the point is surfacing the longest-lived clutter.
+export async function getScreenshotSunsetCandidates(days: number): Promise<PhotoRow[]> {
+  const d = await getDb();
+  // taken_at is epoch milliseconds (getAssetMeta/creationTime are ms).
+  const cutoff = Date.now() - days * 86400 * 1000;
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND local_id IS NOT NULL
+       AND size IS NOT NULL AND size > 0
+       AND taken_at > 0 AND taken_at < ?
+       AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
+            OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
+       AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at ASC`
+  , [cutoff]);
+  return rows.map(rowToPhoto);
+}
+
 // After the device copy is deleted, the DB row must SURVIVE as the library
 // record of the cloud copy — only the stale local_uri pointer goes (local_id
 // stays so a later restore/re-scan can match the asset again).

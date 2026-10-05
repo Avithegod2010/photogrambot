@@ -62,6 +62,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [pinExists, setPinExists] = useState(false);
   const [decoyExists, setDecoyExists] = useState(false);
   const [storage, setStorage] = useState<StorageSummary | null>(null);
+  const [capDraft, setCapDraft] = useState(String(prefs.overnightCap));
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -97,6 +98,10 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     setAiModelDraft(prefs.aiModel);
     setAiPromptDraft(prefs.aiPrompt);
   }, [prefs.aiModel, prefs.aiPrompt]);
+
+  useEffect(() => {
+    setCapDraft(String(prefs.overnightCap));
+  }, [prefs.overnightCap]);
 
   async function onSyncNow() {
     setSyncing(true);
@@ -281,6 +286,33 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ nearDupGuard: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Overnight catch-up"
+            subtitle="Drain a large backlog in bulk while you sleep: only overnight (10 PM–7 AM), on Wi-Fi, while charging, with a per-night upload cap. Work independently of Auto sync."
+            value={prefs.overnightCatchup}
+            onChange={(v) => void update({ overnightCatchup: v })}
+            theme={theme}
+          />
+          {prefs.overnightCatchup ? (
+            <>
+              <TextField
+                value={capDraft}
+                onChangeText={(t) => setCapDraft(t.replace(/[^0-9]/g, ""))}
+                onEndEditing={() => {
+                  const n = Math.max(1, parseInt(capDraft, 10) || 500);
+                  void update({ overnightCap: n });
+                  setCapDraft(String(n));
+                }}
+                placeholder="Max photos per night (e.g. 500)"
+                keyboardType="numeric"
+                theme={theme}
+              />
+              <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant, marginTop: -4 }]}>
+                Photos queued per night; the next night continues where this one stopped.
+              </Text>
+            </>
+          ) : null}
           <View style={styles.divider} />
           <ToggleRow
             title="Video support (Beta)"
@@ -492,6 +524,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         </Dialog>
 
         <SectionLabel text="Maintenance" theme={theme} />
+        <Card theme={theme}>
+          <ToggleRow
+            title="Screenshot sunset"
+            subtitle="In Free up space, highlight screenshots older than 30 days so old clutter is one tap to clear. Uses the automatic screenshot tagging."
+            value={prefs.screenshotSunset}
+            onChange={(v) => void update({ screenshotSunset: v })}
+            theme={theme}
+          />
+        </Card>
         <Card theme={theme} onPress={() => navigation.navigate("Maintenance")}>
           <View style={styles.folderRow}>
             <View style={{ flex: 1 }}>
@@ -549,6 +590,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             subtitle="Upload an index backup to the channel daily and pin it"
             value={prefs.dbAutoBackup}
             onChange={(v) => void update({ dbAutoBackup: v })}
+            theme={theme}
+          />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Weekly channel digest"
+            subtitle="Post a weekly self-audit to the channel: library totals, queue health and a sampled check that backups are still downloadable. One message per week."
+            value={prefs.weeklyDigest}
+            onChange={(v) => void update({ weeklyDigest: v })}
             theme={theme}
           />
           <View style={styles.divider} />

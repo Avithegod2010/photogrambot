@@ -40,7 +40,10 @@ import { setDecoyActive, isDecoyActive } from "./src/lib/applock";
 import {
   registerBackgroundSync,
   unregisterBackgroundSync,
+  registerOvernightCatchup,
+  unregisterOvernightCatchup,
 } from "./src/lib/background";
+import { maybePostWeeklyDigest } from "./src/lib/digest";
 import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
@@ -298,6 +301,13 @@ export default function App() {
     }
   }, [autoSyncEnabled, step, locked]);
 
+  const overnightCatchup = useSettingsStore((s) => s.prefs.overnightCatchup);
+  useEffect(() => {
+    if (step !== "ready" || locked) return;
+    if (overnightCatchup) void registerOvernightCatchup();
+    else void unregisterOvernightCatchup();
+  }, [overnightCatchup, step, locked]);
+
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
@@ -365,6 +375,11 @@ async function bootstrapBackgroundTasks(): Promise<void> {
           await kvSet("last_auto_backup", String(Date.now()));
         } catch {}
       }
+    }
+    // Weekly channel digest (#6) — cold-start only; a decoy session must not
+    // produce any channel activity.
+    if (prefs.weeklyDigest && !isDecoyActive()) {
+      void maybePostWeeklyDigest();
     }
     useLibraryStore.getState().refreshMeta();
   } finally {

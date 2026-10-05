@@ -91,7 +91,8 @@ export interface ScanResult {
 }
 
 export async function scanAndEnqueueAll(
-  onProgress?: (scanned: number, enqueued: number) => void
+  onProgress?: (scanned: number, enqueued: number) => void,
+  maxNew?: number
 ): Promise<ScanResult> {
   const prefs = await loadPrefs();
   const excluded = new Set(prefs.excludedFolders);
@@ -102,6 +103,10 @@ export async function scanAndEnqueueAll(
   let enqueued = 0;
 
   for (const album of albums) {
+    // Overnight catch-up passes maxNew — once the per-night budget is spent,
+    // stop entirely. The next night continues where this one stopped:
+    // enqueueUploads only enqueues rows that aren't uploaded yet.
+    if (maxNew !== undefined && enqueued >= maxNew) break;
     const title = await album.getTitle();
     if (excluded.has(title)) continue;
     try {
@@ -134,9 +139,15 @@ export async function scanAndEnqueueAll(
         });
       }
       if (items.length > 0) {
-        enqueued += await enqueueUploads(items, "sync");
+        const slice =
+          maxNew !== undefined ? items.slice(0, Math.max(0, maxNew - enqueued)) : items;
+        if (slice.length > 0) {
+          enqueued += await enqueueUploads(slice, "sync");
+        }
       }
-      enqueued += await detectEditedPhotos(assets);
+      if (maxNew === undefined || enqueued < maxNew) {
+        enqueued += await detectEditedPhotos(assets);
+      }
       if (onProgress) onProgress(scanned, enqueued);
     } catch {}
   }
