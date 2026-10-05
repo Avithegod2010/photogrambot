@@ -43,6 +43,8 @@ export interface Prefs {
   screenshotSunset: boolean;
   overnightCatchup: boolean;
   overnightCap: number;
+  useLocalApi: boolean;
+  localApiUrl: string;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -78,6 +80,8 @@ export const defaultPrefs: Prefs = {
   screenshotSunset: true,
   overnightCatchup: false,
   overnightCap: 500,
+  useLocalApi: false,
+  localApiUrl: "",
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",

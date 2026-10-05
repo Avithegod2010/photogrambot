@@ -1,9 +1,70 @@
 import { File, Paths, UploadType } from "expo-file-system";
-import { getBotToken, getChannelId } from "./settings";
+import { getBotToken, getChannelId, loadPrefs } from "./settings";
 
-const API_BASE = "https://api.telegram.org";
+const DEFAULT_API_BASE = "https://api.telegram.org";
 const JSON_TIMEOUT_MS = 60_000;
 const UPLOAD_TIMEOUT_MS = 600_000;
+
+// --- Optional local Bot API server (experimental, feature branch) ---
+//
+// When the owner runs their own telegram-bot-api instance
+// (https://github.com/tdlib/telegram-bot-api --local) and points the app at
+// it, uploads up to 2000 MB pass as single files and getFile serves any size
+// — the 50 MB upload / 20 MB download caps are api.telegram.org policy, not
+// protocol. The base is read from prefs once and cached in memory; the
+// Settings screen invalidates the cache whenever the URL changes.
+//
+// Scope: the DEFAULT bot connection follows this setting. Multi-destination
+// profiles always talk to api.telegram.org (per-profile servers unsupported,
+// same as the widget's default-profile limit). A plain-HTTP LAN server needs
+// android:usesCleartextTraffic in RELEASE builds (expo-build-properties);
+// debug builds already allow cleartext.
+let apiBaseCache: string | null = null;
+
+export function normalizeApiBase(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+export function isValidApiBase(url: string): boolean {
+  return /^https?:\/\/\S+/.test(normalizeApiBase(url));
+}
+
+export async function getApiBase(): Promise<string> {
+  if (apiBaseCache !== null) return apiBaseCache;
+  const prefs = await loadPrefs();
+  const custom = prefs.useLocalApi ? normalizeApiBase(prefs.localApiUrl) : "";
+  apiBaseCache = isValidApiBase(custom) ? custom : DEFAULT_API_BASE;
+  return apiBaseCache;
+}
+
+export function invalidateApiBase(): void {
+  apiBaseCache = null;
+}
+
+export function isDefaultApiBase(url: string): boolean {
+  return normalizeApiBase(url) === DEFAULT_API_BASE;
+}
+
+// Size gates in uploader.ts follow the active server: 50 MB on
+// api.telegram.org, 2000 MB on a local server (its documented upload cap).
+export const LOCAL_API_MAX_UPLOAD_BYTES = 2000 * 1024 * 1024;
+export async function getMaxUploadBytes(): Promise<number> {
+  const base = await getApiBase();
+  return isDefaultApiBase(base) ? 50 * 1024 * 1024 : LOCAL_API_MAX_UPLOAD_BYTES;
+}
+
+// Reachability/credential probe used by the Settings screen before a custom
+// base is saved — deliberately base-scoped so it never touches the cache.
+export async function testApiBase(rawBase: string, token: string): Promise<TgUser> {
+  const base = normalizeApiBase(rawBase);
+  if (!isValidApiBase(base)) throw new TelegramError(0, "URL must start with http:// or https://");
+  const res = await fetchWithTimeout(
+    `${base}/bot${token}/getMe`,
+    { method: "GET" },
+    JSON_TIMEOUT_MS
+  );
+  return parseJsonResponse<TgUser>(res, "getMe");
+}
 
 // React Native fetch has no default timeout — a stalled connection would hang
 // a queue worker forever. Abort manually.
@@ -126,8 +187,9 @@ async function call<T>(
 ): Promise<T> {
   const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
+  const base = await getApiBase();
   const res = await fetchWithTimeout(
-    `${API_BASE}/bot${token}/${method}`,
+    `${base}/bot${token}/${method}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -314,6 +376,7 @@ async function sendFileViaTask(
 ): Promise<TgMessage> {
   const token = file.token ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
+  const apiBase = await getApiBase();
   let gotBytes = false;
   let staged: File | null = null;
   let uploadUri = fileUri;
@@ -334,7 +397,7 @@ async function sendFileViaTask(
       staged = dest;
       uploadUri = dest.uri;
     }
-    const task = new File(uploadUri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
+    const task = new File(uploadUri).createUploadTask(`${apiBase}/bot${token}/${method}`, {
       uploadType: UploadType.MULTIPART,
       fieldName,
       mimeType: file.mime,
@@ -380,7 +443,7 @@ async function sendFileViaTask(
       fallbackFile = new File(Paths.cache, `pb_fallback_${Date.now()}_${file.filename}`);
       if (fallbackFile.exists) fallbackFile.delete();
       await new File(uploadUri).copy(fallbackFile);
-      const task = new File(fallbackFile.uri).createUploadTask(`${API_BASE}/bot${token}/${method}`, {
+      const task = new File(fallbackFile.uri).createUploadTask(`${apiBase}/bot${token}/${method}`, {
         uploadType: UploadType.MULTIPART,
         fieldName,
         mimeType: file.mime,
@@ -446,7 +509,7 @@ async function uploadForm(
   const token = tokenOverride ?? (await getBotToken());
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const res = await fetchWithTimeout(
-    `${API_BASE}/bot${token}/${method}`,
+    `${await getApiBase()}/bot${token}/${method}`,
     {
       method: "POST",
       body: form,
@@ -509,7 +572,7 @@ export async function sendMediaGroup(
   });
   try {
     const res = await fetchWithTimeout(
-      `${API_BASE}/bot${token}/sendMediaGroup`,
+      `${await getApiBase()}/bot${token}/sendMediaGroup`,
       {
         method: "POST",
         body: form,
@@ -577,7 +640,7 @@ export async function getUpdates(offset: number, timeout = 0): Promise<TgUpdate[
   const token = await getBotToken();
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const url =
-    `${API_BASE}/bot${token}/getUpdates?offset=${offset}&timeout=${timeout}` +
+    `${await getApiBase()}/bot${token}/getUpdates?offset=${offset}&timeout=${timeout}` +
     `&allowed_updates=${encodeURIComponent(JSON.stringify(["channel_post", "message"]))}`;
   const res = await fetchWithTimeout(
     url,
@@ -596,7 +659,10 @@ export async function downloadFile(
   if (!token) throw new TelegramError(401, "Bot token not configured");
   const info = await getFile(fileId, token);
   if (!info.file_path) throw new TelegramError(400, "No file_path returned by Telegram");
-  const url = `${API_BASE}/file/bot${token}/${info.file_path}`;
+  // api.telegram.org returns a relative file_path; a --local bot-api server
+  // returns an absolute path (leading "/"), so the join must not double it.
+  const filePath = info.file_path.startsWith("/") ? info.file_path : `/${info.file_path}`;
+  const url = `${await getApiBase()}/file/bot${token}${filePath}`;
   const dest = new File(destUri);
   if (dest.exists) dest.delete();
   await File.downloadFileAsync(url, dest, { idempotent: true });

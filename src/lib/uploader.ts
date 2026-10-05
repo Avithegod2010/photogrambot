@@ -30,6 +30,7 @@ import {
   sendVideo,
   sendMediaGroup,
   createForumTopic,
+  getMaxUploadBytes,
   TelegramError,
   TgMessage,
 } from "./telegram";
@@ -48,6 +49,9 @@ import {
   type Destination,
 } from "./destinations";
 
+// Kept as the named default for documentation/tests — the live gates call
+// getMaxUploadBytes() so they follow the active Bot API server (50 MB on
+// api.telegram.org, 2000 MB on a local server).
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_RETRIES = 5;
 const UPLOAD_CONCURRENCY = 2;
@@ -486,9 +490,11 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
     }
     const actualSize = file.size;
     const looksLikeVideo = isVideoMime(guessMime(item.filename));
-    if (actualSize > MAX_UPLOAD_BYTES && !looksLikeVideo) {
-      await updateQueueItem(item.id, { state: "skipped", error: "Photo larger than 50 MB" });
-      await updatePhoto(photoId, { status: "skipped_too_large", error: "Photo larger than 50 MB" });
+    const maxUpload = await getMaxUploadBytes();
+    if (actualSize > maxUpload && !looksLikeVideo) {
+      const limit = Math.round(maxUpload / (1024 * 1024));
+      await updateQueueItem(item.id, { state: "skipped", error: `Photo larger than ${limit} MB` });
+      await updatePhoto(photoId, { status: "skipped_too_large", error: `Photo larger than ${limit} MB` });
       return "skipped";
     }
 
@@ -789,8 +795,10 @@ async function uploadVersionItem(
       await updateQueueItem(item.id, { state: "failed", error: "File missing on device" });
       return "failed";
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      await updateQueueItem(item.id, { state: "skipped", error: "Edited photo larger than 50 MB" });
+    const versionMax = await getMaxUploadBytes();
+    if (file.size > versionMax) {
+      const limit = Math.round(versionMax / (1024 * 1024));
+      await updateQueueItem(item.id, { state: "skipped", error: `Edited photo larger than ${limit} MB` });
       return "skipped";
     }
     if (isVideoMime(guessMime(item.filename))) {
@@ -999,9 +1007,11 @@ async function uploadVideoItem(
     let partsJson: string | null = null;
     let thumbOverride: string | null = null;
     let message: TgMessage | null = null;
-    if (fileSize > MAX_UPLOAD_BYTES) {
+    if (fileSize > (await getMaxUploadBytes())) {
       // Too large for one Bot API message — split into reassemblable parts.
-      // Persist partial progress so a retry resumes instead of re-uploading.
+      // On a local Bot API server the gate is 2000 MB, so this path only runs
+      // for genuinely huge videos. Persist partial progress so a retry
+      // resumes instead of re-uploading.
       const existing = await getPhoto(photoId);
       const resumeParts = parsePartsJson(existing?.parts ?? null);
       const result = await splitAndUploadVideo(channelId, item.local_uri, {

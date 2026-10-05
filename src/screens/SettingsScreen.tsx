@@ -25,8 +25,15 @@ import {
   setAiApiKey,
   getBackupPassphrase,
   setBackupPassphrase,
+  getBotToken,
   DEFAULT_AI_PROMPT,
 } from "../lib/settings";
+import {
+  testApiBase,
+  invalidateApiBase,
+  isValidApiBase,
+  normalizeApiBase,
+} from "../lib/telegram";
 import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
 import {
   getBreakInLog,
@@ -70,6 +77,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [breakInEvents, setBreakInEvents] = useState<BreakInEvent[] | null>(null);
   const [storage, setStorage] = useState<StorageSummary | null>(null);
   const [capDraft, setCapDraft] = useState(String(prefs.overnightCap));
+  const [localApiDraft, setLocalApiDraft] = useState(prefs.localApiUrl);
+  const [localApiStatus, setLocalApiStatus] = useState<string | null>(null);
+  const [localApiTesting, setLocalApiTesting] = useState(false);
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -111,6 +121,10 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     setCapDraft(String(prefs.overnightCap));
   }, [prefs.overnightCap]);
 
+  useEffect(() => {
+    setLocalApiDraft(prefs.localApiUrl);
+  }, [prefs.localApiUrl]);
+
   async function onSyncNow() {
     setSyncing(true);
     setSyncStatus("Scanning gallery…");
@@ -126,6 +140,34 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
       setSyncStatus(`Sync failed: ${e?.message ?? "unknown error"}`);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function onSaveLocalApi() {
+    const base = normalizeApiBase(localApiDraft);
+    if (!isValidApiBase(base)) {
+      setLocalApiStatus("URL must start with http:// or https://");
+      return;
+    }
+    setLocalApiTesting(true);
+    setLocalApiStatus(null);
+    try {
+      const token = await getBotToken();
+      if (!token) {
+        setLocalApiStatus("No bot token configured — finish the bot setup first.");
+        return;
+      }
+      // Only a reachable server that accepts THIS bot's token is saved.
+      const me = await testApiBase(base, token);
+      await update({ localApiUrl: base, useLocalApi: true });
+      invalidateApiBase();
+      setLocalApiStatus(
+        `Connected as @${me.username ?? me.first_name} — the 50 MB / 20 MB public limits no longer apply.`
+      );
+    } catch (e: any) {
+      setLocalApiStatus(`Test failed: ${e?.message ?? "unknown error"} — nothing saved.`);
+    } finally {
+      setLocalApiTesting(false);
     }
   }
 
@@ -227,6 +269,47 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               ])
             }
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Local Bot API server (advanced)"
+            subtitle="Upload and download through your own telegram-bot-api server instead of Telegram's — removes the 50 MB upload / 20 MB download limits. You run the server yourself; experimental."
+            value={prefs.useLocalApi}
+            onChange={(v) => {
+              invalidateApiBase();
+              void update({ useLocalApi: v });
+            }}
+            theme={theme}
+          />
+          {prefs.useLocalApi ? (
+            <>
+              <TextField
+                value={localApiDraft}
+                onChangeText={setLocalApiDraft}
+                placeholder="http://192.168.1.10:8080"
+                theme={theme}
+              />
+              <View style={{ height: 8 }} />
+              <Button
+                title="Test & save"
+                theme={theme}
+                busy={localApiTesting}
+                onPress={() => void onSaveLocalApi()}
+              />
+              <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant }]}>
+                {prefs.localApiUrl
+                  ? `Active server: ${prefs.localApiUrl}`
+                  : "Not configured — api.telegram.org is used until a server is saved."}
+              </Text>
+              {localApiStatus ? (
+                <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant, marginTop: -4 }]}>
+                  {localApiStatus}
+                </Text>
+              ) : null}
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+                Plain-HTTP LAN addresses work in development builds; release builds need cleartext traffic enabled.
+              </Text>
+            </>
+          ) : null}
         </Card>
 
         <SectionLabel text="Backup & sync" theme={theme} />

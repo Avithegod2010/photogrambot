@@ -1,5 +1,25 @@
 # PhotogramBot — Agent Ownership Rules
 
+> **BRANCH NOTE — `feature/local-bot-api` (worktree at `..\photogram-bot-localapi`, 2026-10-06):**
+> This branch adds idea **#1 — optional local Bot API server mode** on top of `main` (`5515406`).
+> Everything here is experimental and deletable: if the owner rejects the feature, delete the
+> branch (`git worktree remove ../photogram-bot-localapi && git branch -D feature/local-bot-api`)
+> and main is untouched. What it adds:
+> - `settings.ts`: `useLocalApi` (default OFF) + `localApiUrl` prefs.
+> - `telegram.ts`: `getApiBase()` (cached pref-driven base, `invalidateApiBase()` on change),
+>   `testApiBase()` probe, `getMaxUploadBytes()` (50 MB public / 2000 MB local); every call site
+>   (call, sendFileViaTask ×2, uploadForm, sendMediaGroup, getUpdates, downloadFile) now resolves
+>   the base dynamically; `downloadFile` joins local-server absolute `file_path`s without
+>   double-slashing.
+> - `uploader.ts`: the three size gates (photo, version, video-split decision) use
+>   `getMaxUploadBytes()` — on a local server a ≤2000 MB video uploads as ONE file, no vsplit.
+> - `SettingsScreen`: Bot configuration card → "Local Bot API server (advanced)" toggle + URL
+>   field + Test & save (saves only after `getMe` succeeds against that base).
+> - Known limits: multi-destination profiles always use api.telegram.org; a plain-HTTP LAN server
+>   needs `usesCleartextTraffic` in RELEASE builds (expo-build-properties, NOT added here — debug
+>   builds already allow cleartext); NOT device-verified (no server/device in this session).
+> - Harness: `.tmp-harness/localapi-harness.mjs` (8/8); tsc clean.
+
 This repository is **PhotogramBot**, the Telegram Bot API version.
 
 - **Engine**: Bot API via `api.telegram.org` — bot token + channel id configured in-app
