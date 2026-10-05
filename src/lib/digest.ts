@@ -14,6 +14,7 @@ import { sendMessage } from "./telegram";
 import { getChannelId } from "./settings";
 import { verifyBackupSample } from "./maintenance";
 import { formatBytes } from "./format";
+import { logDiag } from "./diaglog";
 
 const LAST_DIGEST_AT = "last_digest_at";
 const LAST_DIGEST_UPLOADED = "last_digest_uploaded";
@@ -50,8 +51,9 @@ export async function maybePostWeeklyDigest(): Promise<void> {
         if (r.enqueued > 0) void processQueue();
       } catch {}
     }
-  } catch {
-    // The digest must never break the bootstrap pass.
+  } catch (e: any) {
+    // The digest must never break the bootstrap pass — but record why.
+    void logDiag("digest", `Weekly digest failed: ${e?.message ?? e}`);
   }
 }
 

@@ -6,6 +6,7 @@ import { isVideoMime } from "./format";
 import { enqueueUploads, enqueueVersionUpload, processQueue } from "./uploader";
 import { isRemotePaused } from "./remote";
 import { isStorageCritical } from "./storage";
+import { logDiag } from "./diaglog";
 import { getPhotosByLocalIds, updatePhoto, type PhotoRow } from "./db";
 import { hashFileCached } from "./hash";
 
@@ -154,7 +155,9 @@ export async function scanAndEnqueueAll(
         enqueued += await detectEditedPhotos(assets);
       }
       if (onProgress) onProgress(scanned, enqueued);
-    } catch {}
+    } catch (e: any) {
+      void logDiag("sync", `Scan failed for album "${title}": ${e?.message ?? e}`);
+    }
   }
 
   await savePrefs({ lastFullSyncAt: Date.now() });
@@ -199,7 +202,9 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
         "sync"
       );
       enqueued += await detectEditedPhotos(assets);
-    } catch {}
+    } catch (e: any) {
+      void logDiag("sync", `Recent scan failed for album "${title}": ${e?.message ?? e}`);
+    }
   }
   return enqueued;
 }

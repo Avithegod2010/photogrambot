@@ -15,7 +15,10 @@ import { downloadFile } from "./telegram";
 import { tokenForPhoto } from "./destinations";
 
 const BOT_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
-const MAX_ARCHIVE_BYTES = 500 * 1024 * 1024;
+// JSZip builds the archive in RAM (input entries + serialized output both
+// live on the JS heap simultaneously) — 100 MB is the honest ceiling before
+// Hermes' heap starts OOM-killing the app on mid-range phones.
+const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 
 export interface ZipExportProgress {
   downloaded: number;
