@@ -35,6 +35,8 @@ import {
   DEFAULT_AI_PROMPT,
 } from "../lib/settings";
 import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
+import { exportMonthZip } from "../lib/zipexport";
+import { getUploadedPhotosInMonth } from "../lib/db";
 import {
   getBreakInLog,
   clearBreakInLog,
@@ -79,6 +81,10 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [capDraft, setCapDraft] = useState(String(prefs.overnightCap));
   const [freeBytes, setFreeBytes] = useState<number | null>(null);
   const [thumbBytes, setThumbBytes] = useState<number | null>(null);
+  const [zipDialog, setZipDialog] = useState(false);
+  const [zipMonths, setZipMonths] = useState<{ label: string; year: number; month: number }[]>([]);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipNote, setZipNote] = useState<string | null>(null);
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -104,6 +110,61 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   async function onClearThumbCache() {
     await pruneThumbCache();
     setThumbBytes(await thumbCacheBytes());
+  }
+
+  const MONTH_LABELS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+
+  async function openZipDialog() {
+    const now = new Date();
+    const months: { label: string; year: number; month: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      try {
+        const rows = await getUploadedPhotosInMonth(d.getFullYear(), d.getMonth());
+        if (rows.length > 0) {
+          months.push({
+            label: `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()} · ${rows.length} photos`,
+            year: d.getFullYear(),
+            month: d.getMonth(),
+          });
+        }
+      } catch {}
+      if (months.length >= 8) break;
+    }
+    if (months.length === 0) {
+      Alert.alert("Nothing to export", "No backed-up photos in the last 12 months.");
+      return;
+    }
+    setZipMonths(months);
+    setZipDialog(true);
+  }
+
+  async function runZipExport(year: number, month: number) {
+    if (zipBusy) return;
+    setZipBusy(true);
+    setZipNote("Preparing…");
+    try {
+      const r = await exportMonthZip(year, month, (p) =>
+        setZipNote(p.currentFile ? `Downloading ${p.downloaded + 1}/${p.total} — ${p.currentFile}` : "Packing archive…")
+      );
+      setZipDialog(false);
+      const skipped =
+        r.skippedOversize > 0 || r.skippedCap > 0
+          ? ` Skipped: ${r.skippedOversize} over the bot's 20 MB download limit, ${r.skippedCap} beyond the 500 MB archive cap.`
+          : "";
+      Alert.alert(
+        "Export shared",
+        `${r.count} photos (${formatBytes(r.bytes)}) from ${MONTH_LABELS[month]} ${year} were zipped and handed to the Android share sheet.${skipped}`
+      );
+    } catch (e: any) {
+      Alert.alert("Export failed", e?.message ?? "Unknown error");
+    } finally {
+      setZipBusy(false);
+      setZipNote(null);
+    }
   }
 
   useEffect(() => {
@@ -613,6 +674,19 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
           </View>
         </Card>
+        <Card theme={theme} onPress={() => void openZipDialog()}>
+          <View style={styles.folderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                Export month as ZIP
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                Bundle one month's originals into a single archive and share it
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+          </View>
+        </Card>
 
         <SectionLabel text="Database" theme={theme} />
         <Card theme={theme}>
@@ -817,6 +891,40 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             <Button title="Close" theme={theme} onPress={() => setBreakInEvents(null)} />
           </View>
         )}
+      </Dialog>
+
+      <Dialog
+        visible={zipDialog}
+        theme={theme}
+        title="Export month as ZIP"
+        message="Pick a month — its backed-up originals are downloaded, zipped (up to 500 MB per archive) and handed to the share sheet."
+      >
+        {zipNote ? (
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 8 }}>
+            {zipNote}
+          </Text>
+        ) : null}
+        <View style={{ maxHeight: 300 }}>
+          <ScrollView nestedScrollEnabled>
+            {zipMonths.map((m) => (
+              <Pressable
+                key={`${m.year}-${m.month}`}
+                disabled={zipBusy}
+                onPress={() => void runZipExport(m.year, m.month)}
+                style={({ pressed }) => [
+                  styles.destRow,
+                  { opacity: zipBusy ? 0.5 : pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Text style={{ color: theme.colors.onSurface, fontSize: 14 }}>{m.label}</Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 14 }}>
+          <Button title="Close" variant="text" theme={theme} disabled={zipBusy} onPress={() => setZipDialog(false)} />
+        </View>
       </Dialog>
 
       {busyLabel ? (
