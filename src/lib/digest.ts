@@ -33,18 +33,32 @@ export async function maybePostWeeklyDigest(): Promise<void> {
     // Verification hits the network with spacing between calls — keep it out
     // of the critical path ordering but awaited so a killed app mid-check
     // can't double-post (the timestamp is only written after the send).
-    const text = await buildDigestText();
+    const { text, broken } = await buildDigestText();
     const ok = await sendMessage(channelId, text);
     if (!ok) return;
     await kvSet(LAST_DIGEST_AT, String(Date.now()));
     const s = await getStats();
     await kvSet(LAST_DIGEST_UPLOADED, String(s.uploaded));
+    // Self-repair (#2): anything the sample found broken that still has a
+    // local copy is re-uploaded automatically. Best-effort — failures land in
+    // the normal failed queue.
+    if (broken.length > 0) {
+      try {
+        const { repairBrokenUploads } = await import("./maintenance");
+        const { processQueue } = await import("./uploader");
+        const r = await repairBrokenUploads(broken);
+        if (r.enqueued > 0) void processQueue();
+      } catch {}
+    }
   } catch {
     // The digest must never break the bootstrap pass.
   }
 }
 
-async function buildDigestText(): Promise<string> {
+async function buildDigestText(): Promise<{
+  text: string;
+  broken: { id: string; filename: string }[];
+}> {
   const s = await getStats();
   const lines: string[] = [];
   lines.push(`PhotogramBot weekly digest — ${new Date().toISOString().slice(0, 10)}`);
@@ -60,12 +74,14 @@ async function buildDigestText(): Promise<string> {
   lines.push(`Trash: ${s.trashed}`);
   if (s.failed > 0) lines.push(`Action needed: retry failed uploads from Maintenance.`);
   let verifyLine = "Verification: skipped (no uploaded photos yet)";
+  let verifyBroken: { id: string; filename: string }[] = [];
   try {
     if (s.uploaded > 0) {
       const v = await verifyBackupSample(DIGEST_VERIFY_SAMPLE);
+      verifyBroken = v.broken;
       verifyLine = v.broken.length === 0
         ? `Verification: ${v.checked} sampled uploads OK`
-        : `Verification: ${v.broken.length}/${v.checked} sampled uploads UNREACHABLE — run the full check in Maintenance`;
+        : `Verification: ${v.broken.length}/${v.checked} sampled uploads UNREACHABLE — auto-repair will be attempted, or run the full check in Maintenance`;
     }
   } catch {}
   lines.push(verifyLine);
@@ -77,5 +93,5 @@ async function buildDigestText(): Promise<string> {
       );
     }
   } catch {}
-  return lines.join("\n");
+  return { text: lines.join("\n"), broken: verifyBroken };
 }

@@ -9,6 +9,7 @@ import {
   checkIntegrity,
   removeBrokenPhotos,
   verifyBackupSample,
+  repairBrokenUploads,
   scanNearDuplicates,
   autoTagBackfill,
   type DuplicateGroup,
@@ -54,6 +55,8 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [verifyRunning, setVerifyRunning] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<VerificationProgress | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerificationResult | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairNote, setRepairNote] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
@@ -122,6 +125,37 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       setVerifyError(e?.message ?? "Verification failed — try again.");
     } finally {
       setVerifyRunning(false);
+    }
+  }
+
+  async function runRepair() {
+    if (!verifyResult || verifyResult.broken.length === 0) return;
+    setRepairing(true);
+    setRepairNote(null);
+    try {
+      const r = await repairBrokenUploads(verifyResult.broken, (done, total, current) =>
+        setRepairNote(current ? `Repairing ${done + 1}/${total} — ${current}` : `Checked ${done}/${total}`)
+      );
+      if (r.enqueued > 0) {
+        void processQueue();
+        Alert.alert(
+          "Repair queued",
+          `${r.enqueued} photo${r.enqueued === 1 ? "" : "s"} queued for re-upload` +
+            (r.skipped > 0 ? `; ${r.skipped} skipped (no local copy on this device)` : "") +
+            ". The replaced channel messages are cleaned up once the fresh copies land."
+        );
+        setVerifyResult(null);
+      } else {
+        Alert.alert(
+          "Nothing repairable",
+          "None of the broken photos have a local copy to re-upload from. They can only be re-saved by opening them in the Telegram app."
+        );
+      }
+    } catch (e: any) {
+      Alert.alert("Repair failed", e?.message ?? "Unknown error");
+    } finally {
+      setRepairing(false);
+      setRepairNote(null);
     }
   }
 
@@ -561,6 +595,23 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                     <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, marginTop: 4 }}>
                       Verified {formatDate(verifyResult.sampledAt)}
                     </Text>
+                  ) : null}
+                  {verifyResult.broken.length > 0 ? (
+                    <>
+                      <Button
+                        title="Repair from local copies"
+                        theme={theme}
+                        variant="outlined"
+                        busy={repairing}
+                        onPress={runRepair}
+                        style={{ marginTop: 12 }}
+                      />
+                      {repairNote ? (
+                        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 6 }}>
+                          {repairNote}
+                        </Text>
+                      ) : null}
+                    </>
                   ) : null}
                   {verifyResult.broken.length > 0 ? (
                     <Button

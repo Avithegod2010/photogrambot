@@ -11,6 +11,9 @@
 //   /resume          — release the pause, then one scan
 //   /delete          — REPLY to a backed-up photo's message → trashes it
 //                      locally and deletes the channel message
+//   /find <words>    — search the backed-up library, list top 5 matches
+//   /restore         — REPLY to a backed-up photo's message → downloads the
+//                      original back onto this phone
 //   /wipe            — arm the local wipe; /wipe confirm within 5 minutes
 //                      erases every backed-up photo's LOCAL copy from this
 //                      device (anti-theft: channel archive survives). Two-step
@@ -32,7 +35,7 @@ import {
 } from "./db";
 import { sendMessage, deleteMessage, type TgMessage } from "./telegram";
 import { tokenForPhoto } from "./destinations";
-import { formatBytes } from "./format";
+import { formatBytes, formatDate } from "./format";
 
 const PAUSE_KEY = "remote_paused";
 const WIPE_ARM_KEY = "wipe_armed_at";
@@ -80,7 +83,11 @@ export async function handleRemoteCommand(
   const text = (msg.text ?? "").trim();
   if (!text.startsWith("/")) return false;
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
-  if (!["/status", "/sync", "/pause", "/resume", "/delete", "/wipe"].includes(cmd)) {
+  if (
+    !["/status", "/sync", "/pause", "/resume", "/delete", "/find", "/restore", "/wipe"].includes(
+      cmd
+    )
+  ) {
     return false; // unknown slash command — not ours; let ingestion proceed
   }
 
@@ -111,6 +118,64 @@ export async function handleRemoteCommand(
       `Sync complete: ${r.scanned} photos scanned, ${r.enqueued} new queued.`,
       { replyToMessageId: msg.message_id }
     );
+  } else if (cmd === "/find") {
+    const query = text.split(/\s+/).slice(1).join(" ").trim();
+    if (!query) {
+      await sendMessage(chatId, "Usage: /find <words> — searches your backed-up library.", {
+        replyToMessageId: msg.message_id,
+      });
+      return true;
+    }
+    try {
+      const { searchPhotos } = await import("./db");
+      const results = await searchPhotos(query, undefined, 5);
+      if (results.length === 0) {
+        await sendMessage(chatId, `No matches for "${query}".`, {
+          replyToMessageId: msg.message_id,
+        });
+        return true;
+      }
+      const lines = results.map((p) => `• ${p.filename} — ${formatDate(p.taken_at)}`);
+      lines.push("Reply /restore to a photo's backup message to save the original to this phone.");
+      await sendMessage(chatId, `Top ${results.length} matches:\n${lines.join("\n")}`, {
+        replyToMessageId: msg.message_id,
+      });
+    } catch (e: any) {
+      await sendMessage(chatId, `Search failed: ${e?.message ?? "unknown error"}`, {
+        replyToMessageId: msg.message_id,
+      });
+    }
+  } else if (cmd === "/restore") {
+    const target = msg.reply_to_message;
+    if (!target) {
+      await sendMessage(
+        chatId,
+        "Reply /restore to a backed-up photo's message to save the original back onto this phone.",
+        { replyToMessageId: msg.message_id }
+      );
+      return true;
+    }
+    const photo = await getPhotoByMessageId(target.message_id);
+    if (!photo) {
+      await sendMessage(chatId, "That message isn't a backed-up photo this app manages.", {
+        replyToMessageId: msg.message_id,
+      });
+      return true;
+    }
+    try {
+      const { savePhotoToDevice } = await import("./restore");
+      await savePhotoToDevice(photo);
+      await sendMessage(chatId, `Saved "${photo.filename}" to your gallery.`, {
+        replyToMessageId: msg.message_id,
+      });
+    } catch (e: any) {
+      // Includes the friendly oversize message for >20 MB originals.
+      await sendMessage(
+        chatId,
+        `Restore failed: ${e?.message ?? "unknown error"}. Open the item in the Telegram app if the bot can't download it.`,
+        { replyToMessageId: msg.message_id }
+      );
+    }
   } else if (cmd === "/wipe") {
     const arg = text.split(/\s+/).slice(1)[0]?.toLowerCase();
     if (arg !== "confirm") {

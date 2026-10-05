@@ -5,6 +5,7 @@ import * as Battery from "expo-battery";
 import { loadPrefs } from "./settings";
 import { canAutoSyncNow, scanAndEnqueueAll, scanRecentAndEnqueue } from "./sync";
 import { isRemotePaused } from "./remote";
+import { isStorageCritical } from "./storage";
 import { processQueue } from "./uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./db";
 
@@ -85,6 +86,8 @@ TaskManager.defineTask(OVERNIGHT_CATCHUP_TASK, async () => {
     }
     // Remote /pause holds overnight work too — one gate for all automation.
     if (await isRemotePaused()) return BackgroundTask.BackgroundTaskResult.Success;
+    // Low-storage guard — bulk scans write previews and staging copies.
+    if (await isStorageCritical()) return BackgroundTask.BackgroundTaskResult.Success;
     try {
       const state = await Network.getNetworkStateAsync();
       if (

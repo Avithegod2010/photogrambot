@@ -5,6 +5,7 @@ import { loadPrefs, savePrefs, type Prefs } from "./settings";
 import { isVideoMime } from "./format";
 import { enqueueUploads, enqueueVersionUpload, processQueue } from "./uploader";
 import { isRemotePaused } from "./remote";
+import { isStorageCritical } from "./storage";
 import { getPhotosByLocalIds, updatePhoto, type PhotoRow } from "./db";
 import { hashFileCached } from "./hash";
 
@@ -37,6 +38,10 @@ export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
   // /pause from the channel (remote.ts) is the cheapest gate — check it first
   // so a paused device never even touches the network/battery probes.
   if (await isRemotePaused()) return false;
+  // Low-storage guard (storage.ts): automatic work stops below the critical
+  // threshold — a full disk turns uploads/preview writes into silent failures.
+  // Manual syncs never hit this path.
+  if (await isStorageCritical()) return false;
   try {
     const state = await Network.getNetworkStateAsync();
     if (!state.isConnected) return false;

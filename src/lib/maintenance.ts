@@ -8,6 +8,8 @@ import {
   setPhashBatch,
   getWipeLocalCandidates,
   clearLocalUris,
+  getPhoto,
+  enqueueUpload,
   type PhotoRow,
   type DuplicateGroup,
 } from "./db";
@@ -378,6 +380,66 @@ export async function wipeLocalCopies(
   await clearLocalUris(goneIds);
   onProgress?.(deletable.length, deletable.length);
   return { deleted, freedBytes, kept };
+}
+
+// --- Self-repair (#2, R27) ---
+
+export interface RepairResult {
+  enqueued: number;
+  skipped: number;
+}
+
+// Re-enqueues broken uploads (from verification or the weekly digest) whose
+// local file still exists. The queue row is upload_type='repair', which makes
+// uploadQueueItem bypass the hash-duplicate short-circuit (the hash matches
+// the broken row by definition) and delete the replaced channel messages
+// after success. Rows without a local copy are skipped — they can only be
+// re-saved via the Telegram app.
+export async function repairBrokenUploads(
+  broken: { id: string; filename: string }[],
+  onProgress?: (done: number, total: number, current: string | null) => void
+): Promise<RepairResult> {
+  let enqueued = 0;
+  let skipped = 0;
+  for (let i = 0; i < broken.length; i++) {
+    const b = broken[i];
+    onProgress?.(i, broken.length, b.filename);
+    try {
+      const row = await getPhoto(b.id);
+      if (!row || !row.local_id || !row.local_uri) {
+        skipped++;
+        continue;
+      }
+      if (!new File(row.local_uri).exists) {
+        skipped++;
+        continue;
+      }
+      const created = await enqueueUpload({
+        local_id: row.local_id,
+        local_uri: row.local_uri,
+        filename: row.filename,
+        folder: row.folder,
+        size: row.size,
+        taken_at: row.taken_at,
+        added_at: row.added_at,
+        content_hash: row.content_hash,
+        upload_type: "repair",
+      });
+      if (created > 0) {
+        enqueued++;
+        // Mark honestly: the cloud copy is broken and a repair is in flight.
+        // A completed repair flips this back to 'uploaded' with fresh ids.
+        await updatePhoto(row.id, { status: "failed", error: "Re-uploading (self-repair)" });
+      } else {
+        // An active queue row for this asset already exists (uq_queue_active_local).
+        skipped++;
+      }
+    } catch {
+      skipped++;
+    }
+  }
+  onProgress?.(broken.length, broken.length, null);
+  return { enqueued, skipped };
 }
 
 // --- Auto-tag backfill (filename/mime classification) ---
