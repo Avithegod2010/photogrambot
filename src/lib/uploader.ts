@@ -39,6 +39,8 @@ import { generatePreview, getAssetMeta, guessMime, buildTags } from "./media";
 import { hashFileCached } from "./hash";
 import { computePhotoPhash } from "./maintenance";
 import { hammingHex } from "./phash";
+import { classifyAutoTags } from "./autotags";
+import { extractMotionVideo } from "./motion";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo, type VideoPart } from "./vsplit";
 import { notifyUploadProgress, notifyUploadComplete, notifyUploadsFailed } from "./notify";
@@ -140,6 +142,17 @@ export interface LocalAssetRef {
   added_at: number;
 }
 
+// Upload priority lanes (R27): camera shots go first, screenshots/screen
+// recordings go last, everything else in between. Manual share-target
+// uploads always jump ahead of any lane at dequeue time.
+function uploadPriorityFor(filename: string, folder: string | null): number {
+  const tags = classifyAutoTags(filename, null);
+  if (tags.includes("screenshot") || tags.includes("screenrec")) return 2;
+  const f = (folder ?? "").trim().toLowerCase();
+  if (f === "camera" || f === "dcim" || f.startsWith("dcim")) return 0;
+  return 1;
+}
+
 export async function enqueueUploads(
   items: LocalAssetRef[],
   uploadType: "manual" | "sync",
@@ -175,6 +188,7 @@ export async function enqueueUploads(
       content_hash: null,
       upload_type: uploadType,
       profile_id: pid,
+      priority: uploadPriorityFor(item.filename, item.folder),
     });
     if (queueId > 0) {
       await insertPhoto({
@@ -726,6 +740,42 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
     }
 
     const doc = message.document;
+
+    // Motion-photo companion (#7): Google/Samsung motion JPEGs carry a short
+    // MP4 after the image data. Upload it as a reply to the photo so the pair
+    // stays together in the channel; the photo row records the clip's ids.
+    let motionFileId: string | null = null;
+    let motionMessageId: number | null = null;
+    if (mime === "image/jpeg" && !looksLikeVideo && item.upload_type !== "version") {
+      let motion: { uri: string; size: number } | null = null;
+      try {
+        motion = await extractMotionVideo(item.local_uri);
+      } catch {
+        motion = null;
+      }
+      if (motion) {
+        try {
+          const motionName = `${item.filename.replace(/\.[^.]+$/, "")}_motion.mp4`;
+          const m = await sendDocument(channelId, motion.uri, {
+            caption: `${motionName} #motion`,
+            filename: motionName,
+            mime: "video/mp4",
+            replyToMessageId: message.message_id,
+            token,
+          });
+          motionFileId = m.document?.file_id ?? null;
+          motionMessageId = m.message_id ?? null;
+        } catch {
+          // The still photo is already backed up — a failed companion upload
+          // must not fail the whole item.
+        } finally {
+          try {
+            new File(motion.uri).delete();
+          } catch {}
+        }
+      }
+    }
+
     await updatePhoto(photoId, {
       status: "uploaded",
       remote_file_id: doc?.file_id ?? null,
@@ -733,6 +783,8 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       preview_file_id: previewFileId,
       message_id: message.message_id,
       preview_message_id: previewMessageId,
+      motion_file_id: motionFileId,
+      motion_message_id: motionMessageId,
       uploaded_at: Date.now(),
       content_hash: hash,
       device: deviceId,

@@ -135,6 +135,8 @@ export async function getLocalPhotosInRange(
     upload_type: null,
     phash: null,
     asset_mtime: null,
+    motion_file_id: null,
+    motion_message_id: null,
   }));
 }
 

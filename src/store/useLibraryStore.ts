@@ -6,6 +6,7 @@ import {
   getAlbumPhotos,
   getTrashItems,
   setFavorite,
+  prioritizeQueueForPhoto,
   addToTrash,
   restoreFromTrash,
   markTrashRemoteDeleted,
@@ -121,6 +122,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   toggleFavorite: async (photo) => {
     const next = !photo.favorite;
     await setFavorite(photo.id, next);
+    // Upload priority lanes: a favorited photo that hasn't landed in the
+    // channel yet jumps the pending queue (matters most during overnight
+    // catch-up of a big backlog).
+    if (next && photo.local_id) {
+      try {
+        await prioritizeQueueForPhoto(photo.local_id);
+      } catch {}
+    }
     const channelId = await getChannelId();
     const token = await tokenForPhoto(photo);
     if (next && channelId && photo.message_id) {

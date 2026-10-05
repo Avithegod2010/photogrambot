@@ -78,6 +78,29 @@ export async function savePhotoToDevice(photo: PhotoRow): Promise<void> {
   }
 }
 
+// Saves a motion photo's embedded companion clip (#7) back to the gallery as
+// a video. Same download limits as stills — clips are small, but the guard
+// keeps the friendly error for anything over the bot's 20 MB reach.
+export async function saveMotionClip(photo: PhotoRow): Promise<void> {
+  if (!photo.motion_file_id) throw new Error("This photo has no motion clip");
+  if ((photo.size ?? 0) > BOT_DOWNLOAD_LIMIT) {
+    throw new Error(
+      "Telegram bots can only download files up to 20 MB — open this item in the Telegram app to save the original"
+    );
+  }
+  await ensureSavePermission();
+  const dest = new File(Paths.cache, `pb_motion_${Date.now()}_${safeName(photo.filename)}.mp4`);
+  try {
+    const token = await tokenForPhoto(photo);
+    await downloadFile(photo.motion_file_id, dest.uri, token ?? undefined);
+    await MediaLibrary.Asset.create(dest.uri);
+  } finally {
+    try {
+      if (dest.exists) dest.delete();
+    } catch {}
+  }
+}
+
 export interface RestoreProgress {
   done: number;
   total: number;
