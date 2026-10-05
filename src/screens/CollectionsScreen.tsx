@@ -23,6 +23,7 @@ import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { unlockHiddenAlbum } from "../lib/biometrics";
+import { restorePhotosToDevice } from "../lib/restore";
 import { isDecoyActive } from "../lib/applock";
 import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
 import { formatSearchFilterSummary } from "../lib/filterSummary";
@@ -699,6 +700,42 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
     }
   }
 
+  // Album-scoped restore: fill the gaps in THIS album/favorites/trip list.
+  // Rows still on the phone are skipped by the restore loop itself.
+  const restoreTargets = photos.filter(
+    (p) => p.status === "uploaded" && (p.remote_file_id || p.parts)
+  );
+  const [restoringAll, setRestoringAll] = React.useState<string | null>(null);
+
+  function restoreAll() {
+    if (restoreTargets.length === 0) return;
+    Alert.alert(
+      `Restore ${restoreTargets.length} to device?`,
+      "Photos already on this phone are skipped. Large videos reassemble from parts and may take a while.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Restore", onPress: () => void runRestoreAll(restoreTargets) },
+      ]
+    );
+  }
+
+  async function runRestoreAll(targets: PhotoRow[]) {
+    setRestoringAll("Starting…");
+    try {
+      const r = await restorePhotosToDevice(targets, (p) =>
+        setRestoringAll(p.currentFile ? `${p.done}/${p.total} — ${p.currentFile}` : null)
+      );
+      Alert.alert(
+        "Restore finished",
+        `${r.saved} saved · ${r.skipped} already on device · ${r.failed} failed.`
+      );
+    } catch (e: any) {
+      Alert.alert("Restore failed", e?.message ?? "Unknown error");
+    } finally {
+      setRestoringAll(null);
+    }
+  }
+
   if (!unlocked) {
     return <View style={[styles.container, { backgroundColor: theme.colors.background }]} />;
   }
@@ -712,6 +749,15 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
+        {!isDecoyActive() && restoringAll ? (
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }} numberOfLines={1}>
+            {restoringAll}
+          </Text>
+        ) : !isDecoyActive() && restoreTargets.length > 0 ? (
+          <Pressable onPress={restoreAll} hitSlop={6}>
+            <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Restore all</Text>
+          </Pressable>
+        ) : null}
         {albumId !== -1 && !isTrip && selection.size > 0 ? (
           <Pressable
             onPress={() => {
@@ -719,8 +765,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
               Alert.alert(
                 `Remove ${ids.length} from album?`,
                 undefined,
-                [
-                  { text: "Cancel", style: "cancel" },
+                [                  { text: "Cancel", style: "cancel" },
                   {
                     text: "Remove",
                     style: "destructive",

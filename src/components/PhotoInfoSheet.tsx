@@ -18,6 +18,10 @@ import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db
 import { isDecoyActive } from "../lib/applock";
 import { savePhotoToDevice, saveMotionClip } from "../lib/restore";
 import { Button } from "./ui";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { getCachedTelegramFile } from "../lib/media";
+import { tokenForPhoto } from "../lib/destinations";
+import { ActivityIndicator } from "react-native";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -43,6 +47,7 @@ export function PhotoInfoSheet({
   const [versions, setVersions] = React.useState<PhotoVersionRow[] | null>(null);
   const [savingVersionId, setSavingVersionId] = React.useState<number | null>(null);
   const [savingMotion, setSavingMotion] = React.useState(false);
+  const [motionPlaying, setMotionPlaying] = React.useState(false);
 
   // Version history loads per open; decoy sessions must never read it.
   React.useEffect(() => {
@@ -250,15 +255,18 @@ export function PhotoInfoSheet({
               <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Motion clip</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 8 }}>
-                  This motion photo carries a short video. Save it to your gallery as a separate clip.
+                  This motion photo carries a short video. Play it here or save it to your gallery.
                 </Text>
-                <Button
-                  title={savingMotion ? "Saving…" : "Save motion clip"}
-                  variant="outlined"
-                  theme={theme}
-                  busy={savingMotion}
-                  onPress={() => void saveMotion()}
-                />
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Button title="Play" variant="outlined" theme={theme} onPress={() => setMotionPlaying(true)} />
+                  <Button
+                    title={savingMotion ? "Saving…" : "Save"}
+                    variant="outlined"
+                    theme={theme}
+                    busy={savingMotion}
+                    onPress={() => void saveMotion()}
+                  />
+                </View>
               </View>
             ) : null}
 
@@ -301,8 +309,81 @@ export function PhotoInfoSheet({
           </ScrollView>
         </View>
       </View>
+
+      <Modal
+        visible={motionPlaying && !!p.motion_file_id}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMotionPlaying(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)" }}>
+          <MotionClipPlayer
+            fileId={p.motion_file_id!}
+            profileId={p.profile_id}
+            style={{ flex: 1 }}
+          />
+          <Pressable
+            onPress={() => setMotionPlaying(false)}
+            style={{ position: "absolute", top: 48, right: 20, padding: 10 }}
+          >
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Close</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </Modal>
   );
+}
+
+// Inline motion-clip player (#7 follow-up): same download-then-play pattern
+// as the viewer's video component — the clip is fetched from the channel
+// (cache-first) and handed to expo-video.
+function MotionClipPlayer({
+  fileId,
+  profileId,
+  style,
+}: {
+  fileId: string;
+  profileId: string | null;
+  style: any;
+}) {
+  const [uri, setUri] = React.useState<string | null>(null);
+  const [failed, setFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    setUri(null);
+    setFailed(false);
+    (async () => {
+      try {
+        const token = profileId ? await tokenForPhoto({ profile_id: profileId } as PhotoRow) : null;
+        const u = await getCachedTelegramFile(fileId, "mp4", token);
+        if (alive) setUri(u);
+      } catch {
+        if (alive) setFailed(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [fileId, profileId]);
+
+  const player = useVideoPlayer(uri, () => {});
+
+  if (failed) {
+    return (
+      <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: "#fff", fontSize: 13 }}>Could not download the motion clip.</Text>
+      </View>
+    );
+  }
+  if (!uri) {
+    return (
+      <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
+        <ActivityIndicator color="#fff" />
+      </View>
+    );
+  }
+  return <VideoView style={style} player={player} contentFit="contain" fullscreenOptions={{ enable: true }} />;
 }
 
 function Row({
