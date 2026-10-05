@@ -8,6 +8,7 @@ import { isRemotePaused } from "./remote";
 import { isStorageCritical } from "./storage";
 import { processQueue } from "./uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./db";
+import { logDiag } from "./diaglog";
 
 export const BACKGROUND_SYNC_TASK = "photogrambot-background-sync";
 export const OVERNIGHT_CATCHUP_TASK = "photogrambot-overnight-catchup";
@@ -49,6 +50,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     console.warn("Background sync task failed:", e);
+    void logDiag("background", `Background sync failed: ${String(e)}`);
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
@@ -125,6 +127,7 @@ TaskManager.defineTask(OVERNIGHT_CATCHUP_TASK, async () => {
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     console.warn("Overnight catch-up task failed:", e);
+    void logDiag("background", `Overnight catch-up failed: ${String(e)}`);
     return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });

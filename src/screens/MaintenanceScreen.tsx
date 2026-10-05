@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { Button, Card, SectionLabel } from "../components/ui";
+import { Button, Card, SectionLabel, Dialog } from "../components/ui";
 import {
   findDuplicateGroups,
   checkIntegrity,
@@ -39,6 +39,7 @@ import { getChannelId, getAiApiKey } from "../lib/settings";
 import { deleteMessage } from "../lib/telegram";
 import { tokenForPhoto } from "../lib/destinations";
 import { embedIndexBackfill } from "../lib/semsearch";
+import { getDiagLog, clearDiagLog, type DiagEvent } from "../lib/diaglog";
 import { getEmbeddingCoverage } from "../lib/db";
 import type { EmbedBackfillProgress } from "../lib/semsearch";
 
@@ -57,6 +58,8 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [verifyResult, setVerifyResult] = useState<VerificationResult | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [repairNote, setRepairNote] = useState<string | null>(null);
+  const [diagVisible, setDiagVisible] = useState(false);
+  const [diagEvents, setDiagEvents] = useState<DiagEvent[]>([]);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
@@ -350,6 +353,11 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     }
   }
 
+  async function openDiagLog() {
+    setDiagEvents(await getDiagLog());
+    setDiagVisible(true);
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -377,6 +385,19 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                   </Text>
                   <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
                     Inspect the queue, retry or remove individual items
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </View>
+            </Card>
+            <Card theme={theme} onPress={() => void openDiagLog()}>
+              <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                    Diagnostics
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                    Recent upload, scan and background failures
                   </Text>
                 </View>
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
@@ -790,8 +811,57 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
         }
         ListEmptyComponent={null}
       />
+
+      <Dialog
+        visible={diagVisible}
+        theme={theme}
+        title="Diagnostics"
+        message={
+          diagEvents.length > 0
+            ? "Recent operational failures, newest first. Safe to clear anytime."
+            : "No failures recorded."
+        }
+      >
+        {diagEvents.length > 0 ? (
+          <View style={{ maxHeight: 320 }}>
+            <ScrollView nestedScrollEnabled>
+              {diagEvents
+                .slice()
+                .reverse()
+                .map((e, i) => (
+                  <Text key={`${e.t}-${i}`} style={{ color: theme.colors.onSurface, fontSize: 12.5, paddingVertical: 4 }}>
+                    {fmtDiagTime(e.t)} · [{e.kind}] {e.msg}
+                  </Text>
+                ))}
+            </ScrollView>
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <Button
+                title="Clear"
+                variant="text"
+                theme={theme}
+                onPress={() => {
+                  void clearDiagLog().then(() => {
+                    setDiagEvents([]);
+                  });
+                }}
+              />
+              <Button title="Close" theme={theme} onPress={() => setDiagVisible(false)} />
+            </View>
+          </View>
+        ) : (
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 14 }}>
+            <Button title="Close" theme={theme} onPress={() => setDiagVisible(false)} />
+          </View>
+        )}
+      </Dialog>
     </View>
   );
+}
+
+function fmtDiagTime(t: number): string {
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 const styles = StyleSheet.create({

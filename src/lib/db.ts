@@ -263,6 +263,11 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS uq_queue_active_local
       ON upload_queue(local_id) WHERE state IN ('pending','running');
   `);
+  // Dequeue lookup: pending rows read manual-first → priority → time order.
+  await db.execAsync(
+    `CREATE INDEX IF NOT EXISTS idx_queue_dequeue
+       ON upload_queue(state, priority, upload_type, taken_at);`
+  );
 }
 
 async function addColumnsIfMissing(

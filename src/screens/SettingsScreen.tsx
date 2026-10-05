@@ -153,7 +153,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
       setZipDialog(false);
       const skipped =
         r.skippedOversize > 0 || r.skippedCap > 0
-          ? ` Skipped: ${r.skippedOversize} over the bot's 20 MB download limit, ${r.skippedCap} beyond the 500 MB archive cap.`
+          ? ` Skipped: ${r.skippedOversize} over the bot's 20 MB download limit, ${r.skippedCap} beyond the 100 MB archive cap.`
           : "";
       Alert.alert(
         "Export shared",
@@ -897,7 +897,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         visible={zipDialog}
         theme={theme}
         title="Export month as ZIP"
-        message="Pick a month — its backed-up originals are downloaded, zipped (up to 500 MB per archive) and handed to the share sheet."
+        message="Pick a month — its backed-up originals are downloaded, zipped (up to 100 MB per archive) and handed to the share sheet."
       >
         {zipNote ? (
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 8 }}>

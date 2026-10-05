@@ -41,6 +41,7 @@ import { computePhotoPhash } from "./maintenance";
 import { hammingHex } from "./phash";
 import { classifyAutoTags } from "./autotags";
 import { extractMotionVideo } from "./motion";
+import { logDiag } from "./diaglog";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo, type VideoPart } from "./vsplit";
 import { notifyUploadProgress, notifyUploadComplete, notifyUploadsFailed } from "./notify";
@@ -815,6 +816,7 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
     return "done";
   } catch (e: any) {
     const message = e?.message ?? "Upload failed";
+    void logDiag("upload", `${item.filename}: ${message}`);
     if (cancelRequested) {
       // User cancelled — put the item back without burning a retry.
       await updateQueueItem(item.id, { state: "pending", error: "Cancelled" });
@@ -1007,6 +1009,7 @@ async function uploadVersionItem(
     return "done";
   } catch (e: any) {
     const message = e?.message ?? "Version upload failed";
+    void logDiag("upload", `${item.filename} (version): ${message}`);
     if (cancelRequested) {
       // User cancelled — put the item back without burning a retry.
       await updateQueueItem(item.id, { state: "pending", error: "Cancelled" });

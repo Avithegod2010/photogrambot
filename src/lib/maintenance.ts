@@ -410,6 +410,14 @@ export async function repairBrokenUploads(
         skipped++;
         continue;
       }
+      // Split videos are NOT repairable this way: their part chain was
+      // already persisted at upload time, and re-entering the splitter with
+      // those resumeParts would replay the old (broken) upload as a no-op.
+      // They can only be re-saved via the Telegram app or a fresh re-upload.
+      if (row.parts) {
+        skipped++;
+        continue;
+      }
       if (!new File(row.local_uri).exists) {
         skipped++;
         continue;
