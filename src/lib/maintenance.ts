@@ -6,10 +6,13 @@ import {
   getPhashedIds,
   getAllPhashPairs,
   setPhashBatch,
+  getWipeLocalCandidates,
+  clearLocalUris,
   type PhotoRow,
   type DuplicateGroup,
 } from "./db";
 import { File, FileMode } from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import { getFile } from "./telegram";
 import { getCachedTelegramFile } from "./media";
 import { tokenForPhoto } from "./destinations";
@@ -312,6 +315,69 @@ function readBytesIfSmall(path: string): Uint8Array | null {
       handle?.close();
     } catch {}
   }
+}
+
+// --- Remote wipe (#9) ---
+
+export interface WipeResult {
+  deleted: number;
+  freedBytes: number;
+  kept: number;
+}
+
+// Erases the local copies of every backed-up photo (the channel copies are
+// the archive — the DB rows survive as their record so nothing re-uploads).
+// Per-photo getFile verification before deletion, same as Free up space: a
+// row whose cloud copy no longer resolves is KEPT on device. Android may show
+// a per-chunk system delete dialog; a user cancel falls through to the
+// exists re-check, so whatever survived is counted as kept. Replay-safe: a
+// second run finds no local copies and reports 0.
+export async function wipeLocalCopies(
+  onProgress?: (done: number, total: number) => void
+): Promise<WipeResult> {
+  const rows = await getWipeLocalCandidates();
+  let deleted = 0;
+  let freedBytes = 0;
+  let kept = 0;
+
+  const deletable: PhotoRow[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    onProgress?.(i, rows.length);
+    try {
+      await getFile(rows[i].remote_file_id!);
+      deletable.push(rows[i]);
+    } catch {
+      kept++;
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+
+  const goneIds: string[] = [];
+  for (let i = 0; i < deletable.length; i += 200) {
+    const chunk = deletable.slice(i, i + 200);
+    onProgress?.(i, deletable.length);
+    try {
+      await MediaLibrary.Asset.delete(chunk.map((c) => new MediaLibrary.Asset(c.local_id!)));
+    } catch {
+      // User cancel / partial failure — the exists re-check below counts truth.
+    }
+    for (const c of chunk) {
+      try {
+        if (!new File(c.local_uri!).exists) {
+          deleted++;
+          freedBytes += c.size ?? 0;
+          goneIds.push(c.id);
+        } else {
+          kept++;
+        }
+      } catch {
+        kept++;
+      }
+    }
+  }
+  await clearLocalUris(goneIds);
+  onProgress?.(deletable.length, deletable.length);
+  return { deleted, freedBytes, kept };
 }
 
 // --- Auto-tag backfill (filename/mime classification) ---

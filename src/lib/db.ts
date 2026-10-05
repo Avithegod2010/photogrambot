@@ -1538,6 +1538,22 @@ export async function getScreenshotSunsetCandidates(days: number): Promise<Photo
   return rows.map(rowToPhoto);
 }
 
+// Remote /wipe candidates (#9): every backed-up row with a known local copy —
+// app-trashed rows INCLUDED, because a wiped phone must not leave originals
+// sitting in the system gallery either. No size requirement (unlike free-up);
+// rows whose local copy is already gone simply no-op in the delete loop.
+export async function getWipeLocalCandidates(): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND remote_file_id IS NOT NULL
+       AND local_id IS NOT NULL
+       AND local_uri IS NOT NULL`
+  );
+  return rows.map(rowToPhoto);
+}
+
 // After the device copy is deleted, the DB row must SURVIVE as the library
 // record of the cloud copy — only the stale local_uri pointer goes (local_id
 // stays so a later restore/re-scan can match the asset again).

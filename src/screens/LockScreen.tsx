@@ -5,6 +5,7 @@ import { useTheme } from "../useTheme";
 import { Button } from "../components/ui";
 import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../lib/applock";
 import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
+import { logBreakIn } from "../lib/breakin";
 
 function fmtBackoff(ms: number): string {
   const s = Math.ceil(ms / 1000);
@@ -78,6 +79,11 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
         onUnlock();
       } else {
         setFailed(true);
+        // Only genuine rejections count as break-in evidence — user cancels
+        // (cancelLabel "Retry") and system cancels don't.
+        if (res.error === "authentication_failed" || res.error === "lockout") {
+          void logBreakIn("biometric_fail");
+        }
       }
     } catch {
       setFailed(true);
@@ -107,11 +113,13 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       } else if (result === "decoy") {
         // A decoy hit proves knowledge too — clear, and keep the decoy session
         // indistinguishable from a real unlock (both pass the same backoff).
+        void logBreakIn("decoy_unlock");
         await clearFailures();
         setDecoyActive(true);
         onUnlock();
       } else {
         setPinWrong(true);
+        void logBreakIn("pin_fail");
         await recordFailure();
         setBackoffMs(await getBackoffRemaining());
       }
