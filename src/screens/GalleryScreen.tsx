@@ -68,6 +68,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
+  // Range-select anchor: the last tile added while in selection mode.
+  const [rangeAnchorId, setRangeAnchorId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<PhotoRow[] | null>(null);
   // "Back up" appears in the selection bar only when a selected row is still
@@ -282,6 +284,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         if (next.has(photo.id)) next.delete(photo.id);
         else next.add(photo.id);
         setSelection(next);
+        // Range-select anchor: the last tile ADDED becomes the endpoint for a
+        // long-press range further down the grid.
+        setRangeAnchorId(next.has(photo.id) ? photo.id : null);
         if (next.size === 0) setSelectionMode(false);
       } else {
         const flat = searchResults ?? photos;
@@ -290,6 +295,23 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       }
     },
     [selectionMode, selection, photos, searchResults, navigation]
+  );
+
+  // Range select: in selection mode, long-pressing another tile selects the
+  // inclusive span between the anchor and it (display order of the results
+  // grid). Replaces the selection with the span, then re-anchors there so
+  // ranges can be chained.
+  const selectRange = useCallback(
+    (fromId: string, toId: string) => {
+      const flat = sections.flatMap((s) => s.data.map((p) => p.id));
+      const a = flat.indexOf(fromId);
+      const b = flat.indexOf(toId);
+      if (a === -1 || b === -1 || a === b) return;
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      setSelection(new Set(flat.slice(lo, hi + 1)));
+      setRangeAnchorId(toId);
+    },
+    [sections]
   );
 
   async function onRefresh() {
@@ -535,10 +557,19 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const w = width ?? tile;
     const h = height ?? tile;
     return (
-      <Pressable onPress={() => onTilePress(photo, 0)} onLongPress={() => {
-        setSelectionMode(true);
-        setSelection(new Set([photo.id]));
-      }} style={{ width: w, height: h }}>
+      <Pressable
+        onPress={() => onTilePress(photo, 0)}
+        onLongPress={() => {
+          if (selectionMode && rangeAnchorId && rangeAnchorId !== photo.id) {
+            selectRange(rangeAnchorId, photo.id);
+            return;
+          }
+          setSelectionMode(true);
+          setSelection(new Set([photo.id]));
+          setRangeAnchorId(photo.id);
+        }}
+        style={{ width: w, height: h }}
+      >
         <TelegramImage
           fileId={thumb.fileId}
           localUri={thumb.localUri}
@@ -634,6 +665,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       upload_type: null,
       phash: null,
       asset_mtime: null,
+      motion_file_id: null,
+      motion_message_id: null,
     };
     navigation.navigate("Viewer", { photos: [photo], index: 0 });
   }
@@ -911,6 +944,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         >
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }}>
             {selection.size} selected
+            {selection.size > 0 ? "  ·  long-press another photo for a range" : ""}
           </Text>
           <Pressable
             onPress={() => setSelection(new Set((searchResults ?? photos).map((p) => p.id)))}

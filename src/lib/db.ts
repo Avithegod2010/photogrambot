@@ -33,6 +33,10 @@ export interface PhotoRow {
   parts: string | null;
   profile_id: string | null;
   favorite: number;
+  // Motion-photo companion clip (R27): the embedded short video extracted
+  // from a motion JPEG and uploaded as a reply to the photo's document.
+  motion_file_id: string | null;
+  motion_message_id: number | null;
   status: PhotoStatus;
   error: string | null;
   upload_type: string | null;
@@ -158,6 +162,7 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       added_at INTEGER NOT NULL DEFAULT 0,
       content_hash TEXT,
       upload_type TEXT NOT NULL DEFAULT 'manual',
+      priority INTEGER NOT NULL DEFAULT 1,
       state TEXT NOT NULL DEFAULT 'pending',
       retries INTEGER NOT NULL DEFAULT 0,
       error TEXT,
@@ -193,11 +198,16 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // re-sync paths; the pHash is advisory clustering input, not identity).
     ["phash", "TEXT"],
     ["asset_mtime", "REAL"],
+    ["motion_file_id", "TEXT"],
+    ["motion_message_id", "INTEGER"],
   ]);
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
     ["profile_id", "TEXT"],
     ["reply_to_message_id", "INTEGER"],
+    // Upload priority lanes (R27): 0 = promoted (favorited), 1 = default,
+    // 2 = deprioritized (screenshots/screen recordings).
+    ["priority", "INTEGER NOT NULL DEFAULT 1"],
   ]);
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS photo_versions (
@@ -1256,14 +1266,15 @@ export async function enqueueUpload(item: {
   upload_type: string;
   profile_id?: string | null;
   reply_to_message_id?: number | null;
+  priority?: number;
 }): Promise<number> {
   const d = await getDb();
   let res;
   try {
     res = await d.runAsync(
       `INSERT INTO upload_queue (local_id, local_uri, filename, folder, size, taken_at, added_at,
-        content_hash, upload_type, state, retries, created_at, profile_id, reply_to_message_id)
-       VALUES (?,?,?,?,?,?,?,?,?,'pending',0,?,?,?)`,
+        content_hash, upload_type, priority, state, retries, created_at, profile_id, reply_to_message_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?, 'pending',0,?,?,?)`,
       [
         item.local_id,
         item.local_uri,
@@ -1274,6 +1285,7 @@ export async function enqueueUpload(item: {
         item.added_at,
         item.content_hash,
         item.upload_type,
+        item.priority ?? 1,
         Date.now(),
         item.profile_id ?? null,
         item.reply_to_message_id ?? null,
@@ -1292,7 +1304,7 @@ export async function nextQueueBatch(limit: number): Promise<QueueRow[]> {
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM upload_queue
      WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-     ORDER BY CASE WHEN upload_type = 'manual' THEN 0 ELSE 1 END, taken_at ASC, created_at ASC
+     ORDER BY CASE WHEN upload_type = 'manual' THEN 0 ELSE 1 END, priority ASC, taken_at ASC, created_at ASC
      LIMIT ?`,
     [Date.now(), limit]
   );
@@ -1447,6 +1459,16 @@ export async function removeQueueItem(id: number): Promise<boolean> {
 export async function clearFinishedQueue(): Promise<void> {
   const d = await getDb();
   await d.runAsync("DELETE FROM upload_queue WHERE state IN ('done','skipped','duplicate')");
+}
+
+// Upload priority lanes: favoriting a local-only photo promotes its pending
+// queue row so it lands first when a big backlog drains (overnight catch-up).
+export async function prioritizeQueueForPhoto(localId: string): Promise<void> {
+  const d = await getDb();
+  await d.runAsync(
+    "UPDATE upload_queue SET priority = 0 WHERE local_id = ? AND state IN ('pending','running')",
+    [localId]
+  );
 }
 
 export async function getStats(): Promise<{
@@ -2011,8 +2033,9 @@ export async function importAllData(json: string, replace: boolean): Promise<num
            message_id, preview_message_id, filename, folder, width, height, size, mime,
            taken_at, added_at, uploaded_at, remote_date, content_hash, device, camera,
            tags, latitude, longitude, exif, ai_caption, duration, parts, profile_id,
-           favorite, status, error, upload_type)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           favorite, status, error, upload_type, phash, asset_mtime,
+           motion_file_id, motion_message_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           p.id, p.local_id ?? null, p.local_uri ?? null, p.remote_file_id ?? null,
           p.preview_file_id ?? null, p.thumb_file_id ?? null, p.message_id ?? null,
@@ -2023,6 +2046,11 @@ export async function importAllData(json: string, replace: boolean): Promise<num
           p.latitude ?? null, p.longitude ?? null, p.exif ?? null,
           p.ai_caption ?? null, p.duration ?? null, p.parts ?? null, p.profile_id ?? null,
           p.favorite ?? 0, p.status ?? "local", p.error ?? null, p.upload_type ?? null,
+          // phash/asset_mtime were silently dropped by older import versions —
+          // carried forward now (a re-scan recomputes them, but carrying avoids
+          // a full library re-decode after a restore).
+          p.phash ?? null, p.asset_mtime ?? null,
+          p.motion_file_id ?? null, p.motion_message_id ?? null,
         ]
       );
       count += res.changes > 0 ? 1 : 0;

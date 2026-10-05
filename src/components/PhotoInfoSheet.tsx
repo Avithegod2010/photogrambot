@@ -16,7 +16,8 @@ import { useTheme } from "../useTheme";
 import { formatBytes, formatDate } from "../lib/format";
 import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
-import { savePhotoToDevice } from "../lib/restore";
+import { savePhotoToDevice, saveMotionClip } from "../lib/restore";
+import { Button } from "./ui";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -41,6 +42,7 @@ export function PhotoInfoSheet({
 }) {
   const [versions, setVersions] = React.useState<PhotoVersionRow[] | null>(null);
   const [savingVersionId, setSavingVersionId] = React.useState<number | null>(null);
+  const [savingMotion, setSavingMotion] = React.useState(false);
 
   // Version history loads per open; decoy sessions must never read it.
   React.useEffect(() => {
@@ -79,6 +81,18 @@ export function PhotoInfoSheet({
       Alert.alert("Save failed", e?.message ?? "Could not save the version.");
     } finally {
       setSavingVersionId(null);
+    }
+  }
+
+  async function saveMotion() {
+    if (!photo || savingMotion) return;
+    setSavingMotion(true);
+    try {
+      await saveMotionClip(photo);
+    } catch (e: any) {
+      Alert.alert("Save failed", e?.message ?? "Could not save the motion clip.");
+    } finally {
+      setSavingMotion(false);
     }
   }
 
@@ -229,6 +243,22 @@ export function PhotoInfoSheet({
                     </Pressable>
                   </View>
                 ))}
+              </View>
+            ) : null}
+
+            {p.motion_file_id && !isDecoyActive() ? (
+              <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Motion clip</Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 8 }}>
+                  This motion photo carries a short video. Save it to your gallery as a separate clip.
+                </Text>
+                <Button
+                  title={savingMotion ? "Saving…" : "Save motion clip"}
+                  variant="outlined"
+                  theme={theme}
+                  busy={savingMotion}
+                  onPress={() => void saveMotion()}
+                />
               </View>
             ) : null}
 
