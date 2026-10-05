@@ -139,6 +139,17 @@ async function hasLocalFile(photo: PhotoRow): Promise<boolean> {
 export async function restoreAllToDevice(
   onProgress?: (p: RestoreProgress) => void
 ): Promise<RestoreProgress> {
+  const photos = await getPhotosByUploadStatus("uploaded");
+  return restorePhotosToDevice(photos, onProgress);
+}
+
+// Bulk save of an explicit photo list (album-scoped restore: an album,
+// Favorites, a trip…). Rows that still have a local file are skipped — the
+// point is filling gaps, not duplicating what's on the phone.
+export async function restorePhotosToDevice(
+  photos: PhotoRow[],
+  onProgress?: (p: RestoreProgress) => void
+): Promise<RestoreProgress> {
   if (restoring) throw new Error("A restore is already running");
   await ensureSavePermission();
   restoring = true;
@@ -152,7 +163,6 @@ export async function restoreAllToDevice(
     failed: 0,
   };
   try {
-    const photos = await getPhotosByUploadStatus("uploaded");
     progress.total = photos.length;
     onProgress?.({ ...progress });
     for (const photo of photos) {

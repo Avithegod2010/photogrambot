@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 13.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    // Internal debug build for on-device testing via EAS (JVM-TLS workaround).
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    // Installable APK for testing — the profile used to unblock the local
+    // assembleRelease TLS failure (cloud Gradle downloads dl.google.com fine).
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    // Store-ready AAB. android/version.properties is the versionCode source
+    // of truth — bump per release artifact.
+    "production": {
+      "autoIncrement": false,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

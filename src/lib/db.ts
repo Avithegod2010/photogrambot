@@ -1466,6 +1466,35 @@ export async function clearFinishedQueue(): Promise<void> {
   await d.runAsync("DELETE FROM upload_queue WHERE state IN ('done','skipped','duplicate')");
 }
 
+// Channel-dedupe audit: groups of rows sharing one content_hash where every
+// member has its own channel post — identical uploads posted twice (re-syncs,
+// multi-device double ingests, pre-dedupe-era histories). The kept row and
+// the deleted duplicates are decided by the caller; this only finds them.
+export async function getDuplicateHashGroups(): Promise<PhotoRow[][]> {
+  const d = await getDb();
+  const hashes = await d.getAllAsync<{ content_hash: string }>(
+    `SELECT content_hash FROM photos
+     WHERE content_hash IS NOT NULL AND message_id IS NOT NULL
+       AND id NOT IN (SELECT photo_id FROM trash)
+     GROUP BY content_hash
+     HAVING COUNT(*) > 1
+     LIMIT 200`
+  );
+  const groups: PhotoRow[][] = [];
+  for (const h of hashes) {
+    const rows = await d.getAllAsync<any>(
+      `SELECT * FROM photos
+       WHERE content_hash = ? AND message_id IS NOT NULL
+         AND id NOT IN (SELECT photo_id FROM trash)
+       ORDER BY uploaded_at DESC`,
+      [h.content_hash]
+    );
+    const group = rows.map(rowToPhoto);
+    if (group.length > 1) groups.push(group);
+  }
+  return groups;
+}
+
 // Upload priority lanes: favoriting a local-only photo promotes its pending
 // queue row so it lands first when a big backlog drains (overnight catch-up).
 export async function prioritizeQueueForPhoto(localId: string): Promise<void> {

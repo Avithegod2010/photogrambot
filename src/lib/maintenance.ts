@@ -450,6 +450,58 @@ export async function repairBrokenUploads(
   return { enqueued, skipped };
 }
 
+// --- Channel dedupe (#R29) ---
+
+export interface ChannelDedupeResult {
+  groups: number;
+  deleted: number;
+  failed: number;
+}
+
+// For each same-content_hash group: keep ONE row (preferring one with a local
+// copy — a future self-repair source — then the newest upload) and delete the
+// duplicates' channel posts + index rows. Channel deletion is best-effort;
+// the duplicate row is removed regardless so the audit can't loop forever.
+export async function dedupeChannelPostGroups(
+  groups: PhotoRow[][],
+  onProgress?: (done: number, total: number) => void
+): Promise<ChannelDedupeResult> {
+  const { deletePhoto } = await import("./db");
+  const { deleteMessage } = await import("./telegram");
+  const { getChannelId } = await import("./settings");
+  const channelId = await getChannelId();
+  let deleted = 0;
+  let failed = 0;
+  for (let gi = 0; gi < groups.length; gi++) {
+    onProgress?.(gi, groups.length);
+    const sorted = [...groups[gi]].sort(
+      (a, b) => Number(!!b.local_id) - Number(!!a.local_id) || (b.uploaded_at ?? 0) - (a.uploaded_at ?? 0)
+    );
+    const keep = sorted[0];
+    for (const dup of sorted.slice(1)) {
+      if (dup.id === keep.id) continue;
+      try {
+        if (channelId) {
+          const token = await tokenForPhoto(dup);
+          for (const id of [dup.message_id, dup.preview_message_id]) {
+            if (typeof id === "number") {
+              try {
+                await deleteMessage(channelId, id, token ?? undefined);
+              } catch {}
+            }
+          }
+        }
+        await deletePhoto(dup.id);
+        deleted++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+  onProgress?.(groups.length, groups.length);
+  return { groups: groups.length, deleted, failed };
+}
+
 // --- Auto-tag backfill (filename/mime classification) ---
 
 export interface AutoTagProgress {

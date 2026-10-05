@@ -12,6 +12,7 @@ import {
   repairBrokenUploads,
   scanNearDuplicates,
   autoTagBackfill,
+  dedupeChannelPostGroups,
   type DuplicateGroup,
   type IntegrityProgress,
   type NearDupGroup,
@@ -26,6 +27,7 @@ import {
   retryFailedUploads,
   addToTrash,
   markTrashRemoteDeleted,
+  getDuplicateHashGroups,
   type PhotoRow,
 } from "../lib/db";
 import { formatBytes, formatDate } from "../lib/format";
@@ -60,6 +62,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [repairNote, setRepairNote] = useState<string | null>(null);
   const [diagVisible, setDiagVisible] = useState(false);
   const [diagEvents, setDiagEvents] = useState<DiagEvent[]>([]);
+  const [dedupeGroups, setDedupeGroups] = useState<PhotoRow[][] | null>(null);
+  const [dedupeBusy, setDedupeBusy] = useState(false);
+  const [dedupeNote, setDedupeNote] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
@@ -358,6 +363,45 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     setDiagVisible(true);
   }
 
+  async function runChannelDedupeScan() {
+    setDedupeBusy(true);
+    setDedupeNote(null);
+    try {
+      const groups = await getDuplicateHashGroups();
+      setDedupeGroups(groups);
+      setDedupeNote(
+        groups.length === 0
+          ? "No duplicate posts found — every backed-up photo has exactly one channel copy."
+          : `${groups.length} duplicate group${groups.length === 1 ? "" : "s"} found.`
+      );
+    } catch (e: any) {
+      setDedupeNote(`Scan failed: ${e?.message ?? "unknown error"}`);
+    } finally {
+      setDedupeBusy(false);
+    }
+  }
+
+  async function runChannelDedupeClean() {
+    if (!dedupeGroups || dedupeGroups.length === 0) return;
+    setDedupeBusy(true);
+    try {
+      const r = await dedupeChannelPostGroups(dedupeGroups, (done, total) =>
+        setDedupeNote(`Cleaning ${done + 1}/${total}…`)
+      );
+      setDedupeGroups(null);
+      setDedupeNote(
+        `Cleaned: ${r.deleted} duplicate post${r.deleted === 1 ? "" : "s"} removed` +
+          (r.failed > 0 ? `, ${r.failed} failed` : "") +
+          "."
+      );
+      await refreshMeta();
+    } catch (e: any) {
+      setDedupeNote(`Clean failed: ${e?.message ?? "unknown error"}`);
+    } finally {
+      setDedupeBusy(false);
+    }
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -402,6 +446,37 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
                 </View>
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
               </View>
+            </Card>
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                Channel dedupe
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2, lineHeight: 18 }}>
+                Find identical photos posted to the channel more than once and keep a single copy of each.
+              </Text>
+              <Button
+                title={dedupeGroups ? "Rescan" : "Scan for duplicates"}
+                theme={theme}
+                variant="outlined"
+                busy={dedupeBusy}
+                onPress={runChannelDedupeScan}
+                style={{ marginTop: 10 }}
+              />
+              {dedupeNote ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 8 }}>
+                  {dedupeNote}
+                </Text>
+              ) : null}
+              {dedupeGroups && dedupeGroups.length > 0 ? (
+                <Button
+                  title={`Keep one copy each — clean ${dedupeGroups.length} group${dedupeGroups.length === 1 ? "" : "s"}`}
+                  variant="danger"
+                  theme={theme}
+                  busy={dedupeBusy}
+                  onPress={runChannelDedupeClean}
+                  style={{ marginTop: 10 }}
+                />
+              ) : null}
             </Card>
             <Card theme={theme} onPress={() => navigation.navigate("FreeUpSpace")}>
               <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
