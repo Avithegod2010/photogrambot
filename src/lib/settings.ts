@@ -39,6 +39,10 @@ export interface Prefs {
   dbBackupIncludeToken: boolean;
   nearDupGuard: boolean;
   multiDestination: boolean;
+  weeklyDigest: boolean;
+  screenshotSunset: boolean;
+  overnightCatchup: boolean;
+  overnightCap: number;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -70,6 +74,10 @@ export const defaultPrefs: Prefs = {
   dbBackupIncludeToken: false,
   nearDupGuard: true,
   multiDestination: false,
+  weeklyDigest: false,
+  screenshotSunset: true,
+  overnightCatchup: false,
+  overnightCap: 500,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",

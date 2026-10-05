@@ -14,10 +14,12 @@ import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import {
   getFreeUpCandidates,
+  getScreenshotSunsetCandidates,
   clearLocalUris,
   type PhotoRow,
 } from "../lib/db";
 import { formatBytes } from "../lib/format";
+import { loadPrefs } from "../lib/settings";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 
 const DELETE_CHUNK = 200;
@@ -49,6 +51,7 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
   const [checkProgress, setCheckProgress] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [sunsetIds, setSunsetIds] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<"idle" | "verifying" | "deleting">("idle");
   const [progressLine, setProgressLine] = useState<string | null>(null);
   const [resultLine, setResultLine] = useState<string | null>(null);
@@ -80,6 +83,21 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
       const present = checked.filter((c) => c.existsOnDevice);
       setCandidates(present);
       setSelection(new Set(present.map((c) => c.id)));
+      // Screenshot sunset (#7): when enabled, compute which of the visible
+      // candidates are screenshots older than 30 days so the banner can offer
+      // them as a one-tap selection.
+      try {
+        const prefs = await loadPrefs();
+        if (prefs.screenshotSunset) {
+          const sunsetRows = await getScreenshotSunsetCandidates(30);
+          const presentIds = new Set(present.map((c) => c.id));
+          setSunsetIds(new Set(sunsetRows.map((r) => r.id).filter((id) => presentIds.has(id))));
+        } else {
+          setSunsetIds(new Set());
+        }
+      } catch {
+        setSunsetIds(new Set());
+      }
     } catch (e: any) {
       Alert.alert("Load failed", e?.message ?? "Could not list candidates.");
     } finally {
@@ -98,6 +116,14 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
         .filter((c) => selection.has(c.id))
         .reduce((sum, c) => sum + (c.size ?? 0), 0),
     [candidates, selection]
+  );
+  const sunsetCandidates = useMemo(
+    () => candidates.filter((c) => sunsetIds.has(c.id)),
+    [candidates, sunsetIds]
+  );
+  const sunsetBytes = useMemo(
+    () => sunsetCandidates.reduce((sum, c) => sum + (c.size ?? 0), 0),
+    [sunsetCandidates]
   );
 
   const sections = useMemo(() => {
@@ -290,6 +316,22 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
             </Pressable>
           </View>
 
+          {sunsetCandidates.length > 0 ? (
+            <View style={[styles.sunsetBanner, { backgroundColor: theme.colors.surface }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 13.5 }}>
+                  Screenshot sunset — {sunsetCandidates.length} older than 30 days
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                  {formatBytes(sunsetBytes)} of old screenshots. Clear these first — the originals stay in your channel.
+                </Text>
+              </View>
+              <Pressable onPress={() => setSelection(new Set(sunsetCandidates.map((c) => c.id)))} hitSlop={6} disabled={busy}>
+                <Text style={{ color: theme.colors.primary, fontWeight: "600", fontSize: 13 }}>Select</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           {progressLine ? (
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, paddingHorizontal: 16, paddingVertical: 6 }}>
               {progressLine}
@@ -347,6 +389,7 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
                         </Text>
                         <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
                           {formatBytes(c.size)}
+                          {sunsetIds.has(c.id) ? " · screenshot 30+ days" : ""}
                         </Text>
                       </View>
                     </Pressable>
@@ -414,6 +457,15 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 6,
     textTransform: "uppercase",
+  },
+  sunsetBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 14,
+    gap: 8,
   },
   row: {
     flexDirection: "row",
