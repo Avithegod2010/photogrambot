@@ -137,6 +137,7 @@ export async function getLocalPhotosInRange(
     asset_mtime: null,
     motion_file_id: null,
     motion_message_id: null,
+    ocr_text: null,
   }));
 }
 

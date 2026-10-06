@@ -51,6 +51,59 @@ export async function captionImageWithGemini(opts: AiCaptionOptions): Promise<st
   return text.replace(/\s+/g, " ").slice(0, 200);
 }
 
+// OCR for screenshot-tagged photos (#3 follow-up): extracts visible text so
+// "wifi password" style searches hit. Unlike captions, an empty answer is a
+// SUCCESS (some screenshots genuinely have no text) — only transport/API
+// errors throw. Rows keep ocr_text NULL on failure so a later pass retries.
+export async function ocrImageWithGemini(opts: {
+  apiKey: string;
+  model: string;
+  imageUri: string;
+}): Promise<string> {
+  const file = new File(opts.imageUri);
+  if (!file.exists) throw new Error("OCR source image missing");
+  const data = await file.base64();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text:
+                  "Extract ALL visible text from this screenshot exactly as written, " +
+                  "line by line. Keep URLs, codes, numbers and names verbatim. " +
+                  "If there is no text, respond with exactly: NO_TEXT",
+              },
+              { inline_data: { mime_type: "image/jpeg", data } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0, maxOutputTokens: 1000 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = json?.error?.message ?? `Gemini request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  const parts = json?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text ?? "").join("\n").trim()
+    : "";
+  if (/^NO_TEXT$/i.test(text)) return "";
+  return text.slice(0, 2000);
+}
+
 export interface EmbedTextOptions {
   apiKey: string;
   text: string;

@@ -37,6 +37,8 @@ export interface PhotoRow {
   // from a motion JPEG and uploaded as a reply to the photo's document.
   motion_file_id: string | null;
   motion_message_id: number | null;
+  // Extracted screenshot text (R30): NULL = not attempted/failed, '' = no text.
+  ocr_text: string | null;
   status: PhotoStatus;
   error: string | null;
   upload_type: string | null;
@@ -181,7 +183,7 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       v TEXT NOT NULL
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS photos_fts USING fts5(
-      photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption
+      photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption, ocr_text
     );
   `);
   await addColumnsIfMissing(db, "photos", [
@@ -200,7 +202,64 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["asset_mtime", "REAL"],
     ["motion_file_id", "TEXT"],
     ["motion_message_id", "INTEGER"],
+    // OCR of screenshot-tagged rows (R30): extracted visible text, searchable
+    // via FTS. NULL = not attempted (or failed — retried next pass); '' = no
+    // text found (a finished result, never retried).
+    ["ocr_text", "TEXT"],
   ]);
+  await migrateFtsSchema(db);
+  await migrateRest(db);
+}
+
+// OCR pending set (R30): uploaded screenshot-tagged rows never successfully
+// OCR'd — failures keep ocr_text NULL so a later pass retries them, while a
+// finished "no text" result stores '' and never requeues.
+export async function getScreenshotOcrPending(limit = 200): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND remote_file_id IS NOT NULL
+       AND ocr_text IS NULL
+       AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
+            OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
+       AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at DESC
+     LIMIT ?`,
+    [limit]
+  );
+  return rows.map(rowToPhoto);
+}
+
+// OCR source image for a row: the preview (65 KB) or channel thumbnail —
+// screenshot text stays legible at preview resolution.
+export async function getScreenshotOcrCount(): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) as n FROM photos
+     WHERE status = 'uploaded' AND ocr_text IS NULL
+       AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
+            OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
+       AND id NOT IN (SELECT photo_id FROM trash)`
+  );
+  return row?.n ?? 0;
+}
+
+async function addColumnsIfMissing(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  columns: [string, string][]
+): Promise<void> {
+  const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  const existing = new Set(info.map((c) => c.name));
+  for (const [name, type] of columns) {
+    if (!existing.has(name)) {
+      await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
+async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
     ["profile_id", "TEXT"],
@@ -270,33 +329,22 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   );
 }
 
-async function addColumnsIfMissing(
-  db: SQLite.SQLiteDatabase,
-  table: string,
-  columns: [string, string][]
-): Promise<void> {
-  const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
-  const existing = new Set(info.map((c) => c.name));
-  for (const [name, type] of columns) {
-    if (!existing.has(name)) {
-      await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
-    }
-  }
-}
-
 async function migrateFtsSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ sql: string }>(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'photos_fts'"
   );
-  if (!row || row.sql.includes("ai_caption")) return;
-  // FTS5 tables cannot be altered — drop and rebuild (derived data only).
-  await db.execAsync("DROP TABLE photos_fts");
-  await db.execAsync(`
-    CREATE VIRTUAL TABLE photos_fts USING fts5(
-      photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption
-    );
-  `);
-  await ftsRebuild();
+  // Rebuild when the FTS table predates a column: ai_caption (R18) or
+  // ocr_text (R30). FTS5 tables cannot be altered — drop and rebuild
+  // (derived data only).
+  if (!row || row.sql.includes("ai_caption") === false || row.sql.includes("ocr_text") === false) {
+    await db.execAsync("DROP TABLE IF EXISTS photos_fts");
+    await db.execAsync(`
+      CREATE VIRTUAL TABLE photos_fts USING fts5(
+        photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption, ocr_text
+      );
+    `);
+    await ftsRebuild(db);
+  }
 }
 
 export async function kvGet(key: string): Promise<string | null> {
@@ -388,7 +436,7 @@ export async function updatePhoto(id: string, patch: Partial<PhotoRow>): Promise
   await d.runAsync(`UPDATE photos SET ${setSql} WHERE id = ?`, [...values, id]);
   if (
     keys.some((k) =>
-      ["filename", "folder", "tags", "device", "camera", "mime", "ai_caption"].includes(k)
+      ["filename", "folder", "tags", "device", "camera", "mime", "ai_caption", "ocr_text"].includes(k)
     )
   ) {
     const full = await getPhoto(id);
@@ -926,20 +974,23 @@ export async function ftsIndexPhoto(p: PhotoRow): Promise<void> {
   const d = await getDb();
   await d.runAsync("DELETE FROM photos_fts WHERE photo_id = ?", [p.id]);
   await d.runAsync(
-    "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption) VALUES (?,?,?,?,?,?,?,?)",
-    [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? ""]
+    "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption, ocr_text) VALUES (?,?,?,?,?,?,?,?,?)",
+    [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? "", p.ocr_text ?? ""]
   );
 }
 
-export async function ftsRebuild(): Promise<void> {
-  const d = await getDb();
+// dbOverride: callers running INSIDE migrate() must pass the open handle —
+// getDb() here would await the same pending promise migrate() is already
+// running under and deadlock the very first launch that needs a rebuild.
+export async function ftsRebuild(dbOverride?: SQLite.SQLiteDatabase): Promise<void> {
+  const d = dbOverride ?? (await getDb());
   const rows = await d.getAllAsync<any>("SELECT * FROM photos");
   await d.runAsync("DELETE FROM photos_fts");
   for (const r of rows) {
     const p = rowToPhoto(r);
     await d.runAsync(
-      "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption) VALUES (?,?,?,?,?,?,?,?)",
-      [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? ""]
+      "INSERT INTO photos_fts (photo_id, filename, folder, tags, device, camera, mime, ai_caption, ocr_text) VALUES (?,?,?,?,?,?,?,?,?)",
+      [p.id, p.filename ?? "", p.folder ?? "", p.tags ?? "", p.device ?? "", p.camera ?? "", p.mime ?? "", p.ai_caption ?? "", p.ocr_text ?? ""]
     );
   }
 }

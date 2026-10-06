@@ -65,6 +65,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [dedupeGroups, setDedupeGroups] = useState<PhotoRow[][] | null>(null);
   const [dedupeBusy, setDedupeBusy] = useState(false);
   const [dedupeNote, setDedupeNote] = useState<string | null>(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrNote, setOcrNote] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
@@ -363,6 +366,34 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     setDiagVisible(true);
   }
 
+  async function runOcrBackfill() {
+    if (ocrBusy) return;
+    setOcrBusy(true);
+    setOcrNote(null);
+    setOcrError(null);
+    try {
+      const { ocrScreenshotBackfill } = await import("../lib/ocr");
+      const r = await ocrScreenshotBackfill((p) =>
+        setOcrNote(
+          p.currentFile
+            ? `Reading ${p.done + 1}/${p.total} — text found in ${p.found} so far`
+            : `Finished`
+        )
+      );
+      setOcrNote(
+        r.done === 0
+          ? "Nothing pending — every screenshot has been read."
+          : `Read ${r.done} screenshot${r.done === 1 ? "" : "s"} — text extracted from ${r.found}` +
+              (r.failed > 0 ? `, ${r.failed} failed (retried next run)` : "") +
+              "."
+      );
+    } catch (e: any) {
+      setOcrError(e?.message ?? "OCR failed — try again.");
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
   async function runChannelDedupeScan() {
     setDedupeBusy(true);
     setDedupeNote(null);
@@ -611,6 +642,33 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {tagError ? (
                 <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {tagError}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Screenshot text (OCR)" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Extracts the visible text from your backed-up screenshots via Gemini so word
+                search finds content inside them ("wifi password", order numbers). Uses your
+                Gemini key — one small request per screenshot; run again to pick up new ones.
+              </Text>
+              <Button
+                title={ocrBusy ? "Extracting…" : "Extract text from screenshots"}
+                theme={theme}
+                variant="outlined"
+                busy={ocrBusy}
+                onPress={runOcrBackfill}
+                style={{ marginTop: 12 }}
+              />
+              {ocrNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {ocrNote}
+                </Text>
+              ) : null}
+              {ocrError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {ocrError}
                 </Text>
               ) : null}
             </Card>

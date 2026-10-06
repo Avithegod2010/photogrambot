@@ -24,6 +24,7 @@ import { tokenForPhoto } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
 import { unlockHiddenAlbum } from "../lib/biometrics";
 import { restorePhotosToDevice } from "../lib/restore";
+import { shareTripStory } from "../lib/story";
 import { isDecoyActive } from "../lib/applock";
 import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
 import { formatSearchFilterSummary } from "../lib/filterSummary";
@@ -707,6 +708,23 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   );
   const [restoringAll, setRestoringAll] = React.useState<string | null>(null);
 
+  // Trip story (#4): post a text summary of this trip to the channel — no
+  // new photo uploads, just the digest-style summary post.
+  const [sharingStory, setSharingStory] = useState(false);
+
+  async function shareStory() {
+    if (sharingStory || isTrip !== true) return;
+    setSharingStory(true);
+    try {
+      await shareTripStory(albumName, photos.filter((p) => p.status === "uploaded"));
+      Alert.alert("Story shared", `A summary of "${albumName}" was posted to your channel.`);
+    } catch (e: any) {
+      Alert.alert("Share failed", e?.message ?? "Could not post the story.");
+    } finally {
+      setSharingStory(false);
+    }
+  }
+
   function restoreAll() {
     if (restoreTargets.length === 0) return;
     Alert.alert(
@@ -753,11 +771,27 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }} numberOfLines={1}>
             {restoringAll}
           </Text>
-        ) : !isDecoyActive() && restoreTargets.length > 0 ? (
-          <Pressable onPress={restoreAll} hitSlop={6}>
-            <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Restore all</Text>
-          </Pressable>
-        ) : null}
+        ) : (
+          <>
+            {!isDecoyActive() && restoreTargets.length > 0 ? (
+              <Pressable onPress={restoreAll} hitSlop={6}>
+                <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Restore all</Text>
+              </Pressable>
+            ) : null}
+            {isTrip && !isDecoyActive() && restoreTargets.length > 0 ? (
+              <Pressable
+                onPress={() => void shareStory()}
+                hitSlop={6}
+                disabled={sharingStory}
+                style={{ marginStart: 14 }}
+              >
+                <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>
+                  {sharingStory ? "Sharing…" : "Story"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </>
+        )}
         {albumId !== -1 && !isTrip && selection.size > 0 ? (
           <Pressable
             onPress={() => {
