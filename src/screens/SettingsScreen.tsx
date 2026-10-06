@@ -37,6 +37,8 @@ import {
 import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
 import { exportMonthZip } from "../lib/zipexport";
 import { getUploadedPhotosInMonth } from "../lib/db";
+import { exportIndexCsv } from "../lib/csvexport";
+import { listProfiles, type DestProfile } from "../lib/destinations";
 import {
   getBreakInLog,
   clearBreakInLog,
@@ -85,6 +87,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [zipMonths, setZipMonths] = useState<{ label: string; year: number; month: number }[]>([]);
   const [zipBusy, setZipBusy] = useState(false);
   const [zipNote, setZipNote] = useState<string | null>(null);
+  const [mirrorProfiles, setMirrorProfiles] = useState<DestProfile[]>([]);
+
+  useEffect(() => {
+    if (prefs.multiDestination) {
+      void listProfiles().then(setMirrorProfiles);
+    }
+  }, [prefs.multiDestination]);
 
   useEffect(() => {
     void getPinExists().then(setPinExists);
@@ -423,17 +432,58 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             theme={theme}
           />
           {prefs.multiDestination ? (
-            <Pressable style={styles.destRow} onPress={() => navigation.navigate("Destinations")}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
-                  Manage destinations
-                </Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
-                  Add bot/channel pairs and folder routing rules
-                </Text>
-              </View>
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
-            </Pressable>
+            <>
+              <Pressable style={styles.destRow} onPress={() => navigation.navigate("Destinations")}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
+                    Manage destinations
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                    Add bot/channel pairs and folder routing rules
+                  </Text>
+                </View>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+              </Pressable>
+              <View style={styles.divider} />
+              <ToggleRow
+                title="Mirror uploads (redundancy)"
+                subtitle="Send every upload a second time to the destination below — a plain duplicate copy for safety. Mirror copies are not tracked: deleting a photo does not remove its mirror."
+                value={prefs.mirrorEnabled}
+                onChange={(v) => void update({ mirrorEnabled: v })}
+                theme={theme}
+              />
+              {prefs.mirrorEnabled ? (
+                <>
+                  {mirrorProfiles.length === 0 ? (
+                    <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant }]}>
+                      No extra destinations yet — add one under Manage destinations.
+                    </Text>
+                  ) : (
+                    mirrorProfiles.map((p) => (
+                      <Pressable
+                        key={p.id}
+                        style={styles.destRow}
+                        onPress={() => void update({ mirrorProfileId: p.id })}
+                      >
+                        <Text
+                          style={{
+                            color: prefs.mirrorProfileId === p.id ? theme.colors.primary : theme.colors.onSurface,
+                            fontWeight: prefs.mirrorProfileId === p.id ? "700" : "500",
+                            fontSize: 13.5,
+                            flex: 1,
+                          }}
+                          numberOfLines={1}
+                        >
+                          {p.channelTitle || p.name}
+                          {prefs.mirrorProfileId === p.id ? "  ·  mirror" : ""}
+                        </Text>
+                        <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+                      </Pressable>
+                    ))
+                  )}
+                </>
+              ) : null}
+            </>
           ) : null}
         </Card>
 
@@ -756,6 +806,17 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             <Button title="Export to file" variant="outlined" theme={theme} onPress={onExportLocal} />
             <Button title="Import local backup" variant="outlined" theme={theme} onPress={() => setImportDialog(true)} />
           </View>
+          <Button
+            title="Export index (CSV)"
+            variant="outlined"
+            theme={theme}
+            onPress={() =>
+              void exportIndexCsv().catch((e: any) =>
+                Alert.alert("Export failed", e?.message ?? "Unknown error")
+              )
+            }
+            style={{ marginTop: 8 }}
+          />
         </Card>
 
         <SectionLabel text="Storage" theme={theme} />

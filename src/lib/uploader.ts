@@ -42,6 +42,7 @@ import { hammingHex } from "./phash";
 import { classifyAutoTags } from "./autotags";
 import { extractMotionVideo } from "./motion";
 import { logDiag } from "./diaglog";
+import { bumpHealth } from "./digest";
 import { isVideoMime } from "./format";
 import { splitAndUploadVideo, type VideoPart } from "./vsplit";
 import { notifyUploadProgress, notifyUploadComplete, notifyUploadsFailed } from "./notify";
@@ -50,6 +51,33 @@ import {
   profileIdForFolder,
   type Destination,
 } from "./destinations";
+
+// Mirror mode (R31): after a successful upload, re-send the same file to the
+// configured mirror destination — a dumb second copy in another bot/channel
+// for redundancy. The mirror post is NOT tracked in the index: /delete and
+// channel cleanup only manage primary copies (documented limitation). Split
+// videos are not mirrored (their parts chain is primary-channel-specific).
+async function mirrorUpload(
+  caption: string,
+  localUri: string,
+  filename: string,
+  mime: string
+): Promise<void> {
+  try {
+    const prefs = await loadPrefs();
+    if (!prefs.mirrorEnabled || !prefs.mirrorProfileId) return;
+    const dest = await resolveDestination(prefs.mirrorProfileId);
+    if (!dest) return;
+    await sendDocument(dest.channelId, localUri, {
+      caption,
+      filename,
+      mime,
+      token: dest.token,
+    });
+  } catch (e: any) {
+    void logDiag("upload", `Mirror copy failed for ${filename}: ${e?.message ?? e}`);
+  }
+}
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_RETRIES = 5;
@@ -812,6 +840,7 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
         } catch {}
       }
     }
+    void mirrorUpload(caption, item.local_uri, item.filename, mime);
     await updateQueueItem(item.id, { state: "done", error: null });
     return "done";
   } catch (e: any) {
@@ -827,6 +856,7 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       (e instanceof TelegramError && PERMANENT_CODES.has(e.code)) ||
       /entity too large/i.test(message);
     if (permanent || retries >= MAX_RETRIES) {
+      void bumpHealth("failed_final");
       await updateQueueItem(item.id, { state: "failed", retries, error: message });
       await updatePhoto(photoId, { status: "failed", error: message });
       return "failed";
@@ -1132,6 +1162,10 @@ async function uploadVideoItem(
           throw e;
         }
       }
+    }
+    // Single-file videos mirror too; split parts (message === null) do not.
+    if (message) {
+      void mirrorUpload(caption, item.local_uri, item.filename, ctx.mime);
     }
 
     await updatePhoto(photoId, {
