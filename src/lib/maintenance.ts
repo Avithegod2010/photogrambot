@@ -435,6 +435,8 @@ export async function repairBrokenUploads(
       });
       if (created > 0) {
         enqueued++;
+        const { bumpHealth } = await import("./digest");
+        void bumpHealth("repairs");
         // Mark honestly: the cloud copy is broken and a repair is in flight.
         // A completed repair flips this back to 'uploaded' with fresh ids.
         await updatePhoto(row.id, { status: "failed", error: "Re-uploading (self-repair)" });

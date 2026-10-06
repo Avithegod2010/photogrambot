@@ -17,6 +17,7 @@ import { getAiApiKey, loadPrefs } from "./settings";
 import { getCachedTelegramFile } from "./media";
 import { tokenForPhoto } from "./destinations";
 import { logDiag } from "./diaglog";
+import { bumpHealth } from "./digest";
 
 export interface OcrProgress {
   done: number;
@@ -69,7 +70,10 @@ export async function ocrScreenshotBackfill(
       }
       const text = await ocrImageWithGemini({ apiKey, model, imageUri: uri });
       await updatePhoto(row.id, { ocr_text: text });
-      if (text) found++;
+      if (text) {
+        found++;
+        void bumpHealth("ocr");
+      }
       done++;
     } catch (e: any) {
       failed++;
