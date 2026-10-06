@@ -73,6 +73,9 @@ export interface QueueRow {
   added_at: number;
   content_hash: string | null;
   upload_type: string;
+  // Priority lanes (R27): 0 = promoted (camera/DCIM/favorited), 1 = default,
+  // 2 = deprioritized (screenshots/screen recordings).
+  priority: number;
   state: "pending" | "running" | "done" | "failed" | "skipped" | "duplicate";
   retries: number;
   next_attempt_at: number | null;

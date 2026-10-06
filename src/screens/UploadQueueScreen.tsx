@@ -143,6 +143,9 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
                   item.folder ?? "Unfiled",
                   formatBytes(item.size),
                   item.retries > 0 ? `${item.retries} retry${item.retries === 1 ? "" : "s"}` : null,
+                  // Priority lanes (R27): make the lane visible so "why is my
+                  // screenshot last?" has an answer.
+                  item.priority === 0 ? "priority" : item.priority === 2 ? "low priority" : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

@@ -9,25 +9,31 @@ PhotogramBot turns a private Telegram channel into your personal, free photo arc
 **Backup engine**
 - Auto-sync of your full local roll + camera-watch (new photos upload within seconds), gated by Wi-Fi-only and charging-only options
 - Share-target: send photos/videos straight from Google Photos or any app
-- Upload queue with per-item retry, backoff, live progress, and cancel
+- Upload queue with per-item retry, backoff, live progress, cancel, and **priority lanes** (camera shots first, screenshots last, favorites jump the queue)
 - Videos backed up as ~19 MB re-assemblable parts (beta); resumable split uploads
-- Duplicate-safe uploads (content hashes), AI captions (optional, via your own Gemini key) that are searchable
+- Duplicate-safe uploads (content hashes) plus a perceptual-hash guard that skips re-saves/recompressions
+- **Overnight catch-up**: a bulk backlog drain while the phone charges at night (Wi-Fi + charging + per-night cap)
+- **Self-repair**: uploads that go unreachable in the channel are re-uploaded automatically when the local file still exists
+- **Motion photos**: the embedded video inside a motion JPEG is extracted and backed up as a companion clip
 
 **Browsing & organization**
 - Gallery (local roll with cloud badges), Cloud timeline, Collections tabs
-- Albums, Favorites, Trash with restore — and *delete from Telegram too*
-- Months / Years / period views, map of geotagged photos
-- **Trips & events** — auto-generated albums that group photos by time gaps and location jumps
-- Search: full-text (filename, folder, device, camera, AI captions), structured filters (date, media type, device, size sort, not-backed-up), saved smart collections, and natural-language search ("photos of documents from last month", optional Gemini)
+- Albums, Favorites, Trash with restore — and *delete from Telegram too*; range-select and drag-paint multi-select
+- Months / Years / period views, map of geotagged photos, on-this-day memories
+- **Trips & events** — auto-generated albums that group photos by time gaps and location jumps, with one-tap **story summaries** posted to your channel
+- Search: full-text (filename, folder, device, camera, AI captions, **screenshot OCR text**), structured filters (date, media type, device, size sort, not-backed-up), saved smart collections, natural-language search ("photos of documents from last month", optional Gemini), and meaning-based semantic fallback (optional Gemini embeddings)
 
 **Safety & maintenance**
-- AES-256-GCM **encrypted database backup** to your own channel (PBKDF2-HMAC-SHA256, 600k iterations) — restore everything on a new phone
-- App lock: biometric, PIN, and a **decoy PIN** that opens an empty gallery; failed-unlock backoff
-- Remote control from Telegram: `/status`, `/sync`, `/pause`, `/resume`, reply-`/delete`
-- Maintenance: backup verification sampler, integrity checker, near-duplicate finder (perceptual hash), "find similar", free-up-space (delete local copies that are safely in the cloud)
-- Storage stats with cloud/local split and monthly chart
-- Home-screen widget showing a random photo from your library
-- Multi-destination routing (experimental): multiple bots/channels, per-folder rules
+- AES-256-GCM **encrypted database backup** to your own channel (PBKDF2-HMAC-SHA256, 600k iterations) — restore everything on a new phone, with an in-app **migration wizard**
+- App lock: biometric, PIN, and a **decoy PIN** that opens an empty gallery; failed-unlock backoff and a **break-in log** (wrong PINs, rejected biometrics, decoy uses)
+- Remote control from Telegram: `/status`, `/sync`, `/pause`, `/resume`, reply-`/delete`, `/find <words>`, reply-`/restore`, and a two-step `/wipe` that erases local copies from a lost phone while the archive stays safe
+- **Low-storage guard**: automatic backups pause below 500 MB free; thumbnail cache with one-tap clear
+- **Monthly channel digest**: weekly stats, backup-verification sample, and archive-health tallies posted to your channel
+- Maintenance: backup verification sampler, integrity checker, near-duplicate finder, channel-dedupe audit, in-app diagnostics log, "find similar", free-up-space (including a screenshot-sunset view of 30+ day-old screenshots), monthly ZIP export
+- **Multi-channel mirror** (experimental): re-send every upload to a second bot/channel for redundancy
+- **Index export (CSV)**: your whole library index as a spreadsheet — no lock-in
+- Home-screen widget showing a random photo from your library (optionally favorites only)
+- Material You theming, themed app icon, upload notifications that deep-link to the queue
 
 ## Privacy
 
@@ -67,6 +73,16 @@ Release signing is opt-in and machine-local — the two secret files are gitigno
 2. `android/pb-release-signing.properties` — with `storeFile`, `storePassword`, `keyAlias`, `keyPassword`
 
 Without them, a release APK still builds and installs (signed with the debug keystore) — fine for testing, not for distribution. Bump `versionCode` in `android/version.properties` for every release artifact.
+
+### Cloud builds (EAS)
+
+`eas.json` ships with three profiles: `development`, `preview` (installable APK), and `production` (store AAB). Cloud builds sidestep any local Gradle/network issues — log in with `eas login` (or `EXPO_TOKEN`), then:
+
+```bash
+eas build -p android --profile preview
+```
+
+Note: EAS generates and manages its own keystore for cloud builds unless you upload yours via `eas credentials`.
 
 ### In-app setup
 
