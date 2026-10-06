@@ -667,6 +667,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       asset_mtime: null,
       motion_file_id: null,
       motion_message_id: null,
+      ocr_text: null,
     };
     navigation.navigate("Viewer", { photos: [photo], index: 0 });
   }
