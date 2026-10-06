@@ -1050,6 +1050,7 @@ async function uploadVersionItem(
       (e instanceof TelegramError && PERMANENT_CODES.has(e.code)) ||
       /entity too large/i.test(message);
     if (permanent || retries >= MAX_RETRIES) {
+      void bumpHealth("failed_final");
       await updateQueueItem(item.id, { state: "failed", retries, error: message });
       return "failed";
     }
