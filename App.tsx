@@ -11,6 +11,7 @@ import { useSetupStore } from "./src/store/useSetupStore";
 import { useSettingsStore, useDeviceStore } from "./src/store/useSettingsStore";
 import { useLibraryStore } from "./src/store/useLibraryStore";
 import { useTheme } from "./src/useTheme";
+import * as Notifications from "expo-notifications";
 import { SetupScreen } from "./src/screens/SetupScreen";
 import { GalleryScreen } from "./src/screens/GalleryScreen";
 import { CollectionsScreen, AlbumScreen, LibraryScreen } from "./src/screens/CollectionsScreen";
@@ -64,6 +65,25 @@ async function openPhotoFromUrl(url: string | null): Promise<void> {
       navigationRef.navigate("Viewer", { photos: [photo], index: 0 });
     }
   } catch {}
+}
+
+// Notification tap-actions (#10): a failed-uploads notification carries
+// { screen: "UploadQueue" } — tapping it deep-links to the queue. Cold starts
+// stash the response until navigation is ready.
+let pendingNotificationScreen: string | null = null;
+
+function screenForNotificationResponse(response: Notifications.NotificationResponse): string | null {
+  const data = response.notification.request.content.data as { screen?: string } | undefined;
+  return data && typeof data.screen === "string" ? data.screen : null;
+}
+
+function navigateToNotificationScreen(screen: string): void {
+  if (isDecoyActive()) return;
+  if (!navigationRef.isReady()) {
+    pendingNotificationScreen = screen;
+    return;
+  }
+  navigationRef.navigate(screen as never);
 }
 
 function CloudTab(props: any) {
@@ -165,6 +185,11 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
         ref={navigationRef}
         onReady={() => {
           void Linking.getInitialURL().then(openPhotoFromUrl);
+          if (pendingNotificationScreen) {
+            const screen = pendingNotificationScreen;
+            pendingNotificationScreen = null;
+            navigationRef.navigate(screen as never);
+          }
         }}
       >
         <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -249,6 +274,20 @@ export default function App() {
       setInitialized(true);
     })();
   }, []);
+
+  useEffect(() => {
+    if (step !== "ready" || locked) return;
+    // Tapping a failure notification opens the upload queue.
+    Notifications.getLastNotificationResponseAsync().then((res) => {
+      const screen = res ? screenForNotificationResponse(res) : null;
+      if (screen) navigateToNotificationScreen(screen);
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener((res) => {
+      const screen = screenForNotificationResponse(res);
+      if (screen) navigateToNotificationScreen(screen);
+    });
+    return () => sub.remove();
+  }, [step, locked]);
 
   useEffect(() => {
     if (step !== "ready" || locked) return;

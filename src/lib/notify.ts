@@ -68,6 +68,8 @@ export async function notifyUploadComplete(saved: number, failed: number): Promi
 // Unlike the progress/complete notifications this one deliberately fires in
 // the foreground too — with the banner handler configured, that is the only
 // way a failed run becomes visible without opening the queue screen.
+// The `screen` data field is what App.tsx's response listener uses to open
+// the upload queue when the notification is tapped.
 export async function notifyUploadsFailed(failed: number, saved: number): Promise<void> {
   try {
     ensureHandler();
@@ -76,7 +78,8 @@ export async function notifyUploadsFailed(failed: number, saved: number): Promis
       identifier: "pb-upload-failed",
       content: {
         title: "Uploads failed",
-        body: `${failed} item${failed === 1 ? "" : "s"} failed${saved > 0 ? `, ${saved} uploaded` : ""} — open the app and retry from Maintenance → Upload queue.`,
+        body: `${failed} item${failed === 1 ? "" : "s"} failed${saved > 0 ? `, ${saved} uploaded` : ""} — tap to review the queue.`,
+        data: { screen: "UploadQueue" },
       },
       trigger: null,
     });

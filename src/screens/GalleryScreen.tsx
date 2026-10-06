@@ -300,18 +300,64 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   // Range select: in selection mode, long-pressing another tile selects the
   // inclusive span between the anchor and it (display order of the results
   // grid). Replaces the selection with the span, then re-anchors there so
-  // ranges can be chained.
-  const selectRange = useCallback(
-    (fromId: string, toId: string) => {
+  // ranges can be chained. Paint-select reuses the same span math with the
+  // anchor fixed.
+  const selectSpan = useCallback(
+    (fromId: string, toId: string, reanchor: boolean) => {
       const flat = sections.flatMap((s) => s.data.map((p) => p.id));
       const a = flat.indexOf(fromId);
       const b = flat.indexOf(toId);
       if (a === -1 || b === -1 || a === b) return;
       const [lo, hi] = a < b ? [a, b] : [b, a];
       setSelection(new Set(flat.slice(lo, hi + 1)));
-      setRangeAnchorId(toId);
+      if (reanchor) setRangeAnchorId(toId);
     },
     [sections]
+  );
+
+  const selectRange = useCallback(
+    (fromId: string, toId: string) => selectSpan(fromId, toId, true),
+    [selectSpan]
+  );
+
+  // --- Paint-select (#8) ---
+  // Press a tile in selection mode and drag: the pointer's content
+  // coordinates are hit-tested against reported tile rects and the span from
+  // the anchor grows/shrinks with the finger. Fixed search grid only — the
+  // staggered local roll keeps plain selection. Needs device verification.
+  const paintState = useRef<{ anchorId: string; listX: number; listY: number; pressX: number; pressY: number } | null>(null);
+  const paintScrollY = useRef(0);
+  const paintLastId = useRef<string | null>(null);
+  const paintListRef = useRef<View | null>(null);
+  const paintSections = useRef(
+    new Map<number, { secY: number; gx: number; gy: number; tiles: Map<string, { x: number; y: number; w: number; h: number }> }>()
+  );
+
+  useEffect(() => {
+    paintSections.current.clear();
+  }, [sections]);
+
+  const handlePaintMove = useCallback(
+    (pageX: number, pageY: number) => {
+      const p = paintState.current;
+      if (!p) return;
+      const cx = pageX - p.listX;
+      const cy = paintScrollY.current + (pageY - p.listY);
+      for (const sec of paintSections.current.values()) {
+        for (const [id, t] of sec.tiles) {
+          const ax = sec.gx + t.x;
+          const ay = sec.secY + sec.gy + t.y;
+          if (cx >= ax && cx <= ax + t.w && cy >= ay && cy <= ay + t.h) {
+            if (id !== p.anchorId && paintLastId.current !== id) {
+              paintLastId.current = id;
+              selectSpan(p.anchorId, id, false);
+            }
+            return;
+          }
+        }
+      }
+    },
+    [selectSpan]
   );
 
   async function onRefresh() {
@@ -558,8 +604,32 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const h = height ?? tile;
     return (
       <Pressable
-        onPress={() => onTilePress(photo, 0)}
+        onPress={() => {
+          paintState.current = null;
+          onTilePress(photo, 0);
+        }}
+        onPressIn={(e) => {
+          if (selectionMode) {
+            // Paint anchor: the pressed tile starts (or continues) a drag.
+            // The press point is kept so the capture threshold can tell a
+            // drag from finger jitter (which must not cancel long-press).
+            paintState.current = {
+              anchorId: photo.id,
+              listX: 0,
+              listY: 0,
+              pressX: e.nativeEvent.pageX,
+              pressY: e.nativeEvent.pageY,
+            };
+            paintListRef.current?.measureInWindow((x, y) => {
+              if (paintState.current) {
+                paintState.current.listX = x;
+                paintState.current.listY = y;
+              }
+            });
+          }
+        }}
         onLongPress={() => {
+          paintState.current = null;
           if (selectionMode && rangeAnchorId && rangeAnchorId !== photo.id) {
             selectRange(rangeAnchorId, photo.id);
             return;
@@ -815,6 +885,29 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <Text style={{ color: theme.colors.onSurfaceVariant }}>No results for “{search}”</Text>
         </View>
       ) : searchResults ? (
+        <View
+          ref={paintListRef}
+          onMoveShouldSetResponderCapture={(e) => {
+            const p = paintState.current;
+            if (!p) return false;
+            // Only hijack the touch once the finger has genuinely moved —
+            // small jitter must keep flowing to the tile so long-press
+            // range-select keeps working.
+            const dx = e.nativeEvent.pageX - p.pressX;
+            const dy = e.nativeEvent.pageY - p.pressY;
+            return dx * dx + dy * dy > 144;
+          }}
+          onResponderGrant={() => {
+            paintLastId.current = null;
+          }}
+          onResponderMove={(e) => handlePaintMove(e.nativeEvent.pageX, e.nativeEvent.pageY)}
+          onResponderRelease={() => {
+            paintState.current = null;
+          }}
+          onResponderTerminate={() => {
+            paintState.current = null;
+          }}
+        >
         <FlatList
           data={sections}
           // Size-sorted results interleave dates, so the same label can head
@@ -824,6 +917,10 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             if (!searchResults) void loadMore();
           }}
           onEndReachedThreshold={0.6}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            paintScrollY.current = e.nativeEvent.contentOffset.y;
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
           }
@@ -836,8 +933,16 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               </View>
             ) : null
           }
-          renderItem={({ item }) => (
-            <View>
+          renderItem={({ item, index: si }) => (
+            <View
+              onLayout={(e) => {
+                const m =
+                  paintSections.current.get(si) ??
+                  { secY: 0, gx: 0, gy: 0, tiles: new Map() };
+                m.secY = e.nativeEvent.layout.y;
+                paintSections.current.set(si, m);
+              }}
+            >
               <View style={styles.dateHeaderRow}>
                 <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
                   {item.label}
@@ -859,6 +964,22 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                 photos={item.data}
                 staggered={staggered && !searchResults}
                 renderTile={renderTile}
+                paintSectionIndex={si}
+                onTileLayout={(sectionIndex, id, l) => {
+                  const m =
+                    paintSections.current.get(sectionIndex) ??
+                    { secY: 0, gx: 0, gy: 0, tiles: new Map() };
+                  m.tiles.set(id, { x: l.x, y: l.y, w: l.width, h: l.height });
+                  paintSections.current.set(sectionIndex, m);
+                }}
+                onGridLayout={(sectionIndex, l) => {
+                  const m =
+                    paintSections.current.get(sectionIndex) ??
+                    { secY: 0, gx: 0, gy: 0, tiles: new Map() };
+                  m.gx = l.x;
+                  m.gy = l.y;
+                  paintSections.current.set(sectionIndex, m);
+                }}
               />
             </View>
           )}
@@ -882,6 +1003,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             ) : null
           }
         />
+        </View>
       ) : viewMode !== "days" ? (
         <PeriodJumpList mode={viewMode} navigation={navigation} theme={theme} />
       ) : (
@@ -1514,16 +1636,40 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
   photos,
   staggered,
   renderTile,
+  paintSectionIndex,
+  onTileLayout,
+  onGridLayout,
 }: {
   photos: T[];
   staggered: boolean;
   renderTile: (p: T, w?: number, h?: number) => React.ReactNode;
+  // Paint-select (#8): when provided, tile/grid layouts are reported so the
+  // drag handler can hit-test pointers into photo ids (fixed grid only).
+  paintSectionIndex?: number;
+  onTileLayout?: (sectionIndex: number, id: string, l: { x: number; y: number; width: number; height: number }) => void;
+  onGridLayout?: (sectionIndex: number, l: { x: number; y: number; width: number; height: number }) => void;
 }) {
   if (!staggered) {
     return (
-      <View style={styles.grid}>
+      <View
+        style={styles.grid}
+        onLayout={
+          onGridLayout && paintSectionIndex !== undefined
+            ? (e) => onGridLayout(paintSectionIndex, e.nativeEvent.layout)
+            : undefined
+        }
+      >
         {photos.map((p) => (
-          <React.Fragment key={p.id}>{renderTile(p)}</React.Fragment>
+          <View
+            key={p.id}
+            onLayout={
+              onTileLayout && paintSectionIndex !== undefined
+                ? (e) => onTileLayout(paintSectionIndex, p.id, e.nativeEvent.layout)
+                : undefined
+            }
+          >
+            {renderTile(p)}
+          </View>
         ))}
       </View>
     );

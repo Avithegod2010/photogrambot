@@ -582,6 +582,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ staggeredGrid: v })}
             theme={theme}
           />
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Widget shows favorites only"
+            subtitle="Limit the home-screen random photo widget to favorited photos"
+            value={prefs.widgetFavoritesOnly}
+            onChange={(v) => void update({ widgetFavoritesOnly: v })}
+            theme={theme}
+          />
         </Card>
 
         <SectionLabel text="Privacy & security" theme={theme} />

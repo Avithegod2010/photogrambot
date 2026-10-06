@@ -45,6 +45,7 @@ export interface Prefs {
   overnightCap: number;
   mirrorEnabled: boolean;
   mirrorProfileId: string;
+  widgetFavoritesOnly: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -82,6 +83,7 @@ export const defaultPrefs: Prefs = {
   overnightCap: 500,
   mirrorEnabled: false,
   mirrorProfileId: "",
+  widgetFavoritesOnly: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",
