@@ -11,15 +11,21 @@ export async function getRandomPhotoForWidget(): Promise<{
     const { getCachedTelegramFile } = await import("./src/lib/media");
     const { File } = await import("expo-file-system");
     const db = await getDb();
+    // Widget v2: the widget source follows the widgetFavoritesOnly pref —
+    // "all backed-up photos" (default) or "favorites only".
+    const { loadPrefs } = await import("./src/lib/settings");
+    const prefs = await loadPrefs();
+    const scopeSql = prefs.widgetFavoritesOnly ? "AND favorite = 1" : "";
     const row = await db.getFirstAsync<any>(
       `SELECT id, preview_file_id, thumb_file_id, remote_file_id, taken_at, width, height FROM photos
        WHERE status IN ('uploaded','local')
        AND id NOT IN (SELECT photo_id FROM trash)
+       ${scopeSql}
        AND (preview_file_id IS NOT NULL OR thumb_file_id IS NOT NULL OR remote_file_id IS NOT NULL)
        ORDER BY RANDOM() LIMIT 1`
     );
     const total = await db.getFirstAsync<{ n: number }>(
-      "SELECT COUNT(*) as n FROM photos WHERE status IN ('uploaded','local') AND id NOT IN (SELECT photo_id FROM trash)"
+      `SELECT COUNT(*) as n FROM photos WHERE status IN ('uploaded','local') AND id NOT IN (SELECT photo_id FROM trash) ${scopeSql}`
     );
     if (!row) {
       return {
