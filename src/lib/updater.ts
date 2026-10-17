@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from "expo-file-system";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import { installApk } from "../../modules/share-intent";
+import { installApk, openInstallSettings } from "../../modules/share-intent";
 import {
   buildUpdate,
   pickApkRelease,
@@ -11,6 +11,7 @@ import {
 } from "./updaterLogic";
 
 export type { AvailableUpdate } from "./updaterLogic";
+export { openInstallSettings } from "../../modules/share-intent";
 
 const OWNER = "Avithegod2010";
 const REPO = "photogrambot";

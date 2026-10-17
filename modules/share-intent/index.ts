@@ -5,6 +5,7 @@ type ShareIntentModuleType = {
   clearSharedMedia: () => void;
   shareMedia: (uris: string[], mime: string) => boolean;
   installApk: (filePath: string) => boolean;
+  openInstallSettings: () => boolean;
 };
 
 const mod = requireNativeModule<ShareIntentModuleType>("ShareIntent");
@@ -34,6 +35,14 @@ export function shareMedia(uris: string[], mime: string): boolean {
 export function installApk(filePath: string): boolean {
   try {
     return mod.installApk(filePath);
+  } catch {
+    return false;
+  }
+}
+
+export function openInstallSettings(): boolean {
+  try {
+    return mod.openInstallSettings();
   } catch {
     return false;
   }

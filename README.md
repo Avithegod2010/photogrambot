@@ -29,6 +29,7 @@ There is **no middleman server** — the app talks directly to `api.telegram.org
 - [Features](#features)
 - [Privacy](#privacy)
 - [Building](#building)
+- [Publishing releases (in-app updater)](#publishing-releases-in-app-updater)
 - [In-app setup](#in-app-setup)
 - [How it works](#how-it-works)
 - [Tech stack](#tech-stack)
@@ -132,6 +133,25 @@ eas build -p android --profile preview
 
 > [!NOTE]
 > EAS generates and manages its own keystore for cloud builds unless you upload yours via `eas credentials`.
+
+### Publishing releases (in-app updater)
+
+The app can update itself from GitHub Releases. Settings → About → **Software updates** checks the latest release of this repo, downloads the attached `.apk`, and hands it to the Android installer (the app will ask you to allow "install unknown apps" the first time).
+
+For an exact version comparison, attach a **`latest.json`** next to the APK:
+
+```bash
+# bump android/version.properties first (versionCode + versionName)
+npm run release:manifest -- --apk photogrambot-1.0.1.apk --notes "What's new"
+```
+
+Then create the release and upload both files:
+
+```bash
+gh release create v1.0.1 photogrambot-1.0.1.apk latest.json --title "v1.0.1" --notes-file CHANGELOG.md
+```
+
+Without `latest.json` the updater falls back to comparing the release tag's semantic version against the installed version. `android/version.properties` is the single source of truth for `versionCode` / `versionName`.
 
 ## In-app setup
 

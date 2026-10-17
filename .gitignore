@@ -66,3 +66,6 @@ modules/*/android/build/
 
 # Throwaway test harnesses and scratch builds
 .tmp-harness/
+
+# Generated release manifest (attach to a GitHub Release, don't commit)
+latest.json

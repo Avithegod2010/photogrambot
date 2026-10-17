@@ -38,7 +38,7 @@ import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/apploc
 import { exportMonthZip } from "../lib/zipexport";
 import { getUploadedPhotosInMonth } from "../lib/db";
 import { exportIndexCsv } from "../lib/csvexport";
-import { checkForUpdate, downloadAndInstallUpdate, CURRENT_VERSION } from "../lib/updater";
+import { checkForUpdate, downloadAndInstallUpdate, openInstallSettings, CURRENT_VERSION } from "../lib/updater";
 import { listProfiles, type DestProfile } from "../lib/destinations";
 import {
   getBreakInLog,
@@ -162,6 +162,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                   );
                 } catch (e: any) {
                   setUpdateNote(e?.message ?? "Update failed");
+                  Alert.alert(
+                    "Couldn't open the installer",
+                    "Android needs your permission to install apps from PhotogramBot. Open the setting and allow it, then tap Check again.",
+                    [
+                      { text: "Later", style: "cancel" },
+                      { text: "Open settings", onPress: () => openInstallSettings() },
+                    ]
+                  );
                 } finally {
                   setUpdateBusy(false);
                 }

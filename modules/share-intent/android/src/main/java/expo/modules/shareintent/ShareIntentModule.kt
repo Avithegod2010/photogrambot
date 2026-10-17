@@ -3,6 +3,8 @@ package expo.modules.shareintent
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -87,6 +89,26 @@ class ShareIntentModule : Module() {
       } catch (e: IllegalArgumentException) {
         false
       } catch (e: SecurityException) {
+        false
+      }
+    }
+
+    Function("openInstallSettings") {
+      val context = appContext.reactContext ?: return@Function false
+      try {
+        val canTargetPackage = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        val action = if (canTargetPackage) {
+          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES
+        } else {
+          Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS
+        }
+        val intent = Intent(action).apply {
+          if (canTargetPackage) data = Uri.parse("package:${context.packageName}")
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        true
+      } catch (e: ActivityNotFoundException) {
         false
       }
     }
