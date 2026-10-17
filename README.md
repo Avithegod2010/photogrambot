@@ -72,7 +72,9 @@ Release signing is opt-in and machine-local — the two secret files are gitigno
 1. `android/app/pb-release.keystore` — your release keystore
 2. `android/pb-release-signing.properties` — with `storeFile`, `storePassword`, `keyAlias`, `keyPassword`
 
-Without them, a release APK still builds and installs (signed with the debug keystore) — fine for testing, not for distribution. Bump `versionCode` in `android/version.properties` for every release artifact.
+Without them, a release APK still builds and installs (signed with the debug keystore) — fine for testing, not for distribution.
+
+`android/version.properties` is the single source of truth for the release version — bump `versionCode` (and `versionName`) there for every release artifact. Both the native build (`android/app/build.gradle`) and `app.config.ts` read that same file, so the two can never drift.
 
 ### Cloud builds (EAS)
 

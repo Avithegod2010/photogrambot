@@ -28,7 +28,7 @@ This repository is **PhotogramBot**, the Telegram Bot API version.
 - **Engine**: Bot API via `api.telegram.org` — bot token + channel id configured in-app
 - **Package name**: `com.photogrambot.app`
 - **Tech stack**: Expo SDK 57, React Native, SQLite (expo-sqlite), Zustand, Bot API (no TDLib)
-- **Repo location**: `photogrambot`
+- **Repo location**: this repository (a standalone git repo; never touch the sibling TDLib app)
 
 ---
 
@@ -185,6 +185,7 @@ This repository is **PhotogramBot**, the Telegram Bot API version.
 | 31 | Ideas-menu round 3 continued (owner approved features 5-7: archive-health report, multi-channel mirror, index export; ALL inline) | **F5 Archive health** — kv counters `health_failed_final` (bumped in both uploadQueueItem and uploadVersionItem permanent-failure branches), `health_repairs` (repairBrokenUploads per enqueued row), `health_ocr` (ocr.ts per row with text); the weekly digest reports them as "Health since last digest: …" and resets ONLY after a successful post (review caught the first version resetting inside buildDigestText — a failed send would have erased the week's data). **F6 Multi-channel mirror** — prefs `mirrorEnabled` (default OFF) + `mirrorProfileId` (chosen from existing multi-destination profiles in Settings); `mirrorUpload()` in uploader.ts re-sends the same file with the same caption to the mirror destination after every successful photo upload and single-file video (void, never fails the primary path, diag-logged failures); **mirror posts are deliberately NOT tracked in the index** — /delete and channel dedupe manage primary copies only (documented limitation); split videos not mirrored (message === null in the parts path). **F7 Index CSV export** — `src/lib/csvexport.ts` `buildPhotosCsv()` (full index: ISO dates, sizes, mime, dims, duration, camera, device, content_hash, message_id, lat/lng, status, favorite; quote-escaping with doubled quotes, CRLF) + `exportIndexCsv()` sharing via expo-sharing with cache-copy cleanup; Settings → Database → "Export index (CSV)". 6/6 harness; tsc clean; NOT device-verified. |
 | 32 | Ideas-menu round 3 final batch (owner approved features 8-11: drag-select, widget v2, notification actions, themed icon; ALL inline) | **F8 Paint-select** — press-and-drag paints the span in selection mode (search-results FIXED grid only): SectionGrid gained optional paint props reporting tile + grid layouts (wrapper Views with onLayout); renderItem root reports section Y; pointer → content coords via `onScroll`-tracked offset + one `measureInWindow` of the list wrapper at press; hit-test walks visible tile rects; `selectSpan(from, to, reanchor)` extracted from selectRange so paint keeps a FIXED anchor (shrink-on-backtrack) while long-press range-select still re-anchors for chaining; responder capture on the list wrapper with a **12 px jitter threshold** (review caught: instant capture on any move would cancel long-press) and release/terminate cleanup. Marked NEEDS DEVICE VERIFICATION — the geometry is code-reviewed but unproven on hardware. **F9 Widget scope** — `widgetFavoritesOnly` pref (Settings → Appearance); widgetData's random-photo + count queries honor it headless. **F10 Notification tap-action** — failed-uploads notification carries `data.screen = "UploadQueue"`; App.tsx response listener + `getLastNotificationResponseAsync` for cold starts (stashed until NavigationContainer onReady; decoy-guarded). **F11 Themed icon ALREADY EXISTED** — `adaptiveIcon.monochromeImage` is wired in app.config.ts; Android 13+ themes it automatically. Verified, nothing built. 5/5 harness; tsc clean; NOT device-verified. |
 | 33 | Refinement pass while the device round is pending (owner: "refine everything as the device verification will be done few days from now"; ALL inline) | **Polish + correctness sweep, no new features**: (1) `uploadVersionItem`'s permanent-failure branch now bumps the archive-health counter — only the photo path did, so the digest under-counted version failures; (2) upload-queue rows display their priority lane ("priority" / "low priority") so the R27 lanes are visible in the UI; (3) `QueueRow` interface gained the missing `priority` field (tsc caught the omission the moment the badge used it); (4) README rewritten to match the shipped feature set through R32 and gained an EAS cloud-build section with the keystore caveat; (5) secret-hygiene grep over tracked files (clean — no token anywhere in git); (6) AGENTS.md turned into a full cross-chatbot handover (this text). tsc clean; no harness changes needed. |
+| 34 | **Device round 2 (partial; verified on real hardware)** — first on-device run since R13; ALL inline | **Two real, launch/scan-breaking bugs found by running R33 on hardware and fixed (commit `c5f62d9`, device-verified):** (1) `src/lib/db.ts` — three stray **zero-width-space (U+200B)** characters inside the `getMemories` SQL (before `'unixepoch'`) made the on-this-day query throw `near "'unixepoch'": syntax error` at **every launch**, so the Memories carousel was completely dead; chars removed → carousel renders ("1 year ago", "2 years ago"). (2) `src/lib/sync.ts` — `album.getTitle()` was invoked **outside** the try/catch in both `scanAndEnqueueAll` and `scanRecentAndEnqueue`, so a single album that no longer exists in MediaStore (`Album with ID=… does not exist`) aborted the **entire scan**; both call sites wrapped → full scan completes (pending 67 → 254). **Device-verified working this round:** camera-watch (adb-pushed photo → auto-enqueued `priority 0` → uploaded); search + full filter sheet (Date range / Has location / Not backed up yet / Device / Media / auto-Type, graceful "No results", AI-search gate without a key); overview 6-month chart; **Phase 9 unencrypted backup→restore round-trip** ("2305 photo records restored", 74 trip albums survived); R22 Trips & events (74 auto trip-albums with counts + covers); auto-sync uploads with correct Telegram **429** backoff. Noted (not bugs): 312 stale video failures pre-date R19 (0 new in 24 h); one `NativeStatement.finalizeAsync` rejection on the Screenshots scan (monitor). `tsc --noEmit` clean; commit **not pushed** at time of writing. |
 
 ---
 
@@ -202,6 +203,15 @@ This repository is **PhotogramBot**, the Telegram Bot API version.
 ## Device Verification Checklist
 
 > **2026-08-31 — device round 1 COMPLETE for Phases 0–2** (first real Android device, wireless adb, debug build): fresh build ✅, launches past splash ✅ (getDb race fix validated), setup flow ✅ (test bot + private test channel), 4 photo uploads ✅ (preview + original + metadata caption in channel), offline token retention ✅, Material You theming ✅, picker ✅ (after permissions), new tab UI ✅, local-roll gallery ✅, cloud thumbnails ✅ (4 JPEGs verified in app cache). **Continue at Phase 3.** The phone has a secure lock — adb cannot dismiss the keyguard; ask the owner to unlock it.
+
+> **2026-10-17 — device round 2 (partial; owner will drive the remainder)** — wireless adb, existing dev-client build (`versionName 0.1.0`) serving **current Metro JS (R33)**: launched clean past splash, **current JS confirmed visually** (R25 Weekly digest + Screenshot sunset, R27 priority lanes + Free up space, R31 Export index CSV, R32 Widget-favorites-only all present). Library ~2326 photos / 12.8 GB loaded.
+> **Two real bugs found on hardware — fixed, device-verified, committed `c5f62d9`:**
+> 1. `src/lib/db.ts` — three stray **zero-width-space (U+200B)** chars inside the `getMemories` SQL (`'unixepoch'`) made the on-this-day query throw `near "'unixepoch'": syntax error` at **every launch** → Memories was fully broken; chars removed and the carousel now renders ("1 year ago", "2 years ago").
+> 2. `src/lib/sync.ts` — `album.getTitle()` was called **outside** the try/catch in `scanAndEnqueueAll`/`scanRecentAndEnqueue`, so a single album that no longer exists in MediaStore (`Album with ID=… does not exist`) aborted the **entire scan**; both wrapped and the full scan now completes (pending went 67 → 254).
+>
+> **Verified this round:** Phase 3 **camera-watch** ✅ (adb-pushed photo auto-enqueued with `priority 0` and reached `done` = uploaded); Phase 8 **search** ✅ (graceful "No results"; **AI-search gate without a Gemini key correct**) + **filter sheet** ✅ (Date range, Has location, **Not backed up yet**, Device chip, Media, auto-Type) + **overview 6-month chart** ✅; **Phase 9 backup→restore** ✅ ("Backup uploaded & pinned" → "2305 photo records restored", 74 trip albums survived the round-trip); **R22 Trips & events** ✅ (74 auto trip-albums render with counts + covers). Auto-sync uploads progressed live (2101 → 2140 done), throttling on Telegram **429** with correct backoff.
+> **Noted (not bugs):** the 312 "failed" queue rows are **all stale videos** (created Aug 31–Sep 5, pre-R19 staging fix; 0 new failures in 24 h) — queue-cleanup candidate; one caught `NativeStatement.finalizeAsync` rejection appeared on the Screenshots album scan (monitor).
+> **Still owed:** Phase 3 charging/Wi-Fi gates, Phase 4 videos, Phase 5 share-target, Phase 6 security, Phase 7 multi-destination, and the R23–R32 per-round checks.
 
 **Phase 0 — Fresh build (required)**
 > Old APKs won't work: `expo-video`, the share-intent Kotlin module, intent filters, `background-task`, `expo-network`, `expo-battery`, `expo-notifications` are all new native code.
@@ -222,9 +232,9 @@ npx expo run:android
 - [ ] Re-upload of an identical item is marked duplicate, not re-uploaded
 
 **Phase 3 — Auto-sync & camera watch**
-- [ ] Settings → **Auto sync** ON → take a photo with the camera → uploads within ~10 s (camera watch)
-- [ ] Settings → **Upload only while charging** ON → unplug → take photo → nothing uploads; plug in → it uploads
-- [ ] Wi-Fi-only ON + mobile data → auto-sync holds
+- [x] Settings → **Auto sync** ON → take a photo with the camera → uploads within ~10 s (camera watch) *(2026-10-17 ✅ — adb-pushed photo auto-enqueued with `priority 0` and uploaded)*
+- [ ] Settings → **Upload only while charging** ON → unplug → take photo → nothing uploads; plug in → it uploads *(still owed)*
+- [ ] Wi-Fi-only ON + mobile data → auto-sync holds *(still owed)*
 
 **Phase 4 — Video (beta) ⚠**
 - [ ] Settings → **Video support (Beta)** ON
@@ -251,12 +261,12 @@ npx expo run:android
 - [ ] Background the app mid-upload → **notification** appears (progress + completion)
 - [ ] **Widget**: add RandomPhotoWidget → photo shows → tap → opens *that* photo in the viewer *(review flag *b*)*
 - [ ] Map shows pins; tap a cluster → View photos → correct thumbs
-- [ ] Search text + **☰ filters** (date range, has location, camera) work; "FILTERED" badge clears
-- [ ] Overview card: 6-month chart bars render
+- [x] Search text + **☰ filters** (date range, has location, camera) work; "FILTERED" badge clears *(2026-10-17 ✅ — filter sheet shows Date range / Has location / Not backed up yet / Device / Media / auto-Type; graceful "No results"; AI-search gate with no Gemini key correct)*
+- [x] Overview card: 6-month chart bars render *(2026-10-17 ✅)*
 - [ ] (Optional) Gemini key → AI captioning → `🤖 …` line in channel caption, searchable
 
 **Phase 9 — Migration dry-run**
-- [ ] *Backup to channel* → *Restore from channel* on the same device → library intact (albums, favorites, AI captions)
+- [x] *Backup to channel* → *Restore from channel* on the same device → library intact (albums, favorites, AI captions) *(2026-10-17 ✅ unencrypted round-trip: "Backup uploaded & pinned" → "2305 photo records restored"; 74 auto trip-albums survived; **encrypted** round-trip + wrong-passphrase path still owed)*
 
 ---
 

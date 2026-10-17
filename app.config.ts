@@ -1,5 +1,30 @@
+import fs from "fs";
+import path from "path";
 import type { ExpoConfig } from "expo/config";
 import type { WithAndroidWidgetsParams } from "react-native-android-widget";
+
+// android/version.properties (COMMITTED) is the single source of truth for the
+// release version. Read it here so app.config.ts can never drift from the native
+// build (android/app/build.gradle reads the same file).
+function readReleaseVersion(): { versionCode: number; versionName: string } {
+  try {
+    const raw = fs.readFileSync(
+      path.resolve(__dirname, "android", "version.properties"),
+      "utf8",
+    );
+    const get = (key: string): string | undefined =>
+      raw.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+?)\\s*$`, "m"))?.[1];
+    const versionCode = parseInt(get("versionCode") ?? "1", 10);
+    return {
+      versionCode: Number.isFinite(versionCode) && versionCode > 0 ? versionCode : 1,
+      versionName: get("versionName") ?? "1.0.0",
+    };
+  } catch {
+    return { versionCode: 1, versionName: "1.0.0" };
+  }
+}
+
+const releaseVersion = readReleaseVersion();
 
 const widgetConfig: WithAndroidWidgetsParams = {
   widgets: [
@@ -18,7 +43,7 @@ const widgetConfig: WithAndroidWidgetsParams = {
 const config: ExpoConfig = {
   name: "PhotogramBot",
   slug: "photogrambot",
-  version: "1.0.0",
+  version: releaseVersion.versionName,
   scheme: "photogrambot",
   orientation: "portrait",
   icon: "./assets/icon.png",
@@ -36,7 +61,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.photogrambot.app",
-    versionCode: 1,
+    versionCode: releaseVersion.versionCode,
     adaptiveIcon: {
       backgroundColor: "#101014",
       foregroundImage: "./assets/android-icon-foreground.png",
