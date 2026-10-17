@@ -137,7 +137,7 @@ export async function handleRemoteCommand(
       }
       const lines = results.map((p) => `• ${p.filename} — ${formatDate(p.taken_at)}`);
       lines.push("Reply /restore to a photo's backup message to save the original to this phone.");
-      await sendMessage(chatId, `Top ${results.length} matcheREDACTED_PATH"\n")}`, {
+      await sendMessage(chatId, `Top ${results.length} matches:\n${lines.join("\n")}`, {
         replyToMessageId: msg.message_id,
       });
     } catch (e: any) {
