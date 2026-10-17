@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getPhotosByUploadStatus, setAlbumLocked, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
 import { getCachedTelegramFile } from "../lib/media";
@@ -533,7 +533,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const isTrip: boolean = !!route.params?.isTrip && albumId !== -1;
   const needsUnlock: boolean = !!route.params?.locked && albumId !== -1;
   const [unlocked, setUnlocked] = useState(!needsUnlock);
-  const { favorites, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
+  const { favorites, albums, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Entered via the Collections long-press "Select photos" action or by
@@ -541,6 +541,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   // regardless (existing behavior); the flag is what lets Favorites taps
   // select instead of opening the viewer.
   const [selectionMode, setSelectionMode] = useState(!!route.params?.selectMode);
+  const [coverNote, setCoverNote] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (needsUnlock && !unlocked) {
@@ -586,6 +587,27 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
     (p): p is PhotoRow & { local_id: string } => p.status === "local" && !!p.local_id
   );
   const barVisible = selection.size > 0 || (selectionMode && photos.length > 0);
+  // Current curated cover for this album, if any (F11) — lets the single-select
+  // action toggle to "Remove cover".
+  const currentCover = albums.find((a) => a.id === albumId)?.cover_photo_id ?? null;
+  const selectedId = selection.size === 1 ? Array.from(selection)[0] : null;
+
+  // Curate an album/trip cover from a single selected photo (F11). Shown in
+  // the header briefly; Collections reloads albums on focus so the grid tile
+  // picks up the new cover on back.
+  async function applyCover() {
+    if (albumId === -1 || selection.size !== 1) return;
+    const photoId = Array.from(selection)[0];
+    const clearing = photoId === currentCover;
+    try {
+      await setAlbumCover(albumId, clearing ? null : photoId);
+      setCoverNote(clearing ? "Default cover restored" : "Cover updated");
+      setTimeout(() => setCoverNote(null), 2000);
+      clearSel();
+    } catch (e: any) {
+      setCoverNote(e?.message ?? "Could not set cover");
+    }
+  }
 
   // Deterministic bulk favorite: mixed selections favorite everything, an
   // all-favorite selection unfavorites. One Telegram reaction + one refresh
@@ -767,6 +789,11 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
+        {coverNote ? (
+          <Text style={{ color: theme.colors.primary, fontWeight: "600", marginStart: 10 }} numberOfLines={1}>
+            {coverNote}
+          </Text>
+        ) : null}
         {!isDecoyActive() && restoringAll ? (
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }} numberOfLines={1}>
             {restoringAll}
@@ -895,6 +922,13 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Share</Text>
           </Pressable>
+          {albumId !== -1 && selectedId ? (
+            <Pressable onPress={() => void applyCover()} style={styles.selAction}>
+              <Text style={{ color: theme.colors.primary }}>
+                {selectedId === currentCover ? "Remove cover" : "Set cover"}
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={trashSelected} style={styles.selAction}>
             <Text style={{ color: theme.colors.error }}>Trash</Text>
           </Pressable>

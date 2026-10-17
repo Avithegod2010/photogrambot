@@ -56,6 +56,7 @@ export interface AlbumRow {
   created_at: number;
   locked?: number | null;
   query?: string | null;
+  cover_photo_id?: string | null;
 }
 
 export interface TrashRow {
@@ -333,6 +334,9 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
     ["query", "TEXT"],
+    // Curated album cover (F11): when set and still a member, this photo is
+    // preferred over the newest-taken default. NULL = automatic.
+    ["cover_photo_id", "TEXT"],
   ]);
   await migrateFtsSchema(db);
   await db.execAsync(`
@@ -1132,12 +1136,17 @@ export interface AlbumWithCover extends AlbumRow {
 
 export async function getAlbums(): Promise<AlbumWithCover[]> {
   const d = await getDb();
+  // Cover selection: a curated cover (cover_photo_id) wins when it is still a
+  // non-trashed member; otherwise fall back to the newest-taken member. The
+  // CASE orders the curated row first so LIMIT 1 picks it.
   const rows = await d.getAllAsync<any>(
     `SELECT a.*, COUNT(ap.photo_id) as count,
        (SELECT p.remote_file_id FROM album_photos ap2 JOIN photos p ON p.id = ap2.photo_id
-        WHERE ap2.album_id = a.id ORDER BY p.taken_at DESC LIMIT 1) as cover_file_id,
+        WHERE ap2.album_id = a.id AND p.id NOT IN (SELECT photo_id FROM trash)
+        ORDER BY CASE WHEN p.id = a.cover_photo_id THEN 0 ELSE 1 END, p.taken_at DESC LIMIT 1) as cover_file_id,
        (SELECT p.preview_file_id FROM album_photos ap3 JOIN photos p ON p.id = ap3.photo_id
-        WHERE ap3.album_id = a.id ORDER BY p.taken_at DESC LIMIT 1) as cover_preview_id
+        WHERE ap3.album_id = a.id AND p.id NOT IN (SELECT photo_id FROM trash)
+        ORDER BY CASE WHEN p.id = a.cover_photo_id THEN 0 ELSE 1 END, p.taken_at DESC LIMIT 1) as cover_preview_id
      FROM albums a
      LEFT JOIN album_photos ap ON ap.album_id = a.id
      GROUP BY a.id ORDER BY a.created_at DESC`
@@ -1148,10 +1157,18 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     created_at: r.created_at,
     locked: r.locked,
     query: r.query ?? null,
+    cover_photo_id: r.cover_photo_id ?? null,
     count: r.count,
     cover_file_id: r.cover_file_id,
     cover_preview_id: r.cover_preview_id,
   }));
+}
+
+// Curate an album/trip cover (F11). Passing null restores the newest-taken
+// default. Stored on the album row so generator rebuilds (trips) don't clear it.
+export async function setAlbumCover(albumId: number, photoId: string | null): Promise<void> {
+  const d = await getDb();
+  await d.runAsync("UPDATE albums SET cover_photo_id = ? WHERE id = ?", [photoId, albumId]);
 }
 
 export async function getAlbumPhotos(albumId: number): Promise<PhotoRow[]> {
@@ -2248,9 +2265,17 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       count += res.changes > 0 ? 1 : 0;
     }
     for (const a of data.albums ?? []) {
-      await d.runAsync("INSERT OR IGNORE INTO albums (id, name, created_at, locked, query) VALUES (?,?,?,?,?)", [
-        a.id, a.name, a.created_at, a.locked ?? null, typeof a.query === "string" ? a.query.slice(0, 100_000) : null,
-      ]);
+      await d.runAsync(
+        "INSERT OR IGNORE INTO albums (id, name, created_at, locked, query, cover_photo_id) VALUES (?,?,?,?,?,?)",
+        [
+          a.id,
+          a.name,
+          a.created_at,
+          a.locked ?? null,
+          typeof a.query === "string" ? a.query.slice(0, 100_000) : null,
+          typeof a.cover_photo_id === "string" ? a.cover_photo_id : null,
+        ]
+      );
     }
     for (const ap of data.album_photos ?? []) {
       await d.runAsync(
