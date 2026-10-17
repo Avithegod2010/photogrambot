@@ -1,9 +1,12 @@
 package expo.modules.shareintent
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.io.File
 
 class ShareIntentModule : Module() {
   private var pendingUris: MutableList<String> = mutableListOf()
@@ -59,6 +62,33 @@ class ShareIntentModule : Module() {
       }
       context.startActivity(chooser)
       true
+    }
+
+    Function("installApk") { filePath: String ->
+      val context = appContext.reactContext ?: return@Function false
+      try {
+        val path = if (filePath.startsWith("file://")) {
+          Uri.parse(filePath).path ?: return@Function false
+        } else {
+          filePath
+        }
+        val file = File(path)
+        if (!file.exists()) return@Function false
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+          setDataAndType(uri, "application/vnd.android.package-archive")
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(installIntent)
+        true
+      } catch (e: ActivityNotFoundException) {
+        false
+      } catch (e: IllegalArgumentException) {
+        false
+      } catch (e: SecurityException) {
+        false
+      }
     }
   }
 

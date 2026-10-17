@@ -38,6 +38,7 @@ import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/apploc
 import { exportMonthZip } from "../lib/zipexport";
 import { getUploadedPhotosInMonth } from "../lib/db";
 import { exportIndexCsv } from "../lib/csvexport";
+import { checkForUpdate, downloadAndInstallUpdate, CURRENT_VERSION } from "../lib/updater";
 import { listProfiles, type DestProfile } from "../lib/destinations";
 import {
   getBreakInLog,
@@ -87,6 +88,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [zipMonths, setZipMonths] = useState<{ label: string; year: number; month: number }[]>([]);
   const [zipBusy, setZipBusy] = useState(false);
   const [zipNote, setZipNote] = useState<string | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateNote, setUpdateNote] = useState<string | null>(null);
   const [mirrorProfiles, setMirrorProfiles] = useState<DestProfile[]>([]);
 
   useEffect(() => {
@@ -119,6 +122,59 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   async function onClearThumbCache() {
     await pruneThumbCache();
     setThumbBytes(await thumbCacheBytes());
+  }
+
+  async function runUpdateCheck() {
+    if (updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateNote("Checking GitHub for the latest release…");
+    try {
+      const result = await checkForUpdate();
+      if (result.status === "unsupported" || result.status === "error") {
+        setUpdateNote(result.message);
+        return;
+      }
+      if (result.status === "up-to-date") {
+        setUpdateNote(`You're on the latest version (${result.current}).`);
+        return;
+      }
+      setUpdateNote(null);
+      const notes = result.notes?.trim();
+      Alert.alert(
+        `Update available: ${result.latest}`,
+        `You have ${result.current}. ${
+          notes ? notes.slice(0, 280) + "\n\n" : ""
+        }Download and install now? The APK is fetched from GitHub Releases.`,
+        [
+          { text: "Later", style: "cancel", onPress: () => setUpdateNote(null) },
+          {
+            text: "Download",
+            onPress: () => {
+              void (async () => {
+                setUpdateBusy(true);
+                try {
+                  await downloadAndInstallUpdate(result, (written, total) => {
+                    const pct = total > 0 ? Math.floor((written / total) * 100) : 0;
+                    setUpdateNote(`Downloading ${result.latest} — ${pct}%`);
+                  });
+                  setUpdateNote(
+                    "Downloaded. Follow the installer to finish. If nothing appeared, allow PhotogramBot to install unknown apps in Android settings."
+                  );
+                } catch (e: any) {
+                  setUpdateNote(e?.message ?? "Update failed");
+                } finally {
+                  setUpdateBusy(false);
+                }
+              })();
+            },
+          },
+        ]
+      );
+    } catch (e: any) {
+      setUpdateNote(e?.message ?? "Update check failed");
+    } finally {
+      setUpdateBusy(false);
+    }
   }
 
   const MONTH_LABELS = [
@@ -876,10 +932,28 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>PhotogramBot</Text>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 4, lineHeight: 18 }}>
-            Version 1.0.0 · Photos are backed up to your own Telegram channel via your own bot.
+            Version {CURRENT_VERSION} · Photos are backed up to your own Telegram channel via your own bot.
             No servers, no tracking. Telegram Bot API limits: originals up to 50 MB, downloads
             up to 20 MB.
           </Text>
+          <View style={styles.divider} />
+          <View style={styles.configRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13.5 }}>
+                Software updates
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+                {updateNote ?? "Check GitHub Releases for a newer APK and install it in place."}
+              </Text>
+            </View>
+            <Button
+              title={updateBusy ? "Checking…" : "Check"}
+              variant="outlined"
+              theme={theme}
+              disabled={updateBusy}
+              onPress={() => void runUpdateCheck()}
+            />
+          </View>
         </Card>
 
         <View style={{ height: 60 }} />

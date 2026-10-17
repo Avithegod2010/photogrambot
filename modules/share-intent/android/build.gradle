@@ -28,3 +28,7 @@ android {
     abortOnError false
   }
 }
+
+dependencies {
+  implementation "androidx.core:core:${safeExtGet('androidxCoreVersion', '1.15.0')}"
+}
