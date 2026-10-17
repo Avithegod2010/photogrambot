@@ -43,6 +43,8 @@ export interface PhotoRow {
   error: string | null;
   upload_type: string | null;
   phash: string | null;
+  // Mainline/backfill marker (1 = scanned for an embedded motion clip).
+  motion_checked?: number | null;
   // MediaLibrary modificationTime (seconds) captured at the last scan — the
   // edit-detection baseline for photo version history. NULL = never scanned.
   asset_mtime: number | null;
@@ -209,6 +211,10 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     ["asset_mtime", "REAL"],
     ["motion_file_id", "TEXT"],
     ["motion_message_id", "INTEGER"],
+    // Retroactive motion-clip backfill marker: 1 once the row has been scanned
+    // for an embedded clip (regardless of result) so Maintenance never
+    // re-decodes the same JPEG every run.
+    ["motion_checked", "INTEGER"],
     // OCR of screenshot-tagged rows (R30): extracted visible text, searchable
     // via FTS. NULL = not attempted (or failed — retried next pass); '' = no
     // text found (a finished result, never retried).
@@ -231,6 +237,27 @@ export async function getScreenshotOcrPending(limit = 200): Promise<PhotoRow[]> 
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
        AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at DESC
+     LIMIT ?`,
+    [limit]
+  );
+  return rows.map(rowToPhoto);
+}
+
+// Retroactive motion-clip candidates: uploaded JPEGs that still have a local
+// copy and were never scanned for an embedded clip (motion_checked NULL/0).
+// Rows already carrying a clip (motion_message_id set) or with no local file
+// are excluded — nothing to re-extract.
+export async function getPhotosMissingMotion(limit = 200): Promise<PhotoRow[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    `SELECT * FROM photos
+     WHERE status = 'uploaded'
+       AND mime = 'image/jpeg'
+       AND message_id IS NOT NULL
+       AND local_uri IS NOT NULL
+       AND motion_message_id IS NULL
+       AND (motion_checked IS NULL OR motion_checked = 0)
      ORDER BY taken_at DESC
      LIMIT ?`,
     [limit]

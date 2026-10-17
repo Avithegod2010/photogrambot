@@ -15,7 +15,8 @@ export type DiagKind =
   | "digest"
   | "background"
   | "remote"
-  | "repair";
+  | "repair"
+  | "motion";
 
 export interface DiagEvent {
   t: number;

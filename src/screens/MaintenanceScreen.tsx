@@ -68,6 +68,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [motionBusy, setMotionBusy] = useState(false);
+  const [motionProgress, setMotionProgress] = useState<{ done: number; total: number } | null>(null);
+  const [motionNote, setMotionNote] = useState<string | null>(null);
+  const [motionError, setMotionError] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [restoreRunning, setRestoreRunning] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress | null>(null);
@@ -394,8 +398,35 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     }
   }
 
-  async function runChannelDedupeScan() {
-    setDedupeBusy(true);
+  async function runMotionBackfill() {
+    if (motionBusy) return;
+    setMotionBusy(true);
+    setMotionNote(null);
+    setMotionError(null);
+    setMotionProgress({ done: 0, total: 0 });
+    try {
+      const { backfillMotionClips } = await import("../lib/maintenance");
+      const r = await backfillMotionClips((done, total) => setMotionProgress({ done, total }));
+      if (r.scanned === 0) {
+        setMotionNote("Nothing to scan — every backed-up photo has been checked.");
+      } else {
+        setMotionNote(
+          `Scanned ${r.scanned}: ${r.extracted} motion clip${r.extracted === 1 ? "" : "s"} uploaded` +
+            `, ${r.empty} had none` +
+            (r.skipped > 0 ? `, ${r.skipped} skipped (no local copy)` : "") +
+            (r.failed > 0 ? `, ${r.failed} failed (retried next run)` : "") +
+            "."
+        );
+      }
+    } catch (e: any) {
+      setMotionError(e?.message ?? "Motion scan failed — try again.");
+    } finally {
+      setMotionBusy(false);
+      setMotionProgress(null);
+    }
+  }
+
+  async function runChannelDedupeScan() {    setDedupeBusy(true);
     setDedupeNote(null);
     try {
       const groups = await getDuplicateHashGroups();
@@ -669,6 +700,39 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {ocrError ? (
                 <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {ocrError}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="Motion clips" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Google/Samsung motion photos carry a short video inside the JPEG. New backups get
+                their clip automatically; this scans photos backed up earlier and uploads any missing
+                clips as a #{""}motion reply so they're playable again. Needs the local copy still on
+                this phone.
+              </Text>
+              <Button
+                title={motionBusy ? "Scanning…" : "Extract motion clips"}
+                theme={theme}
+                variant="outlined"
+                busy={motionBusy}
+                onPress={() => void runMotionBackfill()}
+                style={{ marginTop: 12 }}
+              />
+              {motionProgress ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 10 }}>
+                  Scanning {motionProgress.done}/{motionProgress.total || "…"}
+                </Text>
+              ) : null}
+              {motionNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {motionNote}
+                </Text>
+              ) : null}
+              {motionError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {motionError}
                 </Text>
               ) : null}
             </Card>

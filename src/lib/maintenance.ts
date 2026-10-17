@@ -10,14 +10,16 @@ import {
   clearLocalUris,
   getPhoto,
   enqueueUpload,
+  getPhotosMissingMotion,
   type PhotoRow,
   type DuplicateGroup,
 } from "./db";
 import { File, FileMode } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
-import { getFile } from "./telegram";
+import { getFile, sendDocument } from "./telegram";
 import { getCachedTelegramFile } from "./media";
-import { tokenForPhoto } from "./destinations";
+import { tokenForPhoto, resolveDestination } from "./destinations";
+import { extractMotionVideo } from "./motion";
 import {
   dcGridFromJpeg,
   dHashFromDc,
@@ -569,4 +571,93 @@ export async function autoTagBackfill(
     done: true,
   });
   return { tagged, scanned: rows.length };
+}
+
+// Retroactive motion-clip extraction (F8 follow-up): photos backed up before
+// R27 never got their embedded clip. This pass re-scans still-present local
+// JPEGs, extracts the clip and uploads it as a #motion reply to the original
+// document, then stamps motion_checked so the row is never re-decoded — even
+// when nothing is found. On-demand from Maintenance only (a full-library pass
+// decodes every JPEG on the JS thread).
+export interface MotionBackfillResult {
+  scanned: number;
+  extracted: number;
+  empty: number;
+  skipped: number;
+  failed: number;
+}
+
+const MOTION_BACKFILL_LIMIT = 200;
+
+export async function backfillMotionClips(
+  onProgress?: (done: number, total: number) => void
+): Promise<MotionBackfillResult> {
+  const { logDiag } = await import("./diaglog");
+  const rows = await getPhotosMissingMotion(MOTION_BACKFILL_LIMIT);
+  const result: MotionBackfillResult = {
+    scanned: rows.length,
+    extracted: 0,
+    empty: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  let done = 0;
+  for (const row of rows) {
+    done += 1;
+    onProgress?.(done, rows.length);
+    try {
+      if (!row.local_uri || row.message_id == null) {
+        result.skipped += 1;
+        await updatePhoto(row.id, { motion_checked: 1 });
+        continue;
+      }
+      const src = new File(row.local_uri);
+      if (!src.exists) {
+        result.skipped += 1;
+        await updatePhoto(row.id, { motion_checked: 1 });
+        continue;
+      }
+      const clip = await extractMotionVideo(row.local_uri);
+      if (!clip) {
+        result.empty += 1;
+        await updatePhoto(row.id, { motion_checked: 1 });
+        continue;
+      }
+      const dest = await resolveDestination(row.profile_id ?? null);
+      if (!dest) {
+        result.skipped += 1;
+        continue; // leave unchecked so a fixed destination retries later
+      }
+      try {
+        const name = `${row.filename.replace(/\.[^.]+$/, "")}_motion.mp4`;
+        const m = await sendDocument(dest.channelId, clip.uri, {
+          caption: `${name} #motion`,
+          filename: name,
+          mime: "video/mp4",
+          replyToMessageId: row.message_id,
+          token: dest.token,
+        });
+        await updatePhoto(row.id, {
+          motion_file_id: m.document?.file_id ?? null,
+          motion_message_id: m.message_id ?? null,
+          motion_checked: 1,
+        });
+        result.extracted += 1;
+      } catch (e: any) {
+        // Leave unchecked so a later run retries; the photo itself is intact.
+        result.failed += 1;
+        void logDiag("motion", `Motion backfill failed for ${row.filename}: ${e?.message ?? e}`);
+      } finally {
+        try {
+          new File(clip.uri).delete();
+        } catch {}
+      }
+    } catch (e: any) {
+      result.failed += 1;
+      void logDiag("motion", `Motion scan failed for ${row.filename}: ${e?.message ?? e}`);
+    }
+    await new Promise((r) => setTimeout(r, 60));
+    if (done % 10 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+  return result;
 }
