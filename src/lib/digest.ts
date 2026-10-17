@@ -91,7 +91,7 @@ export async function maybePostWeeklyDigest(): Promise<void> {
   }
 }
 
-async function buildDigestText(): Promise<{
+export async function buildDigestText(title = "PhotogramBot weekly digest"): Promise<{
   text: string;
   broken: { id: string; filename: string }[];
   health: Record<HealthKey, number>;
@@ -101,7 +101,7 @@ async function buildDigestText(): Promise<{
   const health = await getHealthSnapshot();
   const s = await getStats();
   const lines: string[] = [];
-  lines.push(`PhotogramBot weekly digest — ${new Date().toISOString().slice(0, 10)}`);
+  lines.push(`${title} — ${new Date().toISOString().slice(0, 10)}`);
   lines.push(
     `Library: ${s.total} photos, ${s.uploaded} backed up (${formatBytes(s.totalBytes)})`
   );

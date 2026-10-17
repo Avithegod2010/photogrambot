@@ -6,6 +6,8 @@
 //
 // Commands (case-insensitive, reply forms where noted):
 //   /status          — library + queue totals
+//   /stats           — full archive-health report on demand (same body as the
+//                      weekly digest, including a sampled backup verification)
 //   /sync            — full-gallery scan + enqueue (respects network gates)
 //   /pause           — hold auto-sync (watcher/background/bootstrap)
 //   /resume          — release the pause, then one scan
@@ -84,7 +86,7 @@ export async function handleRemoteCommand(
   if (!text.startsWith("/")) return false;
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
   if (
-    !["/status", "/sync", "/pause", "/resume", "/delete", "/find", "/restore", "/wipe"].includes(
+    !["/status", "/stats", "/sync", "/pause", "/resume", "/delete", "/find", "/restore", "/wipe"].includes(
       cmd
     )
   ) {
@@ -93,6 +95,16 @@ export async function handleRemoteCommand(
 
   if (cmd === "/status") {
     await replyStatus(chatId, msg.message_id);
+  } else if (cmd === "/stats") {
+    try {
+      const { buildDigestText } = await import("./digest");
+      const { text } = await buildDigestText("PhotogramBot report");
+      await sendMessage(chatId, text, { replyToMessageId: msg.message_id });
+    } catch (e: any) {
+      await sendMessage(chatId, `Stats failed: ${e?.message ?? "unknown error"}`, {
+        replyToMessageId: msg.message_id,
+      });
+    }
   } else if (cmd === "/pause") {
     await kvSet(PAUSE_KEY, "1");
     await sendMessage(chatId, "Auto-sync paused. Send /resume to continue.", {
