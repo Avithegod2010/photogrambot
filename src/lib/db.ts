@@ -1930,20 +1930,20 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
           AND p2.id NOT IN (SELECT photo_id FROM trash)
           AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
-          AND strftime('%m-%d', p2.taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
+          AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
           ORDER BY p2.taken_at DESC LIMIT 1) as cover_preview_id,
         (SELECT p3.remote_file_id FROM photos p3
           WHERE p3.status IN ('uploaded','local','failed')
           AND p3.id NOT IN (SELECT photo_id FROM trash)
           AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
-          AND strftime('%m-%d', p3.taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
+          AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
           ORDER BY p3.taken_at DESC LIMIT 1) as cover_file_id
       FROM photos p
       WHERE status IN ('uploaded','local','failed')
       AND id NOT IN (SELECT photo_id FROM trash)
       AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) < ?
-      AND strftime('%m-%d', taken_at / 1000, ​'unixepoch', 'localtime') IN (${ph})
+      AND strftime('%m-%d', taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
       GROUP BY year ORDER BY year DESC`,
     [...dates, ...dates, thisYear, ...dates]
   );

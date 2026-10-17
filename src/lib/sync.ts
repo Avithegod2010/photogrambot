@@ -113,7 +113,12 @@ export async function scanAndEnqueueAll(
     // stop entirely. The next night continues where this one stopped:
     // enqueueUploads only enqueues rows that aren't uploaded yet.
     if (maxNew !== undefined && enqueued >= maxNew) break;
-    const title = await album.getTitle();
+    let title: string;
+    try {
+      title = await album.getTitle();
+    } catch {
+      continue;
+    }
     if (excluded.has(title)) continue;
     try {
       let assets = await new MediaLibrary.Query()
@@ -170,7 +175,12 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
   const albums = await MediaLibrary.Album.getAll();
   let enqueued = 0;
   for (const album of albums) {
-    const title = await album.getTitle();
+    let title: string;
+    try {
+      title = await album.getTitle();
+    } catch {
+      continue;
+    }
     if (excluded.has(title)) continue;
     try {
       let assets = await new MediaLibrary.Query()
