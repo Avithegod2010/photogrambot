@@ -5,9 +5,11 @@ import { useTheme } from "../useTheme";
 import {
   getQueueCounts,
   getQueueItems,
+  getUploadThroughput,
   removeQueueItem,
   retryQueueItem,
   type QueueRow,
+  type UploadThroughput,
 } from "../lib/db";
 import { processQueue } from "../lib/uploader";
 import { formatBytes } from "../lib/format";
@@ -24,14 +26,17 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
 
   const [items, setItems] = useState<QueueRow[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [throughput, setThroughput] = useState<UploadThroughput | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
-    const [c, rows] = await Promise.all([
+    const [c, rows, tp] = await Promise.all([
       getQueueCounts(),
       getQueueItems(["running", "pending", "failed"], PAGE_LIMIT),
+      getUploadThroughput(),
     ]);
     setCounts(c);
+    setThroughput(tp);
     setItems(
       [...rows].sort((a, b) => (STATE_ORDER[a.state] ?? 9) - (STATE_ORDER[b.state] ?? 9))
     );
@@ -113,6 +118,37 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
           Failed {failed}
         </Text>
       </View>
+
+      {throughput && throughput.lastHour > 0 ? (
+        <View style={[styles.throughputRow, { backgroundColor: theme.colors.surface }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: "700" }}>
+              {throughput.perMinute}/min this hour
+            </Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 2 }}>
+              {throughput.lastHour} uploaded · {throughput.recentPerMinute}/min last 10 min
+            </Text>
+          </View>
+          <View style={styles.spark}>
+            {throughput.buckets.map((n, i) => {
+              const max = Math.max(1, ...throughput.buckets);
+              const h = 4 + Math.round((n / max) * 20);
+              return (
+                <View
+                  key={i}
+                  style={{
+                    width: 5,
+                    height: h,
+                    borderRadius: 2,
+                    backgroundColor: n > 0 ? theme.colors.primary : theme.colors.surfaceVariant,
+                    opacity: 0.4 + 0.6 * (i / throughput.buckets.length),
+                  }}
+                />
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <FlatList
         data={items}
@@ -254,6 +290,21 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingHorizontal: 16,
     paddingBottom: 8,
+  },
+  throughputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 16,
+  },
+  spark: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 3,
+    height: 24,
   },
   row: {
     borderRadius: 16,

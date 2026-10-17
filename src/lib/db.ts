@@ -82,6 +82,9 @@ export interface QueueRow {
   profile_id: string | null;
   error: string | null;
   created_at: number;
+  // Completion timestamp (ms) once the row reaches a terminal state; powers
+  // the throughput readout on the upload queue screen.
+  finished_at?: number | null;
   // Set only for upload_type='version' rows — the channel message being
   // superseded, so the new upload lands as a reply in the same thread.
   reply_to_message_id: number | null;
@@ -171,7 +174,8 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       state TEXT NOT NULL DEFAULT 'pending',
       retries INTEGER NOT NULL DEFAULT 0,
       error TEXT,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      finished_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_queue_state ON upload_queue(state);
     CREATE TABLE IF NOT EXISTS saved_searches (
@@ -270,6 +274,8 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     // Upload priority lanes (R27): 0 = promoted (favorited), 1 = default,
     // 2 = deprioritized (screenshots/screen recordings).
     ["priority", "INTEGER NOT NULL DEFAULT 1"],
+    // Completion timestamp (ms) for the throughput readout on the queue screen.
+    ["finished_at", "INTEGER"],
   ]);
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS photo_versions (
@@ -1391,9 +1397,59 @@ export async function updateQueueItem(id: number, patch: Partial<QueueRow>): Pro
   const d = await getDb();
   const keys = Object.keys(patch).filter((k) => k !== "id");
   if (keys.length === 0) return;
+  // Stamp a completion time whenever a row reaches a terminal state so the
+  // queue screen can show throughput. `done` is the only state we count, but
+  // any terminal transition is stamped for completeness.
+  const TERMINAL = ["done", "failed", "skipped", "duplicate"];
+  if (
+    patch.state !== undefined &&
+    TERMINAL.includes(patch.state as string) &&
+    !keys.includes("finished_at")
+  ) {
+    keys.push("finished_at");
+    (patch as any).finished_at = Date.now();
+  }
   const setSql = keys.map((k) => `${k} = ?`).join(", ");
   const values = keys.map((k) => (patch as any)[k] ?? null);
   await d.runAsync(`UPDATE upload_queue SET ${setSql} WHERE id = ?`, [...values, id]);
+}
+
+export type UploadThroughput = {
+  lastHour: number;
+  perMinute: number;
+  recentPerMinute: number;
+  buckets: number[];
+};
+
+// Uploads completed in the last hour, plus a 12-bucket (5 min each) sparkline.
+export async function getUploadThroughput(): Promise<UploadThroughput> {
+  const d = await getDb();
+  const now = Date.now();
+  const since = now - 3_600_000;
+  let rows: { finished_at: number }[] = [];
+  try {
+    rows = await d.getAllAsync<{ finished_at: number }>(
+      `SELECT finished_at FROM upload_queue
+        WHERE state = 'done' AND finished_at IS NOT NULL AND finished_at >= ?`,
+      [since]
+    );
+  } catch {
+    rows = [];
+  }
+  const buckets = new Array(12).fill(0) as number[];
+  let recent = 0;
+  for (const r of rows) {
+    const age = now - r.finished_at;
+    const idx = 11 - Math.min(11, Math.floor(age / 300_000));
+    buckets[idx] += 1;
+    if (age <= 600_000) recent += 1;
+  }
+  return {
+    lastHour: rows.length,
+    perMinute: Math.round((rows.length / 60) * 10) / 10,
+    recentPerMinute: Math.round((recent / 10) * 10) / 10,
+    buckets,
+  };
 }
 
 export async function retryFailedUploads(): Promise<number> {
