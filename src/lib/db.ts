@@ -1136,32 +1136,58 @@ export interface AlbumWithCover extends AlbumRow {
 
 export async function getAlbums(): Promise<AlbumWithCover[]> {
   const d = await getDb();
-  // Cover selection: a curated cover (cover_photo_id) wins when it is still a
-  // non-trashed member; otherwise fall back to the newest-taken member. The
-  // CASE orders the curated row first so LIMIT 1 picks it.
+  // SQLite rejects outer-column references inside a subquery's ORDER BY (device
+  // test: "no such column: a.id"), so covers are resolved with plain queries.
   const rows = await d.getAllAsync<any>(
-    `SELECT a.*, COUNT(ap.photo_id) as count,
-       (SELECT p.remote_file_id FROM album_photos ap2 JOIN photos p ON p.id = ap2.photo_id
-        WHERE ap2.album_id = a.id AND p.id NOT IN (SELECT photo_id FROM trash)
-        ORDER BY CASE WHEN p.id = a.cover_photo_id THEN 0 ELSE 1 END, p.taken_at DESC LIMIT 1) as cover_file_id,
-       (SELECT p.preview_file_id FROM album_photos ap3 JOIN photos p ON p.id = ap3.photo_id
-        WHERE ap3.album_id = a.id AND p.id NOT IN (SELECT photo_id FROM trash)
-        ORDER BY CASE WHEN p.id = a.cover_photo_id THEN 0 ELSE 1 END, p.taken_at DESC LIMIT 1) as cover_preview_id
+    `SELECT a.*, COUNT(ap.photo_id) as count
      FROM albums a
      LEFT JOIN album_photos ap ON ap.album_id = a.id
      GROUP BY a.id ORDER BY a.created_at DESC`
   );
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    created_at: r.created_at,
-    locked: r.locked,
-    query: r.query ?? null,
-    cover_photo_id: r.cover_photo_id ?? null,
-    count: r.count,
-    cover_file_id: r.cover_file_id,
-    cover_preview_id: r.cover_preview_id,
-  }));
+  // Automatic cover: newest-taken non-trashed member of each album.
+  const newest = await d.getAllAsync<any>(
+    `SELECT ap.album_id AS album_id, p.id AS photo_id,
+            p.remote_file_id, p.preview_file_id
+     FROM album_photos ap
+     JOIN photos p ON p.id = ap.photo_id
+     JOIN (
+       SELECT ap2.album_id AS album_id, MAX(p2.taken_at) AS taken_at
+       FROM album_photos ap2
+       JOIN photos p2 ON p2.id = ap2.photo_id
+       WHERE p2.id NOT IN (SELECT photo_id FROM trash)
+       GROUP BY ap2.album_id
+     ) m ON m.album_id = ap.album_id AND m.taken_at = p.taken_at
+     WHERE p.id NOT IN (SELECT photo_id FROM trash)`
+  );
+  // Curated cover wins when it is still a non-trashed member.
+  const curated = await d.getAllAsync<any>(
+    `SELECT a.id AS album_id, p.id AS photo_id,
+            p.remote_file_id, p.preview_file_id
+     FROM albums a
+     JOIN album_photos ap ON ap.album_id = a.id AND ap.photo_id = a.cover_photo_id
+     JOIN photos p ON p.id = ap.photo_id
+     WHERE a.cover_photo_id IS NOT NULL
+       AND p.id NOT IN (SELECT photo_id FROM trash)`
+  );
+  const coverByAlbum = new Map<number, any>();
+  for (const c of newest) {
+    if (!coverByAlbum.has(c.album_id)) coverByAlbum.set(c.album_id, c);
+  }
+  for (const c of curated) coverByAlbum.set(c.album_id, c);
+  return rows.map((r) => {
+    const c = coverByAlbum.get(r.id);
+    return {
+      id: r.id,
+      name: r.name,
+      created_at: r.created_at,
+      locked: r.locked,
+      query: r.query ?? null,
+      cover_photo_id: r.cover_photo_id ?? null,
+      count: r.count,
+      cover_file_id: c?.remote_file_id ?? null,
+      cover_preview_id: c?.preview_file_id ?? null,
+    };
+  });
 }
 
 // Curate an album/trip cover (F11). Passing null restores the newest-taken
@@ -1906,34 +1932,38 @@ export interface PeriodGroup {
 
 export async function getYearGroups(): Promise<PeriodGroup[]> {
   const d = await getDb();
+  // Covers are fetched separately: SQLite rejects outer-alias references inside
+  // a subquery, which made this query fail outright on device.
   const rows = await d.getAllAsync<any>(
     `SELECT strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') as key,
        COUNT(*) as count,
        MIN(taken_at) as startMs,
-       MAX(taken_at) as endMs,
-       (SELECT p.preview_file_id FROM photos p
-         WHERE p.status IN ('uploaded','local','failed')
-         AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') = key
-         ORDER BY p.taken_at DESC LIMIT 1) as cover_preview_id,
-       (SELECT p.remote_file_id FROM photos p
-         WHERE p.status IN ('uploaded','local','failed')
-         AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') = key
-         ORDER BY p.taken_at DESC LIMIT 1) as cover_file_id
+       MAX(taken_at) as endMs
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
      GROUP BY key ORDER BY key DESC`
   );
+  const covers = await d.getAllAsync<any>(
+    `SELECT strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') as key,
+       preview_file_id, remote_file_id
+     FROM photos
+     WHERE status IN ('uploaded','local','failed')
+     AND id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY taken_at DESC`
+  );
+  const coverByKey = new Map<string, any>();
+  for (const c of covers) {
+    if (!coverByKey.has(c.key)) coverByKey.set(c.key, c);
+  }
   return rows.map((r) => ({
     key: r.key,
     label: r.key,
     startMs: r.startMs,
     endMs: r.endMs,
     count: r.count,
-    cover_preview_id: r.cover_preview_id,
-    cover_file_id: r.cover_file_id,
+    cover_preview_id: coverByKey.get(r.key)?.preview_file_id ?? null,
+    cover_file_id: coverByKey.get(r.key)?.remote_file_id ?? null,
   }));
 }
 
@@ -1950,17 +1980,7 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
     `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch', 'localtime') as key,
        COUNT(*) as count,
        MIN(taken_at) as startMs,
-       MAX(taken_at) as endMs,
-       (SELECT p.preview_file_id FROM photos p
-         WHERE p.status IN ('uploaded','local','failed')
-         AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch', 'localtime') = key
-         ORDER BY p.taken_at DESC LIMIT 1) as cover_preview_id,
-       (SELECT p.remote_file_id FROM photos p
-         WHERE p.status IN ('uploaded','local','failed')
-         AND p.id NOT IN (SELECT photo_id FROM trash)
-         AND strftime('%Y-%m', p.taken_at / 1000, 'unixepoch', 'localtime') = key
-         ORDER BY p.taken_at DESC LIMIT 1) as cover_file_id
+       MAX(taken_at) as endMs
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
@@ -1968,6 +1988,20 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
      GROUP BY key ORDER BY key DESC`,
     params
   );
+  const covers = await d.getAllAsync<any>(
+    `SELECT strftime('%Y-%m', taken_at / 1000, 'unixepoch', 'localtime') as key,
+       preview_file_id, remote_file_id
+     FROM photos
+     WHERE status IN ('uploaded','local','failed')
+     AND id NOT IN (SELECT photo_id FROM trash)
+     ${yearFilter}
+     ORDER BY taken_at DESC`,
+    params
+  );
+  const coverByKey = new Map<string, any>();
+  for (const c of covers) {
+    if (!coverByKey.has(c.key)) coverByKey.set(c.key, c);
+  }
   return rows.map((r) => {
     const y = parseInt(r.key.slice(0, 4), 10);
     const m = parseInt(r.key.slice(5, 7), 10);
@@ -1977,8 +2011,8 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
       startMs: r.startMs,
       endMs: r.endMs,
       count: r.count,
-      cover_preview_id: r.cover_preview_id,
-      cover_file_id: r.cover_file_id,
+      cover_preview_id: coverByKey.get(r.key)?.preview_file_id ?? null,
+      cover_file_id: coverByKey.get(r.key)?.remote_file_id ?? null,
     };
   });
 }
