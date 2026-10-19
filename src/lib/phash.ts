@@ -18,6 +18,7 @@ interface HuffTable {
   minCode: Int32Array; // index [1..16]; minCode[0] unused
   maxCode: Int32Array; // maxCode[len] = -1 marks "no codes of this length"
   valOffset: Int32Array; // valOffset[len] = values-index of minCode[len]
+  values: Uint8Array; // BITS/VALUES payload - the symbols themselves
 }
 
 function buildHuffTable(counts: Uint8Array, values: Uint8Array): HuffTable {
@@ -36,7 +37,8 @@ function buildHuffTable(counts: Uint8Array, values: Uint8Array): HuffTable {
     }
     code = (code + count) << 1;
   }
-  return { minCode, maxCode, valOffset };
+  // Copy: the caller's buffer is a view into the file bytes.
+  return { minCode, maxCode, valOffset, values: values.slice() };
 }
 
 // Entropy bit reader: MSB-first bits, 0xFF00 de-stuffing, RSTn consumption,
@@ -105,7 +107,9 @@ class BitReader {
         // maxCode[len] === -1 (no codes this length) fails this test.
         // valOffset[len] = valuesIndex(minCode[len]) - minCode[len], so the
         // symbol is recovered in one add (libjpeg's HUFF_DECODE fast path).
-        return t.valOffset[len] + code;
+        // NOTE: the result is an index into the values blob - not the symbol.
+        const idx = t.valOffset[len] + code;
+        return idx >= 0 && idx < t.values.length ? t.values[idx] : -1;
       }
     }
     return -1;
