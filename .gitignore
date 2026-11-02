@@ -69,3 +69,7 @@ modules/*/android/build/
 
 # Generated release manifest (attach to a GitHub Release, don't commit)
 latest.json
+
+# Release artifacts (attach to a GitHub Release, never commit)
+*.apk
+*.aab
