@@ -2283,8 +2283,8 @@ export async function importAllData(json: string, replace: boolean): Promise<num
            taken_at, added_at, uploaded_at, remote_date, content_hash, device, camera,
            tags, latitude, longitude, exif, ai_caption, duration, parts, profile_id,
            favorite, status, error, upload_type, phash, asset_mtime,
-           motion_file_id, motion_message_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           motion_file_id, motion_message_id, ocr_text, motion_checked)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           p.id, p.local_id ?? null, p.local_uri ?? null, p.remote_file_id ?? null,
           p.preview_file_id ?? null, p.thumb_file_id ?? null, p.message_id ?? null,
@@ -2300,6 +2300,13 @@ export async function importAllData(json: string, replace: boolean): Promise<num
           // a full library re-decode after a restore).
           p.phash ?? null, p.asset_mtime ?? null,
           p.motion_file_id ?? null, p.motion_message_id ?? null,
+          // ocr_text is tri-state: NULL = never OCR'd (retried), '' = scanned
+          // and clean (never retried), text = extract. Keeping NULL and ''
+          // distinct here is what stops a restore from re-OCRing the whole
+          // library; motion_checked likewise prevents re-decoding every JPEG
+          // in the Maintenance motion backfill.
+          typeof p.ocr_text === "string" ? p.ocr_text.slice(0, 20_000) : null,
+          Number.isFinite(p.motion_checked) ? p.motion_checked : null,
         ]
       );
       count += res.changes > 0 ? 1 : 0;
