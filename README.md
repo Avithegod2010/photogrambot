@@ -196,6 +196,14 @@ Expo SDK 57 · React Native 0.86 · TypeScript · expo-sqlite (FTS5) · Zustand 
 
 `AGENTS.md` documents the project's conventions, history, and the rules for AI-assisted development of this repo.
 
+## Troubleshooting
+
+**Metro dies with `Failed to construct transformer: Error: Failed to start watch mode`.** The file-map crawler gave up before it finished (slow disks and Windows Defender make this likely on a large `node_modules` plus native build output). `metro.config.js` already excludes `android/app/build`, `android/app/.cxx`, `android/build` and `android/.gradle`; if it still trips, delete `%TEMP%\metro-cache` and `%TEMP%\metro-file-map-expo-*` and start Metro again — the first crawl is slow but subsequent starts reuse the cache.
+
+**The dev client shows a white screen or "problem loading the project".** Almost always one of two things: Metro isn't reachable, or it is serving 500s (see above). Over wireless ADB, re-run `adb reverse tcp:8081 tcp:8081` after every reconnect — the reverse is dropped with the connection.
+
+**PhotogramBot doesn't appear in the Android share sheet.** The intent filters live in `app.config.ts` and in the committed `android/app/src/main/AndroidManifest.xml`; changing them requires a native rebuild, not just a JS reload. Use the *short* form (`action: "SEND"`, `category: ["DEFAULT"]`) — Expo's `IntentFilters` plugin adds the `android.intent.action.` / `android.intent.category.` prefixes itself, so fully-qualified names produce `android.intent.action.android.intent.action.SEND`.
+
 ## Known limitations
 
 - The Bot API cannot **download** files larger than 20 MB — oversized originals are still backed up (downloadable via the Telegram app); the app shows a friendly error when restoring them
