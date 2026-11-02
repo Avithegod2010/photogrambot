@@ -188,9 +188,20 @@ export async function enqueueUploads(
   profileId?: string | null
 ): Promise<number> {
   let enqueued = 0;
+  // The near-duplicate guard is opt-out: with "Skip near-duplicate uploads"
+  // turned OFF the user wants those files backed up after all, so previously
+  // skipped rows must become eligible again instead of being stranded as
+  // 'duplicate' forever.
+  const prefs = await loadPrefs();
+  const skipNearDuplicates = prefs.nearDupGuard;
   for (const item of items) {
     const existing = await getPhotoByLocalId(item.local_id);
-    if (existing && (existing.status === "uploaded" || existing.status === "duplicate")) continue;
+    if (
+      existing &&
+      (existing.status === "uploaded" || (skipNearDuplicates && existing.status === "duplicate"))
+    ) {
+      continue;
+    }
     // A full-gallery sync can run for minutes — never stack duplicate queue
     // rows for an asset that is already pending or mid-upload.
     if (await hasActiveQueuedUpload(item.local_id)) continue;
