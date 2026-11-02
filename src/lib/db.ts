@@ -2392,8 +2392,24 @@ export async function importAllData(json: string, replace: boolean): Promise<num
         ]
       );
     }
+    // kv holds two very different things: archive-ish counters and pure
+    // per-device state. Restoring the latter onto a new phone is actively
+    // harmful — most visibly `remote_paused` (a phone paused with /pause
+    // before the backup would come back silently never auto-syncing again) —
+    // so those keys are dropped here:
+    //   updates_offset  — poll cursor of the OLD device (already excluded)
+    //   remote_paused   — per-device /pause gate
+    //   wipe_armed_at   — a wipe arm must never travel between devices
+    //   overnight_day / overnight_count — per-night catch-up budget for THIS phone
+    const DEVICE_LOCAL_KV = new Set([
+      "updates_offset",
+      "remote_paused",
+      "wipe_armed_at",
+      "overnight_day",
+      "overnight_count",
+    ]);
     for (const k of data.kv ?? []) {
-      if (k.k !== "updates_offset") {
+      if (typeof k?.k === "string" && typeof k.v === "string" && !DEVICE_LOCAL_KV.has(k.k)) {
         await d.runAsync("INSERT OR REPLACE INTO kv (k, v) VALUES (?,?)", [k.k, k.v]);
       }
     }
