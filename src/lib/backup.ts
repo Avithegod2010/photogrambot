@@ -126,17 +126,24 @@ export async function uploadBackupToChannel(): Promise<boolean> {
   if (tmp.exists) tmp.delete();
   tmp.write(payload);
   const oldMessageId = await kvGet(KV_BACKUP_MESSAGE_ID);
-  if (oldMessageId) {
-    await unpinChatMessage(channelId, parseInt(oldMessageId, 10));
+  try {
+    if (oldMessageId) {
+      await unpinChatMessage(channelId, parseInt(oldMessageId, 10));
+    }
+    const message = await sendDocument(channelId, tmp.uri, {
+      caption: `#db_backup #app:photogrambot${prefs.dbBackupEncrypt ? " #encrypted" : ""} ${new Date().toISOString()}`,
+      filename: BACKUP_FILENAME,
+      mime: "application/json",
+    });
+    await kvSet(KV_BACKUP_MESSAGE_ID, String(message.message_id));
+    await pinChatMessage(channelId, message.message_id);
+  } finally {
+    // A failed upload must not leave the full index sitting unencrypted in
+    // the cache directory.
+    try {
+      if (tmp.exists) tmp.delete();
+    } catch {}
   }
-  const message = await sendDocument(channelId, tmp.uri, {
-    caption: `#db_backup #app:photogrambot${prefs.dbBackupEncrypt ? " #encrypted" : ""} ${new Date().toISOString()}`,
-    filename: BACKUP_FILENAME,
-    mime: "application/json",
-  });
-  await kvSet(KV_BACKUP_MESSAGE_ID, String(message.message_id));
-  await pinChatMessage(channelId, message.message_id);
-  try { tmp.delete(); } catch {}
   return true;
 }
 

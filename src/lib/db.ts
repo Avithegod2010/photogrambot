@@ -2274,6 +2274,14 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync("DELETE FROM photo_versions");
       await d.runAsync("DELETE FROM photos_fts");
       await d.runAsync("DELETE FROM photos");
+      // The queue and the embedding index describe the OLD index. Left behind,
+      // pending rows would upload local files that the restored index knows
+      // nothing about (untracked channel posts), and the embeddings would rank
+      // photo ids that no longer exist. Both are cheap to rebuild: a scan
+      // re-enqueues whatever the restored rows still need, and Maintenance can
+      // rebuild the search index.
+      await d.runAsync("DELETE FROM upload_queue");
+      await d.runAsync("DELETE FROM photo_embeddings");
     }
     for (const p of data.photos ?? []) {
       const res = await d.runAsync(
