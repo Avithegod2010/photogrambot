@@ -190,7 +190,7 @@ export async function enqueueUploads(
   let enqueued = 0;
   for (const item of items) {
     const existing = await getPhotoByLocalId(item.local_id);
-    if (existing && existing.status === "uploaded") continue;
+    if (existing && (existing.status === "uploaded" || existing.status === "duplicate")) continue;
     // A full-gallery sync can run for minutes — never stack duplicate queue
     // rows for an asset that is already pending or mid-upload.
     if (await hasActiveQueuedUpload(item.local_id)) continue;
@@ -625,10 +625,15 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
           }
         }
         if (bestId && bestId !== photoId && bestDistance <= NEARDUP_GUARD_DISTANCE) {
+          const reason = `Near-duplicate of an already backed up photo (distance ${bestDistance}) — skipped`;
           await updateQueueItem(item.id, {
             state: "duplicate",
-            error: `Near-duplicate of an already backed up photo (distance ${bestDistance}) — skipped`,
+            error: reason,
           });
+          // Mark the photo itself too, otherwise every later scan re-enqueues
+          // the same asset (the queue row is terminal, the photo row is not),
+          // which grew the queue without bound on device.
+          await updatePhoto(photoId, { status: "duplicate", error: reason, phash: newPhash });
           return "duplicate";
         }
       }

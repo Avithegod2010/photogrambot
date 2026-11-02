@@ -199,7 +199,9 @@ export function PhotoInfoSheet({
                     ? formatDate(p.uploaded_at)
                     : p.status === "skipped_too_large"
                       ? "Skipped — larger than 50 MB"
-                      : p.status === "failed"
+                      : p.status === "duplicate"
+                        ? "Skipped — near-duplicate of a backed up photo"
+                        : p.status === "failed"
                         ? `Failed — ${p.error ?? "unknown"}`
                         : p.status
                 }

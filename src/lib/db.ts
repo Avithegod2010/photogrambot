@@ -1,6 +1,12 @@
 import * as SQLite from "expo-sqlite";
 
-export type PhotoStatus = "local" | "uploading" | "uploaded" | "failed" | "skipped_too_large";
+export type PhotoStatus =
+  | "local"
+  | "uploading"
+  | "uploaded"
+  | "failed"
+  | "skipped_too_large"
+  | "duplicate";
 
 export interface PhotoRow {
   id: string;
@@ -1700,7 +1706,7 @@ export async function getStats(): Promise<{
     `SELECT COUNT(*) as total,
        SUM(CASE WHEN status = 'uploaded' THEN 1 ELSE 0 END) as uploaded,
        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-       SUM(CASE WHEN status = 'skipped_too_large' THEN 1 ELSE 0 END) as skipped,
+       SUM(CASE WHEN status IN ('skipped_too_large', 'duplicate') THEN 1 ELSE 0 END) as skipped,
        SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END) as favorites,
        SUM(CASE WHEN status = 'uploaded' THEN COALESCE(size,0) ELSE 0 END) as totalBytes
      FROM photos`

@@ -77,13 +77,13 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
     intentFilters: [
       {
-        action: "android.intent.action.SEND",
-        category: ["android.intent.category.DEFAULT"],
+        action: "SEND",
+        category: ["DEFAULT"],
         data: [{ mimeType: "image/*" }, { mimeType: "video/*" }],
       },
       {
-        action: "android.intent.action.SEND_MULTIPLE",
-        category: ["android.intent.category.DEFAULT"],
+        action: "SEND_MULTIPLE",
+        category: ["DEFAULT"],
         data: [{ mimeType: "image/*" }, { mimeType: "video/*" }],
       },
     ],

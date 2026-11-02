@@ -42,16 +42,16 @@
         <data android:scheme="exp+photogrambot"/>
       </intent-filter>
       <intent-filter data-generated="true">
-        <action android:name="android.intent.action.android.intent.action.SEND"/>
+        <action android:name="android.intent.action.SEND"/>
         <data android:mimeType="image/*"/>
         <data android:mimeType="video/*"/>
-        <category android:name="android.intent.category.android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>
       <intent-filter data-generated="true">
-        <action android:name="android.intent.action.android.intent.action.SEND_MULTIPLE"/>
+        <action android:name="android.intent.action.SEND_MULTIPLE"/>
         <data android:mimeType="image/*"/>
         <data android:mimeType="video/*"/>
-        <category android:name="android.intent.category.android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>
     </activity>
     <receiver android:name=".widget.RandomPhoto" android:exported="false" android:label="PhotogramBot">
