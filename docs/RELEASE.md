@@ -65,6 +65,11 @@ eas build -p android --profile production
 `production` (AAB). `appVersionSource: "local"` means EAS reads the version from
 `android/version.properties`.
 
+> [!TIP]
+> With a committed `android/` directory the "computing project fingerprint"
+> step has nothing to do and can hang for many minutes on a slow disk. Set
+> `EAS_SKIP_AUTO_FINGERPRINT=1` before `eas build` to skip it.
+
 Local build (debug only — no `dl.google.com` needed because deps are cached):
 
 ```bash
