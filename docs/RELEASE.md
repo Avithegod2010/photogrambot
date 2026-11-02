@@ -84,37 +84,34 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## 4. Publish the APK for the in-app updater
 
 The updater (`src/lib/updater.ts`) reads the repository's recent GitHub
-Releases, picks the newest one that carries a `latest.json` manifest plus the
-named APK, and compares it against the installed version. To publish:
+Releases, picks the newest one that carries an `.apk` asset, and compares it
+against the installed version (exactly, via `latest.json`). To publish:
 
-1. Generate the release manifest:
+1. Bump `android/version.properties` (`versionCode` + `versionName`).
 
-   ```bash
-   node scripts/make-latest-json.mjs --apk photogrambot-1.0.1.apk \
-     --notes "What changed in this version"
-   # or: npm run release:manifest -- --apk photogrambot-1.0.1.apk
-   ```
-
-   This writes `latest.json` (`{ versionCode, versionName, apk, notes }`) from
-   `android/version.properties`. `--apk` must match the attached file name.
-
-2. Create a GitHub Release tagged `v<versionName>` (e.g. `v1.0.0`) and attach:
-   - the APK built by EAS (`photogrambot-<version>.apk`),
-   - `latest.json`.
+2. Run the publish script — it generates `latest.json` from
+   `android/version.properties`, creates the release and uploads both files:
 
    ```bash
-   gh release create v1.0.0 \
-     --title "PhotogramBot 1.0.0" \
-     --notes "Release notes here" \
-     photogrambot-1.0.0.apk latest.json
+   npm run release:publish -- --apk photogrambot-1.0.1.apk --tag v1.0.1 \
+     --title "PhotogramBot 1.0.1" --notes-file CHANGELOG.md
+   # add --prerelease for a preview APK; --dry-run validates without publishing
    ```
 
-3. The updater fetches `/releases?per_page=30`, finds the release with a
-   `latest.json` asset, compares `versionCode` (falling back to semver),
-   then downloads and installs the APK. Installing
-   an APK requires the **Install unknown apps** permission for PhotogramBot —
-   the Settings "Check for updates" flow detects a missing permission and offers
-   to open that screen.
+   The token comes from `GITHUB_TOKEN` (or `gh auth token`); it is never
+   written to disk. On a failed asset upload the half-published release and
+   its tag are removed, so a retry is clean.
+
+3. The updater fetches `/releases?per_page=30`, finds the newest release with
+   an APK, compares `versionCode` (falling back to semver), then downloads and
+   installs the APK. Installing an APK requires the **Install unknown apps**
+   permission for PhotogramBot — the Settings "Check for updates" flow detects
+   a missing permission and offers to open that screen.
+
+`latest.json` is gitignored; it is a build artifact. If you prefer doing it by
+hand: `npm run release:manifest -- --apk <file> --notes "..."`, then attach the
+APK and `latest.json` to a release created in the GitHub UI (or `gh release
+create`).
 
 `latest.json` is gitignored; it is a build artifact.
 
