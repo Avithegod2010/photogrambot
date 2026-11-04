@@ -107,7 +107,11 @@ class ShareIntentModule : Module() {
         "accent" to "$pkg.IconAccent",
         "mono" to "$pkg.IconMono"
       )
-      val target = names[variant] ?: names["default"]!!
+      // Normalise unknown values to "default": skipping a key that is not in
+      // the map would otherwise disable every alias and remove the launcher
+      // icon entirely.
+      val key = if (names.containsKey(variant)) variant else "default"
+      val target = names[key]!!
       try {
         val pm = context.packageManager
         pm.setComponentEnabledSetting(
@@ -115,8 +119,8 @@ class ShareIntentModule : Module() {
           PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
           PackageManager.DONT_KILL_APP
         )
-        for ((key, name) in names) {
-          if (key == variant) continue
+        for ((nameKey, name) in names) {
+          if (nameKey == key) continue
           pm.setComponentEnabledSetting(
             ComponentName(context, name),
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
