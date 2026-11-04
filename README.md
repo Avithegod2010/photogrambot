@@ -154,6 +154,27 @@ Without `latest.json` the updater falls back to comparing the release tag's sema
 
 Paste the bot token → **Verify** → the app detects your channel (or paste the `-100…` channel ID) → done. Everything after that runs on-device.
 
+## Backup & restore explained
+
+There are two distinct things people mean by "backup" in PhotogramBot, and they use the channel differently:
+
+**1. The channel is the media archive (automatic, continuous).**
+Every photo and video you back up produces a *preview* message plus a *full-quality original* document in your Telegram channel, with a metadata caption (date, size, camera, GPS, tags). This is the only place your actual media lives off-device. It needs no action from you beyond turning on auto-sync — the app keeps the channel and the on-device index in sync, including a perceptual-hash guard that quietly skips re-saves and recompressions (they show up under **Skipped** in the stats).
+
+**2. The encrypted database backup is the index (manual, pinned).**
+The SQLite library — every caption, hash, album, trip, and favorite — lives only on your phone. To protect it (and to move to a new phone), Settings → Maintenance → **Backup to channel** uploads a single, *encrypted* snapshot and pins it in the channel. The passphrase (AES-256-GCM, key stretched with PBKDF2-HMAC-SHA256 at 600 000 iterations) never leaves the device; you can also choose to embed the bot token inside the backup so a fresh device can adopt it without re-pasting.
+
+**Restoring — pick the scope you need:**
+
+| You want to… | Do this |
+| --- | --- |
+| Pull one original back to the phone | Viewer → **Save** (or reply `/restore` to its channel message) |
+| Refill a phone that lost its local copies | Maintenance → **Restore all originals**, or an album/trip header → **Restore all** (gap-filling — only downloads what's missing) |
+| Move to a new phone | Install → Setup → when a pinned backup is detected, the **migration wizard** restores the whole index behind a passphrase, then a follow-up scan *relinks* photos already on the new device by content hash (no re-upload) |
+| Rebuild after losing the app | The pinned backup is the source of truth; the index is recreated locally and re-syncs from the channel |
+
+Nothing is ever deleted from the channel by a local action unless you explicitly choose **delete from Telegram too**.
+
 ## How it works
 
 ```text

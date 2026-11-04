@@ -28,6 +28,9 @@ No shipped-feature changes yet — all of this is no-phone, code-only work.
   Dependabot.
 - Removed the stale draft release `v1.0.0-preview.1` (pre-R37 APK, invisible to
   the updater).
+- README: added a "Backup & restore explained" section (channel-as-archive vs
+  encrypted index backup, and the per-photo / bulk / new-phone migration restore
+  paths), and refreshed the CI badge.
 
 ## [1.0.0] — preview
 
