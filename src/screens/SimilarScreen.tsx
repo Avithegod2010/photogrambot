@@ -7,6 +7,7 @@ import { computePhotoPhash } from "../lib/maintenance";
 import { hammingHex } from "../lib/phash";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
+import { EmptySearchArt } from "../components/illustrations";
 
 const HASH_RE = /^[0-9a-f]{16}$/i;
 const SIMILAR_THRESHOLD = 12;
@@ -85,7 +86,14 @@ export function SimilarScreen({ route, navigation }: { route: any; navigation: a
       {similar === null ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
       ) : message && similar.length === 0 ? (
-        <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>{message}</Text>
+        <View style={{ alignItems: "center", padding: 24 }}>
+          <EmptySearchArt
+            color={theme.colors.onSurfaceVariant}
+            accent={theme.colors.primary}
+            size={104}
+          />
+          <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>{message}</Text>
+        </View>
       ) : (
         <FlatList
           data={similar}
@@ -109,7 +117,16 @@ export function SimilarScreen({ route, navigation }: { route: any; navigation: a
             );
           }}
           ListEmptyComponent={
-            <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>No visually similar photos found yet.</Text>
+            <View style={{ alignItems: "center", padding: 24 }}>
+              <EmptySearchArt
+                color={theme.colors.onSurfaceVariant}
+                accent={theme.colors.primary}
+                size={104}
+              />
+              <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
+                No visually similar photos found yet.
+              </Text>
+            </View>
           }
         />
       )}

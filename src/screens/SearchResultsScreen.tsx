@@ -7,6 +7,7 @@ import { normalizeSearchFilters, searchPhotos } from "../lib/db";
 import { groupPhotosByDate } from "../lib/format";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage } from "../components/TelegramImage";
+import { EmptySearchArt } from "../components/illustrations";
 import type { PhotoRow } from "../lib/db";
 
 // Runs a pinned saved search (Collections → Smart collections). Virtual by
@@ -96,9 +97,16 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
         )}
         ListEmptyComponent={
           photos ? (
-            <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
-              Nothing matches this search.
-            </Text>
+            <View style={{ alignItems: "center", padding: 24 }}>
+              <EmptySearchArt
+                color={theme.colors.onSurfaceVariant}
+                accent={theme.colors.primary}
+                size={104}
+              />
+              <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
+                Nothing matches this search.
+              </Text>
+            </View>
           ) : (
             <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
           )
