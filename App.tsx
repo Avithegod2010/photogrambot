@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
+import { ActivityIndicator, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -172,6 +172,7 @@ function Splash() {
   const fg = useAccent ? readableOn(accentColor) : theme.colors.onSurfaceVariant;
   return (
     <View style={[styles.splash, { backgroundColor: bg }]}>
+      <Image source={require("./assets/icon.png")} style={styles.splashLogo} />
       <ActivityIndicator color={useAccent ? fg : "#A8C7FA"} />
       <Text style={[styles.splashText, { color: fg }]}>
         Starting {appDisplayName || "PhotogramBot"}…
@@ -457,6 +458,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
+  },
+  splashLogo: {
+    width: 76,
+    height: 76,
+    borderRadius: 20,
+    marginBottom: 4,
   },
   splashText: {
     fontSize: 13,
