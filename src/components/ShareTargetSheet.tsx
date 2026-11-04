@@ -10,7 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { File, Paths } from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
@@ -32,6 +32,7 @@ export function ShareTargetSheet({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const multiDest = useSettingsStore((s) => s.prefs.multiDestination);
+  const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
   const [destId, setDestId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -106,7 +107,7 @@ export function ShareTargetSheet({
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
           </Pressable>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" }}>
-            Shared with PhotogramBot
+            Shared with {appDisplayName || "PhotogramBot"}
           </Text>
           <View style={{ width: 18 }} />
         </View>

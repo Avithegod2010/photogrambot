@@ -8,7 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +16,7 @@ import * as Sharing from "expo-sharing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
 import { CloudUploadIcon, DownloadIcon, HeartIcon, InfoIcon, ShareIcon, TrashIcon } from "../components/icons";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
@@ -93,6 +94,8 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
+  const autoHideChrome = useSettingsStore((s) => s.prefs.viewerAutoHideChrome);
+  const chromeDelaySec = useSettingsStore((s) => s.prefs.viewerChromeDelaySec);
   const [saving, setSaving] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const zoomedRef = useRef(false);
@@ -103,6 +106,15 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     photo &&
     (photo.remote_file_id || photo.preview_file_id || photo.thumb_file_id)
   );
+
+  // Google Photos-style auto-hide: once the chrome is shown (or the photo
+  // changes), tuck it away again after the configured delay.
+  useEffect(() => {
+    if (!autoHideChrome || !chromeVisible || infoVisible) return;
+    const delay = Math.max(1, Math.min(15, chromeDelaySec || 3)) * 1000;
+    const timer = setTimeout(() => setChromeVisible(false), delay);
+    return () => clearTimeout(timer);
+  }, [autoHideChrome, chromeVisible, chromeDelaySec, infoVisible, index]);
 
   async function onSave() {
     if (!photo || saving) return;

@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";

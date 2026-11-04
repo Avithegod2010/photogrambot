@@ -1,7 +1,9 @@
 package expo.modules.shareintent
 
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -89,6 +91,40 @@ class ShareIntentModule : Module() {
       } catch (e: IllegalArgumentException) {
         false
       } catch (e: SecurityException) {
+        false
+      }
+    }
+
+    // Launcher-icon variants (Appearance → App icon). The manifest ships three
+    // launcher activity-aliases pointing at MainActivity; only one may be
+    // enabled at a time or the launcher shows duplicate icons. Enable the
+    // target BEFORE disabling the others so there is never zero launcher icons.
+    Function("setAppIcon") { variant: String ->
+      val context = appContext.reactContext ?: return@Function false
+      val pkg = context.packageName
+      val names = mapOf(
+        "default" to "$pkg.IconDefault",
+        "accent" to "$pkg.IconAccent",
+        "mono" to "$pkg.IconMono"
+      )
+      val target = names[variant] ?: names["default"]!!
+      try {
+        val pm = context.packageManager
+        pm.setComponentEnabledSetting(
+          ComponentName(context, target),
+          PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+          PackageManager.DONT_KILL_APP
+        )
+        for ((key, name) in names) {
+          if (key == variant) continue
+          pm.setComponentEnabledSetting(
+            ComponentName(context, name),
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP
+          )
+        }
+        true
+      } catch (e: Exception) {
         false
       }
     }

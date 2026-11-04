@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "../rn";
 import MapView, { Marker, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { getGeotagged, type GeotaggedPhoto } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
 
 export function MapScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const mapStyle = useSettingsStore((s) => s.prefs.mapStyle);
   const insets = useSafeAreaInsets();
   const decoy = isDecoyActive();
   const [photos, setPhotos] = useState<GeotaggedPhoto[]>([]);
@@ -52,7 +54,7 @@ export function MapScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <MapView style={StyleSheet.absoluteFill} initialRegion={initialRegion}>
+      <MapView style={StyleSheet.absoluteFill} initialRegion={initialRegion} mapType={mapStyle}>
         {clusters.map((cluster) => (
           <Marker
             key={`${cluster[0].latitude},${cluster[0].longitude}`}

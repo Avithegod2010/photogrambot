@@ -6,7 +6,7 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";

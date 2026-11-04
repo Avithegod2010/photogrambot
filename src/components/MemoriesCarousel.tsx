@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "../rn";
 import { useTheme } from "../useTheme";
 import { getMemories, type MemoryGroup } from "../lib/db";
 import { TelegramImage } from "./TelegramImage";

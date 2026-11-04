@@ -10,12 +10,14 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
+} from "../rn";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useSettingsStore } from "../store/useSettingsStore";
+import { ACCENT_PRESETS, albumAccent, isHexColor } from "../lib/appearance";
 import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
@@ -27,6 +29,7 @@ import { restorePhotosToDevice } from "../lib/restore";
 import { shareTripStory } from "../lib/story";
 import { isDecoyActive } from "../lib/applock";
 import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
+import { EmptyAlbumArt, EmptyTrashArt } from "../components/illustrations";
 import { formatSearchFilterSummary } from "../lib/filterSummary";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
@@ -41,6 +44,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [savedSearches, setSavedSearches] = useState<SavedSearchRow[]>([]);
   const [renameTarget, setRenameTarget] = useState<SavedSearchRow | null>(null);
   const [renameName, setRenameName] = useState("");
+  const albumAccents = useSettingsStore((s) => s.prefs.albumAccents);
   const decoy = isDecoyActive();
 
   useFocusEffect(
@@ -187,7 +191,14 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                 {visibleTripAlbums.map((a) => (
                   <Pressable
                     key={a.id}
-                    style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                    style={[
+                      styles.albumCard,
+                      { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface },
+                      isHexColor(albumAccent(albumAccents, a.id, "")) && {
+                        borderWidth: 2,
+                        borderColor: albumAccent(albumAccents, a.id, ""),
+                      },
+                    ]}
                     onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, isTrip: true })}
                     onLongPress={() =>
                       Alert.alert(
@@ -231,7 +242,14 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               {visibleManualAlbums.map((a) => (
                 <Pressable
                   key={a.id}
-                  style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                  style={[
+                    styles.albumCard,
+                    { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface },
+                    isHexColor(albumAccent(albumAccents, a.id, "")) && {
+                      borderWidth: 2,
+                      borderColor: albumAccent(albumAccents, a.id, ""),
+                    },
+                  ]}
                   onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, locked: !!a.locked })}
                   onLongPress={() =>
                     // Long-press is the album-management menu; "Select photos"
@@ -415,9 +433,10 @@ function TrashTab({
   if (trash.length === 0) {
     return (
       <View style={styles.trashEmpty}>
-        <TrashIcon
-          color={typeof theme.colors.onSurfaceVariant === "string" ? theme.colors.onSurfaceVariant : "#C4C6D0"}
-          size={52}
+        <EmptyTrashArt
+          color={theme.colors.onSurfaceVariant}
+          accent={theme.colors.primary}
+          size={112}
         />
         <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>Trash is empty</Text>
         <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
@@ -534,6 +553,9 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const needsUnlock: boolean = !!route.params?.locked && albumId !== -1;
   const [unlocked, setUnlocked] = useState(!needsUnlock);
   const { favorites, albums, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
+  const prefs = useSettingsStore((s) => s.prefs);
+  const updatePrefs = useSettingsStore((s) => s.update);
+  const [styleDialog, setStyleDialog] = useState(false);
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Entered via the Collections long-press "Select photos" action or by
@@ -591,6 +613,12 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   // action toggle to "Remove cover".
   const currentCover = albums.find((a) => a.id === albumId)?.cover_photo_id ?? null;
   const selectedId = selection.size === 1 ? Array.from(selection)[0] : null;
+  const albumTint = albumAccent(
+    prefs.albumAccents,
+    albumId,
+    typeof theme.colors.primary === "string" ? theme.colors.primary : "#A8C7FA"
+  );
+  const hasCustomTint = isHexColor(prefs.albumAccents?.[String(albumId)]);
 
   // Curate an album/trip cover from a single selected photo (F11). Shown in
   // the header briefly; Collections reloads albums on focus so the grid tile
@@ -782,13 +810,39 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: 0 }]}>
-      <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
+      <View
+        style={[
+          styles.subHeader,
+          { paddingTop: insets.top + 6 },
+          hasCustomTint && { borderBottomWidth: 3, borderBottomColor: albumTint },
+        ]}
+      >
         <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
+        {albumId !== -1 && !isDecoyActive() ? (
+          <Pressable
+            onPress={() => setStyleDialog(true)}
+            hitSlop={10}
+            style={{ marginStart: 8 }}
+            accessibilityLabel="Album style"
+            accessibilityRole="button"
+          >
+            <View
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 6,
+                backgroundColor: albumTint,
+                borderWidth: 1,
+                borderColor: theme.colors.outline,
+              }}
+            />
+          </Pressable>
+        ) : null}
         {coverNote ? (
           <Text style={{ color: theme.colors.primary, fontWeight: "600", marginStart: 10 }} numberOfLines={1}>
             {coverNote}
@@ -867,6 +921,40 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
                 navigation.navigate("Viewer", { photos, index: photos.indexOf(item) });
               }}
               onLongPress={() => {
+                if (albumId !== -1 && !isTrip) {
+                  Alert.alert(
+                    item.filename,
+                    undefined,
+                    [
+                      {
+                        text: "Set as cover",
+                        onPress: () => {
+                          void setAlbumCover(albumId, item.id).then(() => {
+                            setCoverNote("Cover updated");
+                            void useLibraryStore.getState().refreshMeta();
+                          });
+                        },
+                      },
+                      {
+                        text: "Select photos",
+                        onPress: () => {
+                          setSelectionMode(true);
+                          setSelection(new Set([item.id]));
+                        },
+                      },
+                      {
+                        text: "Open",
+                        onPress: () =>
+                          navigation.navigate("Viewer", {
+                            photos,
+                            index: photos.indexOf(item),
+                          }),
+                      },
+                    ],
+                    { cancelable: true }
+                  );
+                  return;
+                }
                 setSelectionMode(true);
                 setSelection(new Set([item.id]));
               }}
@@ -888,13 +976,86 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           );
         }}
         ListEmptyComponent={
-          <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant, padding: 24 }]}>
-            {albumId === -1
-              ? "Tap ♥ on any photo to add it here."
-              : "No photos in this album yet. Select photos in the gallery, then use the album menu."}
-          </Text>
+          <View style={{ alignItems: "center", padding: 24 }}>
+            <EmptyAlbumArt
+              color={theme.colors.onSurfaceVariant}
+              accent={theme.colors.primary}
+              size={104}
+            />
+            <Text
+              style={[
+                styles.emptyText,
+                { color: theme.colors.onSurfaceVariant, padding: 12, textAlign: "center" },
+              ]}
+            >
+              {albumId === -1
+                ? "Tap ♥ on any photo to add it here."
+                : "No photos in this album yet. Select photos in the gallery, then use the album menu."}
+            </Text>
+          </View>
         }
       />
+
+      <Dialog
+        visible={styleDialog}
+        theme={theme}
+        title="Album style"
+        message="Pick an accent for this album, or reset its cover to the newest photo."
+      >
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+          {ACCENT_PRESETS.map((preset) => {
+            const current = prefs.albumAccents?.[String(albumId)];
+            const selected =
+              preset.key === "default" ? !hasCustomTint : !!preset.color && current === preset.color;
+            return (
+              <Pressable
+                key={preset.key}
+                onPress={() => {
+                  const next = { ...(prefs.albumAccents ?? {}) };
+                  if (preset.key === "default" || !preset.color) delete next[String(albumId)];
+                  else next[String(albumId)] = preset.color;
+                  void updatePrefs({ albumAccents: next });
+                }}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  backgroundColor: preset.color ?? theme.colors.surfaceHighest,
+                  borderWidth: selected ? 3 : 1,
+                  borderColor: selected ? theme.colors.onSurface : theme.colors.outline,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                accessibilityLabel={`${preset.label} accent`}
+                accessibilityRole="button"
+              >
+                {preset.key === "default" ? (
+                  <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>Auto</Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        {albumId !== -1 && !isTrip ? (
+          <Button
+            title="Reset cover to newest"
+            variant="outlined"
+            theme={theme}
+            style={{ marginTop: 16 }}
+            onPress={() => {
+              void setAlbumCover(albumId, null).then(() => {
+                setCoverNote("Default cover restored");
+                setStyleDialog(false);
+                void useLibraryStore.getState().refreshMeta();
+              });
+            }}
+          />
+        ) : null}
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 16 }}>
+          <Button title="Done" variant="text" theme={theme} onPress={() => setStyleDialog(false)} />
+        </View>
+      </Dialog>
+
       {barVisible ? (
         <View
           style={[

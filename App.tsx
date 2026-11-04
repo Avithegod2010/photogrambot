@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -48,6 +48,7 @@ import { maybePostWeeklyDigest } from "./src/lib/digest";
 import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
+import { isHexColor, readableOn } from "./src/lib/appearance";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -163,11 +164,17 @@ function Tabs() {
 
 function Splash() {
   const theme = useTheme();
+  const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
+  const splashAccent = useSettingsStore((s) => s.prefs.splashAccent);
+  const accentColor = useSettingsStore((s) => s.prefs.accentColor);
+  const useAccent = splashAccent && isHexColor(accentColor);
+  const bg = useAccent ? accentColor : theme.colors.background;
+  const fg = useAccent ? readableOn(accentColor) : theme.colors.onSurfaceVariant;
   return (
-    <View style={[styles.splash, { backgroundColor: theme.colors.background }]}>
-      <ActivityIndicator color="#A8C7FA" />
-      <Text style={[styles.splashText, { color: theme.colors.onSurfaceVariant }]}>
-        Starting PhotogramBot…
+    <View style={[styles.splash, { backgroundColor: bg }]}>
+      <ActivityIndicator color={useAccent ? fg : "#A8C7FA"} />
+      <Text style={[styles.splashText, { color: fg }]}>
+        Starting {appDisplayName || "PhotogramBot"}…
       </Text>
     </View>
   );
@@ -229,6 +236,7 @@ export default function App() {
   const loadSettings = useSettingsStore((s) => s.load);
   const ensureDeviceId = useDeviceStore((s) => s.ensureDeviceId);
   const appLock = useSettingsStore((s) => s.prefs.appLock);
+  const refreshTheme = useSettingsStore((s) => s.refreshTheme);
   const [locked, setLocked] = useState(appLock);
   const [initialized, setInitialized] = useState(false);
   const [sharedUris, setSharedUris] = useState<string[]>([]);
@@ -251,6 +259,20 @@ export default function App() {
       urlSub.remove();
     };
   }, [step, locked]);
+
+  // Scheduled light/dark switching: re-resolve every minute (cheap no-op when
+  // the mode is unchanged) and whenever the app returns to the foreground.
+  useEffect(() => {
+    refreshTheme();
+    const timer = setInterval(refreshTheme, 60_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshTheme();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [refreshTheme]);
 
   useEffect(() => {
     globalUnlock = () => setLocked(false);

@@ -83,6 +83,30 @@ There is **no middleman server** — the app talks directly to `api.telegram.org
 - Home-screen widget showing a random photo from your library (optionally favorites only)
 - Material You theming, a themed app icon, and upload notifications that deep-link to the queue
 
+## Customisation
+
+Settings → **Appearance** controls the whole look of the app:
+
+- **Theme** — Dark, AMOLED, Light, or Auto (system), plus an optional scheduled
+  switch (dark at night, light during the day).
+- **Accent colour** — eight presets or a custom `#RRGGBB`; tinted buttons,
+  chips, tab bar, selection bar and upload banner.
+- **Gallery** — 2–5 columns, square or natural aspect, compact gaps, per-badge
+  toggles (cloud / video / favourite / status), date-header counts and a
+  draggable date scrubber.
+- **Viewer** — auto-hiding top/bottom bars with a configurable delay, and a
+  compact/detailed photo info sheet.
+- **Text** — four font scales and four date formats (applied to gallery
+  headers, search results and channel captions).
+- **Albums** — per-album accent colours; long-press a photo to set the cover,
+  or reset it to the newest photo from the album style dialog.
+- **Branding** — custom in-app name, Default / Accent / Monochrome launcher
+  icons, and an accent-coloured cold-start splash.
+- **Widget & notifications** — widget date overlay and compact layout;
+  notification accent colour.
+- **Captions** — choose and reorder the metadata lines written to the channel
+  (the content hash is always kept so restore and dedupe keep working).
+
 ## Privacy
 
 - Your bot token is stored in the device keychain (SecureStore) — never in the cloud, never in a backup's plaintext, never logged

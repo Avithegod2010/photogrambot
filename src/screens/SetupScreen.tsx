@@ -6,9 +6,10 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { useSetupStore } from "../store/useSetupStore";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { Button, Card, SectionLabel, TextField } from "../components/ui";
 import { restoreFromChannelPinned } from "../lib/backup";
 import { setBackupPassphrase } from "../lib/settings";
@@ -17,6 +18,7 @@ import { runSyncNow } from "../lib/sync";
 
 export function SetupScreen() {
   const theme = useTheme();
+  const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const { verifyAndSave, saveChannel, detectChannel, busy, error, token, channelId } =
     useSetupStore();
   const migrationOffer = useSetupStore((s) => s.migrationOffer);
@@ -128,7 +130,9 @@ export function SetupScreen() {
           <View style={[styles.logo, { backgroundColor: theme.colors.primaryContainer }]}>
             <Text style={[styles.logoText, { color: theme.colors.onPrimaryContainer }]}>PB</Text>
           </View>
-          <Text style={[styles.title, { color: theme.colors.onSurface }]}>PhotogramBot</Text>
+          <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+            {appDisplayName || "PhotogramBot"}
+          </Text>
           <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
             Your personal photo gallery, backed by your own Telegram bot and channel.
             Unlimited storage, no middleman.

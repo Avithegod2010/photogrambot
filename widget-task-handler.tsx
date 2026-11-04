@@ -13,7 +13,18 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
     case "WIDGET_UPDATE":
     case "WIDGET_RESIZED": {
       const data = await getRandomPhotoForWidget();
-      const dateLabel = data?.takenAt
+      // Widget appearance prefs are read here so the headless render honours
+      // Settings → Appearance. A missing prefs read falls back to defaults.
+      let showDate = true;
+      let forceCompact = false;
+      try {
+        const { loadPrefs } = await import("./src/lib/settings");
+        const prefs = await loadPrefs();
+        showDate = prefs.widgetShowDate;
+        forceCompact = prefs.widgetCompact;
+      } catch {}
+      const compact = forceCompact || width < 180 || height < 150;
+      const dateLabel = showDate && data?.takenAt
         ? new Date(data.takenAt).toLocaleDateString(undefined, {
             day: "numeric",
             month: "short",
@@ -28,6 +39,8 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
           count={data?.count ?? 0}
           dateLabel={dateLabel}
           photoId={data?.photoId ?? null}
+          showDate={showDate}
+          compact={compact}
         />
       );
       break;

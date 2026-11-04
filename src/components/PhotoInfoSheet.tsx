@@ -10,9 +10,10 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import MapView, { Marker } from "react-native-maps";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { formatBytes, formatDate } from "../lib/format";
 import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
@@ -21,7 +22,7 @@ import { Button } from "./ui";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
-import { ActivityIndicator } from "react-native";
+import { ActivityIndicator } from "../rn";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -44,6 +45,7 @@ export function PhotoInfoSheet({
   onFindSimilar?: () => void;
   theme: ReturnType<typeof useTheme>;
 }) {
+  const compact = useSettingsStore((s) => s.prefs.infoSheetDensity === "compact");
   const [versions, setVersions] = React.useState<PhotoVersionRow[] | null>(null);
   const [savingVersionId, setSavingVersionId] = React.useState<number | null>(null);
   const [savingMotion, setSavingMotion] = React.useState(false);
@@ -187,11 +189,15 @@ export function PhotoInfoSheet({
               <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Details</Text>
               <Row label="File name" value={p.filename} theme={theme} />
               {p.folder ? <Row label="Folder" value={p.folder} theme={theme} /> : null}
-              <Row label="Size" value={formatBytes(p.size)} theme={theme} />
+              {!compact || p.size ? (
+                <Row label="Size" value={formatBytes(p.size)} theme={theme} />
+              ) : null}
               {p.width && p.height ? (
                 <Row label="Resolution" value={`${p.width} × ${p.height} (${((p.width * p.height) / 1_000_000).toFixed(1)} MP)`} theme={theme} />
               ) : null}
-              {p.mime ? <Row label="Format" value={p.mime} theme={theme} /> : null}
+              {p.mime && (!compact || p.mime !== "image/jpeg") ? (
+                <Row label="Format" value={p.mime} theme={theme} />
+              ) : null}
               <Row
                 label="Backed up"
                 value={
@@ -207,8 +213,10 @@ export function PhotoInfoSheet({
                 }
                 theme={theme}
               />
-              {p.device ? <Row label="Uploaded by" value={`device ${p.device}`} theme={theme} /> : null}
-              {p.content_hash ? (
+              {!compact && p.device ? (
+                <Row label="Uploaded by" value={`device ${p.device}`} theme={theme} />
+              ) : null}
+              {!compact && p.content_hash ? (
                 <Row label="SHA-256" value={`${p.content_hash.slice(0, 24)}…`} theme={theme} mono />
               ) : null}
             </View>
@@ -218,9 +226,11 @@ export function PhotoInfoSheet({
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
                   Version history
                 </Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
-                  Previous uploads of this photo are kept as replies in your channel.
-                </Text>
+                {!compact ? (
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+                    Previous uploads of this photo are kept as replies in your channel.
+                  </Text>
+                ) : null}
                 {versions.map((v) => (
                   <View key={v.id} style={styles.versionRow}>
                     <View style={{ flex: 1 }}>

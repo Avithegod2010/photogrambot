@@ -10,7 +10,7 @@ import {
   type ViewStyle,
   type TextStyle,
   StyleSheet,
-} from "react-native";
+} from "../rn";
 import type { AppTheme } from "../theme";
 
 export function Button({

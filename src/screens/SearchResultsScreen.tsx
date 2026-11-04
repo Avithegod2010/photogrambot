@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { normalizeSearchFilters, searchPhotos } from "../lib/db";
 import { groupPhotosByDate } from "../lib/format";
 import { isDecoyActive } from "../lib/applock";
@@ -17,6 +18,7 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
   const title: string = route.params?.title ?? "Search";
   const query: string = route.params?.query ?? "";
   const filtersJson: string = route.params?.filtersJson ?? "null";
+  const dateFormat = useSettingsStore((s) => s.prefs.dateFormat);
   const [photos, setPhotos] = useState<PhotoRow[] | null>(null);
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
     };
   }, [query, filtersJson]);
 
-  const sections = photos ? groupPhotosByDate(photos) : [];
+  const sections = photos ? groupPhotosByDate(photos, dateFormat) : [];
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>

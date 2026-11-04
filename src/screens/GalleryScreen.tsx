@@ -14,7 +14,7 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
+} from "../rn";
 import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,6 +30,8 @@ import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { GearIcon, HeartIcon, TrashIcon, SparkleIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
+import { DateScrubber } from "../components/DateScrubber";
+import { EmptyGalleryArt, EmptySearchArt } from "../components/illustrations";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto, listProfiles } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
@@ -52,6 +54,7 @@ type LocalItem = {
 const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
 const COLUMNS = 3;
+const clampColumns = (n: number) => Math.max(2, Math.min(5, Math.round(n || COLUMNS)));
 
 // Local-roll page size. The new Query builder exposes no cursor API
 // (offset/limit only), so infinite scroll pages through the media store by
@@ -91,7 +94,18 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [albumDialogVisible, setAlbumDialogVisible] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
   const { albums, newAlbum, addPhotosToAlbum } = useLibraryStore();
-  const staggered = useSettingsStore((s) => s.prefs.staggeredGrid);
+  const staggeredPref = useSettingsStore((s) => s.prefs.staggeredGrid);
+  const tileAspect = useSettingsStore((s) => s.prefs.tileAspect);
+  const staggered = staggeredPref || tileAspect === "original";
+  const gridColumns = clampColumns(useSettingsStore((s) => s.prefs.gridColumns));
+  const compactGrid = useSettingsStore((s) => s.prefs.compactGrid);
+  const showCloudBadge = useSettingsStore((s) => s.prefs.showCloudBadge);
+  const showVideoBadge = useSettingsStore((s) => s.prefs.showVideoBadge);
+  const showFavoriteBadge = useSettingsStore((s) => s.prefs.showFavoriteBadge);
+  const showStatusBadge = useSettingsStore((s) => s.prefs.showStatusBadge);
+  const showDateCounts = useSettingsStore((s) => s.prefs.showDateCounts);
+  const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
+  const dateFormat = useSettingsStore((s) => s.prefs.dateFormat);
   const includeVideos = useSettingsStore((s) => s.prefs.includeVideos);
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
@@ -262,20 +276,29 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
   const sections = useMemo(() => {
     const source = decoy ? [] : searchResults ?? [];
-    return groupPhotosByDate(source).map((g) => ({
+    return groupPhotosByDate(source, dateFormat).map((g) => ({
       label: g.label,
       data: g.items,
     }));
-  }, [searchResults, decoy]);
+  }, [searchResults, decoy, dateFormat]);
 
   const localSections = useMemo(() => {
     if (decoy) return [];
-    return groupPhotosByDate(localAssets).map((g) => ({ label: g.label, data: g.items }));
-  }, [localAssets, decoy]);
+    return groupPhotosByDate(localAssets, dateFormat).map((g) => ({
+      label: g.label,
+      data: g.items,
+    }));
+  }, [localAssets, decoy, dateFormat]);
 
-  // Floor + margin: three tiles must fit the wrap container even after the
+  // Scrubber support: measured section offsets, refreshed on every layout.
+  const localListRef = useRef<FlatList<any>>(null);
+  const localSectionYs = useRef<number[]>([]);
+
+  // Floor + margin: all columns must fit the wrap container even after the
   // framework rounds fractional DP to whole pixels (2-per-row rounding bug).
-  const tile = Math.floor((Dimensions.get("window").width - 8) / COLUMNS);
+  const tile = Math.floor(
+    (Dimensions.get("window").width - (compactGrid ? 4 : 8)) / gridColumns
+  );
 
   const onTilePress = useCallback(
     (photo: PhotoRow, index: number) => {
@@ -646,24 +669,24 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           profileId={photo.profile_id}
           style={{ width: w, height: h }}
         />
-        {photo.favorite ? (
+        {showFavoriteBadge && photo.favorite ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.scrim }]}>
             <HeartIcon color={"#FF8FA3"} size={16} filled={true} />
           </View>
         ) : null}
-        {isVideoMime(photo.mime) || (photo.duration ?? 0) > 0 ? (
+        {showVideoBadge && (isVideoMime(photo.mime) || (photo.duration ?? 0) > 0) ? (
           <View style={styles.videoBadge}>
             <Text style={styles.videoBadgeText}>
               ▶ {formatDuration(photo.duration)}
             </Text>
           </View>
         ) : null}
-        {photo.status === "failed" || photo.status === "skipped_too_large" ? (
+        {showStatusBadge && (photo.status === "failed" || photo.status === "skipped_too_large") ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.errorContainer }]}>
             <Text style={{ color: theme.colors.error, fontSize: 11, fontWeight: "800" }}>!</Text>
           </View>
         ) : null}
-        {photo.status === "uploaded" ? (
+        {showCloudBadge && photo.status === "uploaded" ? (
           <View style={[styles.cloudBadge, { backgroundColor: theme.colors.primaryContainer }]}>
             <Text style={[styles.cloudBadgeText, { color: theme.colors.onPrimaryContainer }]}>✓</Text>
           </View>
@@ -750,12 +773,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     return (
       <Pressable onPress={() => void onLocalPress(item)} style={{ width: w, height: h }}>
         <LocalThumb assetId={a.id} />
-        {a.mediaType === MediaLibrary.MediaType.VIDEO ? (
+        {showVideoBadge && a.mediaType === MediaLibrary.MediaType.VIDEO ? (
           <View style={styles.videoBadge}>
             <Text style={styles.videoBadgeText}>▶ {formatDuration(a.duration)}</Text>
           </View>
         ) : null}
-        {backedUp ? (
+        {showCloudBadge && backedUp ? (
           <View style={[styles.cloudBadge, { backgroundColor: theme.colors.primaryContainer }]}>
             <Text style={[styles.cloudBadgeText, { color: theme.colors.onPrimaryContainer }]}>✓</Text>
           </View>
@@ -768,7 +791,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.appTitle, { color: theme.colors.onSurface }]}>PhotogramBot</Text>
+          <Text style={[styles.appTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
+            {appDisplayName || "PhotogramBot"}
+          </Text>
           {channelTitle && !decoy ? (
             <View
               style={[
@@ -903,7 +928,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
       {searchResults && searchResults.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={{ color: theme.colors.onSurfaceVariant }}>No results for “{search}”</Text>
+          <EmptySearchArt
+            color={theme.colors.onSurfaceVariant}
+            accent={theme.colors.primary}
+            size={110}
+          />
+          <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 10 }}>
+            No results for “{search}”
+          </Text>
         </View>
       ) : searchResults ? (
         <View
@@ -965,9 +997,23 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               }}
             >
               <View style={styles.dateHeaderRow}>
-                <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
-                  {item.label}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "baseline", flex: 1 }}>
+                  <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                    {item.label}
+                  </Text>
+                  {showDateCounts ? (
+                    <Text
+                      style={{
+                        color: theme.colors.onSurfaceVariant,
+                        fontSize: 11,
+                        marginLeft: 8,
+                        opacity: 0.75,
+                      }}
+                    >
+                      {item.data.length} photo{item.data.length === 1 ? "" : "s"}
+                    </Text>
+                  ) : null}
+                </View>
                 {selectionMode ? (
                   <Pressable
                     onPress={() =>
@@ -1009,12 +1055,17 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
             ) : (
               <View style={styles.empty}>
-                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>
+                <EmptyGalleryArt
+                  color={theme.colors.onSurfaceVariant}
+                  accent={theme.colors.primary}
+                  size={120}
+                />
+                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
                   No photos yet
                 </Text>
-            <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-              Nothing backed up yet. New photos back up automatically when Auto sync is on in Settings, or share photos to PhotogramBot from any app.
-            </Text>
+                <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
+                  Nothing backed up yet. New photos back up automatically when Auto sync is on in Settings, or share photos to {appDisplayName || "PhotogramBot"} from any app.
+                </Text>
               </View>
             )
           }
@@ -1029,6 +1080,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         <PeriodJumpList mode={viewMode} navigation={navigation} theme={theme} />
       ) : (
         <FlatList
+          ref={localListRef}
           data={localSections}
           // Offset shifts from media added/deleted mid-scroll can leave two
           // sections with the same date label; the index keeps keys unique.
@@ -1047,12 +1099,30 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               </View>
             ) : null
           }
-          renderItem={({ item }) => (
-            <View>
+          renderItem={({ item, index }) => (
+            <View
+              onLayout={(e) => {
+                localSectionYs.current[index] = e.nativeEvent.layout.y;
+              }}
+            >
               <View style={styles.dateHeaderRow}>
-                <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
-                  {item.label}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "baseline", flex: 1 }}>
+                  <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                    {item.label}
+                  </Text>
+                  {showDateCounts ? (
+                    <Text
+                      style={{
+                        color: theme.colors.onSurfaceVariant,
+                        fontSize: 11,
+                        marginLeft: 8,
+                        opacity: 0.75,
+                      }}
+                    >
+                      {item.data.length} photo{item.data.length === 1 ? "" : "s"}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
               <SectionGrid photos={item.data} staggered={staggered} renderTile={renderLocalTile} />
             </View>
@@ -1062,7 +1132,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
             ) : (
               <View style={styles.empty}>
-                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>
+                <EmptyGalleryArt
+                  color={theme.colors.onSurfaceVariant}
+                  accent={theme.colors.primary}
+                  size={120}
+                />
+                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
                   Nothing here yet
                 </Text>
                 <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
@@ -1078,6 +1153,21 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           }
         />
       )}
+
+      {viewMode === "days" && !searchResults && !decoy ? (
+        <DateScrubber
+          labels={localSections.map((s) => s.label)}
+          onJump={(i) =>
+            localListRef.current?.scrollToOffset({
+              offset: localSectionYs.current[i] ?? 0,
+              animated: false,
+            })
+          }
+          theme={theme}
+          top={insets.top + 150}
+          bottom={insets.bottom + 150}
+        />
+      ) : null}
 
       {selectionMode ? (
         <View
@@ -1670,10 +1760,13 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
   onTileLayout?: (sectionIndex: number, id: string, l: { x: number; y: number; width: number; height: number }) => void;
   onGridLayout?: (sectionIndex: number, l: { x: number; y: number; width: number; height: number }) => void;
 }) {
+  const columnsPref = clampColumns(useSettingsStore((s) => s.prefs.gridColumns));
+  const compact = useSettingsStore((s) => s.prefs.compactGrid);
+  const gap = compact ? 1 : 2;
   if (!staggered) {
     return (
       <View
-        style={styles.grid}
+        style={[styles.grid, { gap, padding: compact ? 1 : 2 }]}
         onLayout={
           onGridLayout && paintSectionIndex !== undefined
             ? (e) => onGridLayout(paintSectionIndex, e.nativeEvent.layout)
@@ -1695,26 +1788,28 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
       </View>
     );
   }
-  const colW = Math.floor((Dimensions.get("window").width - 8) / COLUMNS);
+  const colW = Math.floor(
+    (Dimensions.get("window").width - (compact ? 4 : 8)) / columnsPref
+  );
   const heights = photos.map((p) => {
     const aspect =
       p.width && p.height ? p.height / p.width : 1;
     return Math.max(colW * 0.6, Math.min(colW * 1.8, colW * aspect));
   });
   const columns: { p: T; h: number }[][] = Array.from(
-    { length: COLUMNS },
+    { length: columnsPref },
     () => []
   );
-  const colHeights = new Array(COLUMNS).fill(0);
+  const colHeights = new Array(columnsPref).fill(0);
   photos.forEach((p, i) => {
     const shortest = colHeights.indexOf(Math.min(...colHeights));
     columns[shortest].push({ p, h: heights[i] });
-    colHeights[shortest] += heights[i] + 2;
+    colHeights[shortest] += heights[i] + gap;
   });
   return (
-    <View style={[styles.grid, { flexDirection: "row", gap: 2, alignItems: "flex-start" }]}>
+    <View style={[styles.grid, { flexDirection: "row", gap, alignItems: "flex-start" }]}>
       {columns.map((col, ci) => (
-        <View key={ci} style={{ flex: 1, gap: 2 }}>
+        <View key={ci} style={{ flex: 1, gap }}>
           {col.map(({ p, h }) => (
             <React.Fragment key={p.id}>{renderTile(p, colW, h)}</React.Fragment>
           ))}

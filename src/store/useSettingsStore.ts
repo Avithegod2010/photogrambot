@@ -1,3 +1,4 @@
+import { Appearance } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { create } from "zustand";
 import {
@@ -7,6 +8,7 @@ import {
   type Prefs,
   type ThemeMode,
 } from "../lib/settings";
+import { resolveThemeMode, type ResolvedThemeMode } from "../lib/appearance";
 
 interface DeviceIdState {
   deviceId: string;
@@ -41,24 +43,42 @@ export const useDeviceStore = create<DeviceIdState>((set, get) => ({
 interface SettingsState {
   prefs: Prefs;
   loaded: boolean;
+  /** Concrete light/dark/amoled mode after schedule + system resolution. */
+  resolvedTheme: ResolvedThemeMode;
   load: () => Promise<void>;
   update: (patch: Partial<Prefs>) => Promise<void>;
   setTheme: (mode: ThemeMode) => Promise<void>;
+  refreshTheme: () => void;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+function resolve(prefs: Prefs): ResolvedThemeMode {
+  return resolveThemeMode(
+    prefs.theme,
+    prefs.themeSchedule,
+    prefs.themeScheduleStart,
+    prefs.themeScheduleEnd,
+    Appearance.getColorScheme()
+  );
+}
+
+export const useSettingsStore = create<SettingsState>((set, get) => ({
   prefs: { ...defaultPrefs },
   loaded: false,
+  resolvedTheme: resolve(defaultPrefs),
   load: async () => {
     const prefs = await loadPrefs();
-    set({ prefs, loaded: true });
+    set({ prefs, resolvedTheme: resolve(prefs), loaded: true });
   },
   update: async (patch) => {
     const prefs = await savePrefs(patch);
-    set({ prefs });
+    set({ prefs, resolvedTheme: resolve(prefs) });
   },
   setTheme: async (mode) => {
     const prefs = await savePrefs({ theme: mode });
-    set({ prefs });
+    set({ prefs, resolvedTheme: resolve(prefs) });
+  },
+  refreshTheme: () => {
+    const next = resolve(get().prefs);
+    if (next !== get().resolvedTheme) set({ resolvedTheme: next });
   },
 }));

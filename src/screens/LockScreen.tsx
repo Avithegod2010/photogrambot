@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "../rn";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { Button } from "../components/ui";
 import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../lib/applock";
 import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
@@ -15,6 +16,7 @@ function fmtBackoff(ms: number): string {
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const theme = useTheme();
+  const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pinWrong, setPinWrong] = useState(false);
@@ -70,7 +72,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     setFailed(false);
     try {
       const res = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Unlock PhotogramBot",
+        promptMessage: `Unlock ${appDisplayName || "PhotogramBot"}`,
         cancelLabel: "Retry",
         disableDeviceFallback: false,
       });
@@ -135,7 +137,9 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
           🔒
         </Text>
       </View>
-      <Text style={[styles.title, { color: theme.colors.onSurface }]}>PhotogramBot is locked</Text>
+      <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+        {appDisplayName || "PhotogramBot"} is locked
+      </Text>
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
         {backoffMs > 0
           ? `Too many attempts — try again in ${fmtBackoff(backoffMs)}`

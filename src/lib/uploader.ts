@@ -747,24 +747,27 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
       try { new File(previewLocalUri).delete(); } catch {}
     }
 
-    const caption = buildCaption({
-      filename: item.filename,
-      path: metaFull?.localUri,
-      size: metaFull?.size ?? file.size,
-      width: metaFull?.width ?? null,
-      height: metaFull?.height ?? null,
-      mime,
-      dateTaken: takenAt,
-      dateAdded: metaFull?.addedAt ?? item.added_at,
-      camera: metaFull?.camera ?? null,
-      technical: metaFull?.technical ?? null,
-      gps: metaFull?.gps ?? null,
-      tags,
-      device: deviceId,
-      deviceName: null,
-      hash,
-      aiDescription,
-    });
+    const caption = buildCaption(
+      {
+        filename: item.filename,
+        path: metaFull?.localUri,
+        size: metaFull?.size ?? file.size,
+        width: metaFull?.width ?? null,
+        height: metaFull?.height ?? null,
+        mime,
+        dateTaken: takenAt,
+        dateAdded: metaFull?.addedAt ?? item.added_at,
+        camera: metaFull?.camera ?? null,
+        technical: metaFull?.technical ?? null,
+        gps: metaFull?.gps ?? null,
+        tags,
+        device: deviceId,
+        deviceName: null,
+        hash,
+        aiDescription,
+      },
+      { fields: prefs.captionFields, dateFormat: prefs.dateFormat }
+    );
 
     const controller = new AbortController();
     const cancelFn = () => controller.abort();
@@ -992,24 +995,27 @@ async function uploadVersionItem(
       mime,
       metaFull?.camera ?? null
     );
-    const caption = buildCaption({
-      filename: item.filename,
-      path: metaFull?.localUri,
-      size: metaFull?.size ?? file.size,
-      width: metaFull?.width ?? null,
-      height: metaFull?.height ?? null,
-      mime,
-      dateTaken: metaFull?.takenAt || item.taken_at || Date.now(),
-      dateAdded: metaFull?.addedAt ?? item.added_at,
-      camera: metaFull?.camera ?? null,
-      technical: metaFull?.technical ?? null,
-      gps: metaFull?.gps ?? null,
-      tags,
-      device: deviceId,
-      deviceName: null,
-      hash,
-      versionTag: newVersionTag,
-    });
+    const caption = buildCaption(
+      {
+        filename: item.filename,
+        path: metaFull?.localUri,
+        size: metaFull?.size ?? file.size,
+        width: metaFull?.width ?? null,
+        height: metaFull?.height ?? null,
+        mime,
+        dateTaken: metaFull?.takenAt || item.taken_at || Date.now(),
+        dateAdded: metaFull?.addedAt ?? item.added_at,
+        camera: metaFull?.camera ?? null,
+        technical: metaFull?.technical ?? null,
+        gps: metaFull?.gps ?? null,
+        tags,
+        device: deviceId,
+        deviceName: null,
+        hash,
+        versionTag: newVersionTag,
+      },
+      { fields: prefs.captionFields, dateFormat: prefs.dateFormat }
+    );
 
     const controller = new AbortController();
     const cancelFn = () => controller.abort();
@@ -1103,24 +1109,28 @@ async function uploadVideoItem(
   const { metaFull } = ctx;
   const duration = metaFull?.duration ?? null;
   const fileSize = metaFull?.size ?? ctx.fileSize;
-  const caption = buildCaption({
-    filename: item.filename,
-    path: metaFull?.localUri,
-    size: fileSize,
-    width: metaFull?.width ?? null,
-    height: metaFull?.height ?? null,
-    mime: ctx.mime,
-    duration,
-    dateTaken: ctx.takenAt,
-    dateAdded: metaFull?.addedAt ?? item.added_at,
-    camera: metaFull?.camera ?? null,
-    technical: null,
-    gps: metaFull?.gps ?? null,
-    tags: ctx.tags,
-    device: ctx.deviceId,
-    deviceName: null,
-    hash: ctx.hash,
-  });
+  const captionPrefs = await loadPrefs();
+  const caption = buildCaption(
+    {
+      filename: item.filename,
+      path: metaFull?.localUri,
+      size: fileSize,
+      width: metaFull?.width ?? null,
+      height: metaFull?.height ?? null,
+      mime: ctx.mime,
+      duration,
+      dateTaken: ctx.takenAt,
+      dateAdded: metaFull?.addedAt ?? item.added_at,
+      camera: metaFull?.camera ?? null,
+      technical: null,
+      gps: metaFull?.gps ?? null,
+      tags: ctx.tags,
+      device: ctx.deviceId,
+      deviceName: null,
+      hash: ctx.hash,
+    },
+    { fields: captionPrefs.captionFields, dateFormat: captionPrefs.dateFormat }
+  );
 
   const controller = new AbortController();
   const cancelFn = () => controller.abort();

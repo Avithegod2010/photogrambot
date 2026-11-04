@@ -8,6 +8,8 @@ export function RandomPhotoWidget({
   count,
   dateLabel,
   photoId,
+  showDate = true,
+  compact = false,
 }: {
   imageDataUri: `data:image${string}` | null;
   imageWidth: number;
@@ -15,6 +17,8 @@ export function RandomPhotoWidget({
   count: number;
   dateLabel: string | null;
   photoId: string | null;
+  showDate?: boolean;
+  compact?: boolean;
 }) {
   return (
     <FlexWidget
@@ -23,7 +27,7 @@ export function RandomPhotoWidget({
         width: "match_parent",
         justifyContent: "flex-end",
         alignItems: "flex-start",
-        borderRadius: 20,
+        borderRadius: compact ? 12 : 20,
         backgroundColor: "#101014",
         overflow: "hidden",
       }}
@@ -51,27 +55,29 @@ export function RandomPhotoWidget({
         ) : (
           <TextWidget
             text={count > 0 ? `${count} photos` : "PhotogramBot"}
-            style={{ fontSize: 13, color: "#D6E3FF", fontWeight: "700" }}
+            style={{ fontSize: compact ? 11 : 13, color: "#D6E3FF", fontWeight: "700" }}
           />
         )}
       </FlexWidget>
-      <FlexWidget
-        style={{
-          marginLeft: 10,
-          marginBottom: 10,
-          paddingLeft: 10,
-          paddingRight: 10,
-          paddingTop: 4,
-          paddingBottom: 4,
-          backgroundColor: "#8E000000",
-          borderRadius: 10,
-        }}
-      >
-        <TextWidget
-          text={dateLabel ?? "PhotogramBot"}
-          style={{ fontSize: 11, color: "#FFFFFF", fontWeight: "600" }}
-        />
-      </FlexWidget>
+      {showDate ? (
+        <FlexWidget
+          style={{
+            marginLeft: compact ? 6 : 10,
+            marginBottom: compact ? 6 : 10,
+            paddingLeft: compact ? 7 : 10,
+            paddingRight: compact ? 7 : 10,
+            paddingTop: compact ? 2 : 4,
+            paddingBottom: compact ? 2 : 4,
+            backgroundColor: "#8E000000",
+            borderRadius: compact ? 7 : 10,
+          }}
+        >
+          <TextWidget
+            text={dateLabel ?? "PhotogramBot"}
+            style={{ fontSize: compact ? 9 : 11, color: "#FFFFFF", fontWeight: "600" }}
+          />
+        </FlexWidget>
+      ) : null}
     </FlexWidget>
   );
 }

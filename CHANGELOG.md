@@ -3,6 +3,73 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [1.1.0] — customisation
+
+A look-and-feel release: 21 appearance and layout controls, most of them
+reachable from Settings → Appearance.
+
+### Theme & colour
+- **Accent colour picker** — eight presets plus a custom `#RRGGBB` field. The
+  accent drives the primary buttons, chips, tab bar, selection bar and upload
+  banner. Containers/foregrounds are derived with a luminance-aware blend so
+  light and dark modes stay legible.
+- **Dark / AMOLED / Light / Auto** plus an optional **scheduled theme**
+  (dark at night, light by day, with editable 30-minute start/end steps).
+  AMOLED stays AMOLED through the night half of the schedule.
+- **Per-album accent colour** — the album header gains a colour dot that opens
+  an “Album style” dialog (accents + reset cover). Chosen accents also tint the
+  album cards in Collections.
+- **Custom in-app name** — renames the gallery header, splash, setup, lock
+  screen, share sheet and About card. (The Android launcher label remains a
+  build-time `strings.xml` value.)
+
+### Gallery layout
+- **Grid density** — 2 / 3 / 4 / 5 columns.
+- **Aspect-ratio modes** — square tiles or natural aspect, plus a **compact
+  grid** with tighter gaps.
+- **Date-section headers** — photo counts per date, plus a draggable
+  **date scrubber** on the right edge of the day view that jumps to a section.
+- **Tile badge toggles** — cloud ✓, video ▶, favourite ♥ and failed-upload !
+  can each be hidden independently.
+- **Cover-photo curation** — long-press a photo in an album → “Set as cover”,
+  and “Reset cover to newest” from the album style dialog (the existing
+  selection-bar Set cover still works).
+
+### Surfaces & chrome
+- **Map style picker** — standard / satellite / hybrid / terrain.
+- **Viewer chrome auto-hide** — Google Photos-style timed hiding with a
+  2 / 3 / 5 / 8 second delay, or keep it always on.
+- **Photo info density** — compact (hides empty/low-value rows) or detailed.
+- **Empty-state illustrations** — themed inline artwork for empty gallery,
+  search, album and trash screens.
+- **Loading skeletons** — pulsing placeholders while cloud thumbnails load.
+
+### Widget & notifications
+- **Widget appearance** — date overlay on/off and a compact layout; the widget
+  also switches to compact automatically at small sizes.
+- **Notification accent colour** — upload progress/completion/failure
+  notifications are tinted with the current accent.
+
+### Typography & locale
+- **Font scale** — Small / Default / Large / Extra large, applied app-wide via
+  a Text wrapper (all UI text, including nested text).
+- **Date format** — System / `31.12.2026` / `12/31/2026` / ISO, used by gallery
+  headers, saved-search results and channel captions.
+- **Caption template editor** — include/exclude and reorder every metadata line
+  in the channel caption (the content hash is always kept for restore/dedupe).
+
+### Branding
+- **App icon variants** — Default / Accent / Monochrome launcher icons via
+  Android activity-aliases and a native `setAppIcon` toggle.
+- **Accent splash** — the in-app cold-start screen can match the accent colour
+  and uses the custom app name.
+
+### Testing & docs
+- New `tests/customisation.test.mjs` (20 checks) covers schedule resolution
+  (including midnight wrap), colour math, accent validation, date formats,
+  album accents and caption field filtering/ordering/hash-keeping.
+- Version bumped to **1.1.0 / versionCode 3**.
+
 ## [unreleased] — repository tooling
 
 No shipped-feature changes yet — all of this is no-phone, code-only work.

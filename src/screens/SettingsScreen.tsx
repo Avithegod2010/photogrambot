@@ -8,7 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useSetupStore } from "../store/useSetupStore";
@@ -33,7 +33,20 @@ import {
   getBackupPassphrase,
   setBackupPassphrase,
   DEFAULT_AI_PROMPT,
+  DEFAULT_CAPTION_FIELDS,
+  CAPTION_FIELD_LABELS,
 } from "../lib/settings";
+import {
+  ACCENT_PRESETS,
+  APP_ICON_VARIANTS,
+  DATE_FORMATS,
+  FONT_SCALES,
+  GRID_COLUMNS,
+  MAP_STYLES,
+  formatClock,
+  isHexColor,
+} from "../lib/appearance";
+import { setAppIcon } from "../../modules/share-intent";
 import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/applock";
 import { exportMonthZip } from "../lib/zipexport";
 import { getUploadedPhotosInMonth } from "../lib/db";
@@ -91,6 +104,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   const [mirrorProfiles, setMirrorProfiles] = useState<DestProfile[]>([]);
+  const [accentDraft, setAccentDraft] = useState(
+    prefs.accentColor === "default" ? "" : prefs.accentColor
+  );
+  const [displayNameDraft, setDisplayNameDraft] = useState(prefs.appDisplayName);
+  const [captionDialog, setCaptionDialog] = useState(false);
+  const [captionOrder, setCaptionOrder] = useState<string[]>(DEFAULT_CAPTION_FIELDS);
+  const [captionEnabled, setCaptionEnabled] = useState<Set<string>>(
+    new Set(prefs.captionFields)
+  );
 
   useEffect(() => {
     if (prefs.multiDestination) {
@@ -107,6 +129,17 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   useEffect(() => {
     void getBackupPassphrase().then((p) => setPassDraft(p ?? ""));
   }, []);
+
+  useEffect(() => {
+    setAccentDraft(prefs.accentColor === "default" ? "" : prefs.accentColor);
+    setDisplayNameDraft(prefs.appDisplayName);
+    // Keep excluded fields visible in the editor so they can be re-enabled.
+    setCaptionOrder([
+      ...prefs.captionFields,
+      ...DEFAULT_CAPTION_FIELDS.filter((k) => !prefs.captionFields.includes(k)),
+    ]);
+    setCaptionEnabled(new Set(prefs.captionFields));
+  }, [prefs.accentColor, prefs.appDisplayName, prefs.captionFields]);
 
   useEffect(() => {
     void refreshMeta();
@@ -337,6 +370,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     { key: "dark", label: "Dark" },
     { key: "amoled", label: "AMOLED" },
     { key: "light", label: "Light" },
+    { key: "system", label: "Auto" },
   ];
   const canDynamic = Platform.OS === "android" && Number(Platform.Version) >= 31;
 
@@ -615,19 +649,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
         <SectionLabel text="Appearance" theme={theme} />
         <Card theme={theme}>
-          <View style={styles.themeRow}>
-            {themeOptions.map((opt) => (
-              <Button
-                key={opt.key}
-                title={opt.label}
-                theme={theme}
-                variant={prefs.theme === opt.key ? "filled" : "outlined"}
-                style={{ flex: 1 }}
-                onPress={() => void update({ theme: opt.key })}
-              />
-            ))}
-          </View>
-          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>Theme</Text>
+          <ChipRow
+            options={themeOptions}
+            value={prefs.theme}
+            onSelect={(v) => void update({ theme: v as ThemeMode })}
+            theme={theme}
+          />
           <ToggleRow
             title="Material You colors"
             subtitle={
@@ -640,19 +668,302 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             theme={theme}
           />
           <ToggleRow
-            title="Staggered grid"
-            subtitle="Show photos at their natural aspect ratio in the day view"
-            value={prefs.staggeredGrid}
-            onChange={(v) => void update({ staggeredGrid: v })}
+            title="Scheduled theme"
+            subtitle="Use dark at night and light during the day"
+            value={prefs.themeSchedule}
+            onChange={(v) => void update({ themeSchedule: v })}
             theme={theme}
           />
+          {prefs.themeSchedule ? (
+            <>
+              <StepperRow
+                label="Dark starts"
+                minutes={prefs.themeScheduleStart}
+                onChange={(m) => void update({ themeScheduleStart: m })}
+                theme={theme}
+              />
+              <StepperRow
+                label="Light starts"
+                minutes={prefs.themeScheduleEnd}
+                onChange={(m) => void update({ themeScheduleEnd: m })}
+                theme={theme}
+              />
+            </>
+          ) : null}
+
           <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Accent color
+          </Text>
+          <View style={styles.swatchRow}>
+            {ACCENT_PRESETS.map((preset) => {
+              const selected =
+                preset.key === "default"
+                  ? prefs.accentColor === "default" || !isHexColor(prefs.accentColor)
+                  : prefs.accentColor === preset.color;
+              return (
+                <Pressable
+                  key={preset.key}
+                  onPress={() => {
+                    setAccentDraft("");
+                    void update({ accentColor: preset.key });
+                  }}
+                  style={[
+                    styles.swatch,
+                    {
+                      backgroundColor: preset.color ?? theme.colors.surfaceHighest,
+                      borderWidth: selected ? 3 : 1,
+                      borderColor: selected ? theme.colors.onSurface : theme.colors.outline,
+                    },
+                  ]}
+                  accessibilityLabel={`${preset.label} accent`}
+                  accessibilityRole="button"
+                >
+                  {preset.key === "default" ? (
+                    <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>Auto</Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10, alignItems: "center" }}>
+            <TextField
+              value={accentDraft}
+              onChangeText={setAccentDraft}
+              placeholder="#RRGGBB (custom)"
+              theme={theme}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Apply"
+              variant="outlined"
+              theme={theme}
+              disabled={accentDraft.length > 0 && !isHexColor(accentDraft)}
+              onPress={() => void update({ accentColor: isHexColor(accentDraft) ? accentDraft : "default" })}
+            />
+          </View>
+
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            In-app name
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <TextField
+              value={displayNameDraft}
+              onChangeText={setDisplayNameDraft}
+              placeholder="PhotogramBot"
+              theme={theme}
+              autoCapitalize="words"
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Save"
+              variant="outlined"
+              theme={theme}
+              onPress={() => void update({ appDisplayName: displayNameDraft.trim() || "PhotogramBot" })}
+            />
+          </View>
+
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Text size
+          </Text>
+          <ChipRow
+            options={FONT_SCALES}
+            value={prefs.fontScale}
+            onSelect={(v) => void update({ fontScale: Number(v) })}
+            theme={theme}
+          />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Date format
+          </Text>
+          <ChipRow
+            options={DATE_FORMATS}
+            value={prefs.dateFormat}
+            onSelect={(v) => void update({ dateFormat: v as any })}
+            theme={theme}
+          />
+
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>Grid</Text>
+          <ChipRow
+            options={GRID_COLUMNS.map((n) => ({ key: n, label: `${n}` }))}
+            value={prefs.gridColumns}
+            onSelect={(v) => void update({ gridColumns: Number(v) })}
+            theme={theme}
+          />
+          <ChipRow
+            options={[
+              { key: "square", label: "Square tiles" },
+              { key: "original", label: "Natural aspect" },
+            ]}
+            value={prefs.tileAspect}
+            onSelect={(v) => void update({ tileAspect: v as any })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Compact grid"
+            subtitle="Tighter gaps between photos"
+            value={prefs.compactGrid}
+            onChange={(v) => void update({ compactGrid: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Cloud badge"
+            subtitle="Show the ✓ on backed-up photos"
+            value={prefs.showCloudBadge}
+            onChange={(v) => void update({ showCloudBadge: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Video badge"
+            subtitle="Show the ▶ duration on videos"
+            value={prefs.showVideoBadge}
+            onChange={(v) => void update({ showVideoBadge: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Favorite badge"
+            subtitle="Show the heart on favorites"
+            value={prefs.showFavoriteBadge}
+            onChange={(v) => void update({ showFavoriteBadge: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Upload-status badge"
+            subtitle="Show the ! on failed photos"
+            value={prefs.showStatusBadge}
+            onChange={(v) => void update({ showStatusBadge: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Date header counts"
+            subtitle="Show how many photos are under each date"
+            value={prefs.showDateCounts}
+            onChange={(v) => void update({ showDateCounts: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Loading skeletons"
+            subtitle="Pulse placeholders while thumbnails download"
+            value={prefs.skeletonLoading}
+            onChange={(v) => void update({ skeletonLoading: v })}
+            theme={theme}
+          />
+
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Map style
+          </Text>
+          <ChipRow
+            options={MAP_STYLES}
+            value={prefs.mapStyle}
+            onSelect={(v) => void update({ mapStyle: v as any })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Auto-hide viewer controls"
+            subtitle="Tuck the top/bottom bars away after a few seconds"
+            value={prefs.viewerAutoHideChrome}
+            onChange={(v) => void update({ viewerAutoHideChrome: v })}
+            theme={theme}
+          />
+          {prefs.viewerAutoHideChrome ? (
+            <ChipRow
+              options={[2, 3, 5, 8].map((n) => ({ key: n, label: `${n}s` }))}
+              value={prefs.viewerChromeDelaySec}
+              onSelect={(v) => void update({ viewerChromeDelaySec: Number(v) })}
+              theme={theme}
+            />
+          ) : null}
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Photo info
+          </Text>
+          <ChipRow
+            options={[
+              { key: "compact", label: "Compact" },
+              { key: "detailed", label: "Detailed" },
+            ]}
+            value={prefs.infoSheetDensity}
+            onSelect={(v) => void update({ infoSheetDensity: v as any })}
+            theme={theme}
+          />
+
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Notification accent color"
+            subtitle="Tint upload notifications with your accent"
+            value={prefs.notificationAccent}
+            onChange={(v) => void update({ notificationAccent: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Accent splash"
+            subtitle="Match the in-app loading screen to your accent"
+            value={prefs.splashAccent}
+            onChange={(v) => void update({ splashAccent: v })}
+            theme={theme}
+          />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            App icon
+          </Text>
+          <ChipRow
+            options={APP_ICON_VARIANTS}
+            value={prefs.appIconVariant}
+            onSelect={(v) => {
+              void update({ appIconVariant: v as any });
+              if (!setAppIcon(String(v))) {
+                Alert.alert(
+                  "Icon not applied",
+                  "This build predates the icon variants. Install the next preview build to switch icons."
+                );
+              }
+            }}
+            theme={theme}
+          />
+          <Text style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
+            If the launcher keeps the old icon, close and reopen it (or reboot).
+          </Text>
+
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Widget
+          </Text>
+          <ToggleRow
+            title="Widget shows date"
+            subtitle="Overlay the photo date on the home-screen widget"
+            value={prefs.widgetShowDate}
+            onChange={(v) => void update({ widgetShowDate: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Widget compact layout"
+            subtitle="Smaller padding and rounded corners"
+            value={prefs.widgetCompact}
+            onChange={(v) => void update({ widgetCompact: v })}
+            theme={theme}
+          />
           <ToggleRow
             title="Widget shows favorites only"
             subtitle="Limit the home-screen random photo widget to favorited photos"
             value={prefs.widgetFavoritesOnly}
             onChange={(v) => void update({ widgetFavoritesOnly: v })}
             theme={theme}
+          />
+        </Card>
+
+        <SectionLabel text="Channel captions" theme={theme} />
+        <Card theme={theme}>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+            Choose which metadata lines appear under each upload and reorder them. The
+            content hash and preview line are always kept so restore and dedupe keep working.
+          </Text>
+          <Button
+            title="Edit caption fields"
+            variant="outlined"
+            theme={theme}
+            style={{ marginTop: 12 }}
+            onPress={() => setCaptionDialog(true)}
           />
         </Card>
 
@@ -938,7 +1249,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
         <SectionLabel text="About" theme={theme} />
         <Card theme={theme}>
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>PhotogramBot</Text>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>
+            {prefs.appDisplayName || "PhotogramBot"}
+          </Text>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 4, lineHeight: 18 }}>
             Version {CURRENT_VERSION} · Photos are backed up to your own Telegram channel via your own bot.
             No servers, no tracking. Telegram Bot API limits: originals up to 50 MB, downloads
@@ -976,6 +1289,86 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <Button title="Cancel" variant="text" theme={theme} onPress={() => setRestoreDialog(false)} />
           <Button title="Restore" theme={theme} onPress={onRestoreFromChannel} />
+        </View>
+      </Dialog>
+
+      <Dialog
+        visible={captionDialog}
+        theme={theme}
+        title="Caption fields"
+        message="Tap a field to include or exclude it. The content hash is always kept so restore and dedupe keep working."
+      >
+        <ScrollView style={{ maxHeight: 340, marginTop: 12 }}>
+          {captionOrder.map((key, index) => {
+            const label = CAPTION_FIELD_LABELS.find((f) => f.key === key)?.label ?? key;
+            const enabled = key === "hash" || captionEnabled.has(key);
+            const move = (delta: number) => {
+              const next = [...captionOrder];
+              const to = index + delta;
+              if (to < 0 || to >= next.length) return;
+              [next[index], next[to]] = [next[to], next[index]];
+              setCaptionOrder(next);
+            };
+            return (
+              <View key={key} style={styles.captionRow}>
+                <Pressable
+                  onPress={() => {
+                    if (key === "hash") return;
+                    const next = new Set(captionEnabled);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    setCaptionEnabled(next);
+                  }}
+                  style={[
+                    styles.captionToggle,
+                    {
+                      borderColor: enabled ? theme.colors.primary : theme.colors.outline,
+                      backgroundColor: enabled ? theme.colors.primaryContainer : "transparent",
+                    },
+                  ]}
+                >
+                  <Text style={{ color: enabled ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant, fontSize: 12 }}>
+                    {enabled ? "✓" : ""}
+                  </Text>
+                </Pressable>
+                <Text style={[styles.captionLabel, { color: theme.colors.onSurface }]} numberOfLines={1}>
+                  {label}
+                </Text>
+                <Pressable onPress={() => move(-1)} hitSlop={6} disabled={index === 0}>
+                  <Text style={{ color: index === 0 ? theme.colors.outline : theme.colors.primary, fontSize: 16 }}>↑</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => move(1)}
+                  hitSlop={6}
+                  disabled={index === captionOrder.length - 1}
+                >
+                  <Text
+                    style={{
+                      color:
+                        index === captionOrder.length - 1
+                          ? theme.colors.outline
+                          : theme.colors.primary,
+                      fontSize: 16,
+                    }}
+                  >
+                    ↓
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </ScrollView>
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Button title="Cancel" variant="text" theme={theme} onPress={() => setCaptionDialog(false)} />
+          <Button
+            title="Save"
+            theme={theme}
+            onPress={() => {
+              const fields = captionOrder.filter((k) => k === "hash" || captionEnabled.has(k));
+              void update({ captionFields: fields });
+              setCaptionDialog(false);
+            }}
+          />
         </View>
       </Dialog>
 
@@ -1095,6 +1488,91 @@ function Stat({ label, value, theme }: { label: string; value: string; theme: Re
     <View style={styles.stat}>
       <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 16 }}>{value}</Text>
       <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>{label}</Text>
+    </View>
+  );
+}
+
+function ChipRow({
+  options,
+  value,
+  onSelect,
+  theme,
+}: {
+  options: { key: string | number; label: string }[];
+  value: string | number;
+  onSelect: (value: string | number) => void;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  return (
+    <View style={styles.chipRow}>
+      {options.map((option) => {
+        const active = option.key === value;
+        return (
+          <Pressable
+            key={String(option.key)}
+            onPress={() => onSelect(option.key)}
+            style={[
+              styles.chip,
+              {
+                backgroundColor: active
+                  ? theme.colors.primaryContainer
+                  : theme.colors.surfaceHighest,
+              },
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+          >
+            <Text
+              style={{
+                color: active ? theme.colors.onPrimaryContainer : theme.colors.onSurface,
+                fontSize: 12.5,
+                fontWeight: "600",
+              }}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function StepperRow({
+  label,
+  minutes,
+  onChange,
+  theme,
+}: {
+  label: string;
+  minutes: number;
+  onChange: (minutes: number) => void;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  return (
+    <View style={styles.stepperRow}>
+      <Text style={{ color: theme.colors.onSurface, fontSize: 14 }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Pressable
+          onPress={() => onChange((minutes - 30 + 1440) % 1440)}
+          hitSlop={8}
+          accessibilityLabel={`${label} earlier`}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: theme.colors.primary, fontSize: 20, fontWeight: "700" }}>−</Text>
+        </Pressable>
+        <Text style={{ color: theme.colors.onSurface, fontSize: 15, fontWeight: "600", minWidth: 48, textAlign: "center" }}>
+          {formatClock(minutes)}
+        </Text>
+        <Pressable
+          onPress={() => onChange((minutes + 30) % 1440)}
+          hitSlop={8}
+          accessibilityLabel={`${label} later`}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: theme.colors.primary, fontSize: 20, fontWeight: "700" }}>+</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -1288,5 +1766,67 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     justifyContent: "center",
+  },
+  groupLabel: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 4,
+  },
+  chip: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  swatchRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 4,
+  },
+  swatch: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hint: {
+    fontSize: 11.5,
+    marginTop: 6,
+    lineHeight: 16,
+  },
+  stepperRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+  },
+  captionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 6,
+  },
+  captionToggle: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  captionLabel: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: "500",
   },
 });
