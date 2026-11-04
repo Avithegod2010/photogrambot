@@ -39,8 +39,28 @@ App.tsx        (bootstrap, polling, navigation)
   kept byte-exact as decrypt-only for legacy blobs.
 - `updater.ts` / `updaterLogic.ts` — in-app updater; picks the newest release
   that carries an `.apk` asset (drafts skipped).
+- `appearanceMath.ts` — dependency-free theme resolution (system/schedule),
+  accent colour math, date/map/grid option constants. Unit-tested.
+- `appearance.ts` — theme-dependent accent application (blends the accent into
+  the static dark/AMOLED/light palettes).
+- `captionFields.ts` — pure caption-field metadata shared by the builder and
+  Settings.
 - Pure logic (no RN imports, directly unit-tested): `vecmath`, `pbkdf2`,
   `autotags`, `format`, `caption`, `trips`, `phash`, `motionScan`.
+
+### Customisation / theming
+
+- `src/theme.ts` holds the static dark/AMOLED/light palettes and the Material
+  You dynamic palettes. `src/useTheme.ts` resolves a concrete mode from
+  `useSettingsStore().resolvedTheme` and applies the accent.
+- `src/store/useSettingsStore.ts` owns `resolvedTheme`; `App.tsx` refreshes it
+  on prefs changes, foreground and a 60 s timer so scheduled themes switch.
+- `src/rn.ts` re-exports `react-native` but swaps `Text` for
+  `src/components/ScaledText.tsx`, which applies the app-wide font scale. UI
+  files import from `../rn` (not `react-native`) so the setting reaches every
+  label.
+- Settings → Appearance is the single UI surface for theme, accent, grid,
+  viewer, widget, text and caption options.
 
 ### Stores (`src/store/`)
 `useLibraryStore`, `useSettingsStore`, `useSetupStore`, `useUploadStore`.
