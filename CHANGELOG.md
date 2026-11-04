@@ -3,6 +3,32 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [unreleased] — repository tooling
+
+No shipped-feature changes yet — all of this is no-phone, code-only work.
+
+- Committed the Node test suite (`tests/*.test.mjs`) — the eleven `.tmp-harness`
+  checks plus new `pure-logic` (real `vecmath`/`pbkdf2`/`autotags`/`format`/
+  `caption`/`trips`/`phash` modules) and `invisible-chars` regression tests for
+  the R34 U+200B SQL bug. `npm test` runs each file in its own process; CI
+  (Node 24) runs typecheck, tests, a critical-level audit gate, a Metro bundle,
+  and an expo dependency-drift check.
+- Second review sweep hardened real bugs: per-update isolation in channel
+  polling (a single poison update could stall polling forever), overnight scans
+  no longer advance `lastFullSyncAt` early, background/overnight tasks resume a
+  pending queue even on an empty scan, `savePrefs` is serialized (two quick
+  toggles could drop a patch), camera-watch events arriving mid-scan are
+  retried, destination rule blobs reject array-shaped tampering, empty videos
+  are rejected before upload, and the release publisher requires a real `.apk`,
+  detects DRAFT tag collisions, and falls back to git credentials for its token.
+- Documentation: `docs/ARCHITECTURE.md`, `docs/DEPENDENCIES.md` (audit state —
+  the only non-major-fixable advisories are already at their best versions; the
+  rest require Expo SDK 58), `docs/STORE.md` (privacy policy + store copy +
+  production AAB steps), `SECURITY.md`, `CONTRIBUTING.md`, issue/PR templates, and
+  Dependabot.
+- Removed the stale draft release `v1.0.0-preview.1` (pre-R37 APK, invisible to
+  the updater).
+
 ## [1.0.0] — preview
 
 First build with an installable, EAS-signed APK. Android only; iOS configuration

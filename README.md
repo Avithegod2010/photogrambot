@@ -11,6 +11,7 @@
 [![React Native 0.86](https://img.shields.io/badge/React_Native-0.86-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml/badge.svg)](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml)
 
 </div>
 
