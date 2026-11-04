@@ -53,6 +53,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "test": "node scripts/run-tests.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
     "release:manifest": "node scripts/make-latest-json.mjs",
     "release:publish": "node scripts/publish-release.mjs"
   },
