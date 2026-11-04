@@ -158,13 +158,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                     setUpdateNote(`Downloading ${result.latest} — ${pct}%`);
                   });
                   setUpdateNote(
-                    "Downloaded. Follow the installer to finish. If nothing appeared, allow PhotogramBot to install unknown apps in Android settings."
+                    "Downloaded. Follow the installer to finish. If Android reports the app can't be installed, uninstall the current preview build first — your library restores from the channel backup. Otherwise allow PhotogramBot to install unknown apps in Android settings."
                   );
                 } catch (e: any) {
                   setUpdateNote(e?.message ?? "Update failed");
                   Alert.alert(
                     "Couldn't open the installer",
-                    "Android needs your permission to install apps from PhotogramBot. Open the setting and allow it, then tap Check again.",
+                    "Android needs your permission to install apps from PhotogramBot. Open the setting and allow it, then tap Check again. If the installer opens but Android says the app can't be installed, uninstall the current preview build first — your library restores from the channel backup.",
                     [
                       { text: "Later", style: "cancel" },
                       { text: "Open settings", onPress: () => openInstallSettings() },
