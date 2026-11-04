@@ -14,6 +14,7 @@ export type DiagKind =
   | "sync"
   | "digest"
   | "background"
+  | "updates"
   | "remote"
   | "repair"
   | "motion";

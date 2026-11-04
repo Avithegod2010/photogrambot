@@ -56,6 +56,7 @@ export async function splitAndUploadVideo(
 ): Promise<{ parts: VideoPart[]; thumbFileId: string | null }> {
   const file = new File(fileUri);
   if (!file.exists) throw new Error("Video file missing on device");
+  if (!(file.size > 0)) throw new Error("Video file is empty");
   const total = Math.max(1, Math.ceil(file.size / VIDEO_PART_BYTES));
   const resume = opts.resumeParts ?? [];
   let thumbFileId: string | null = null;

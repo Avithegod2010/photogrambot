@@ -12,6 +12,10 @@ let mediaSub: MediaLibrary.EventSubscription | null = null;
 let netSub: ReturnType<typeof Network.addNetworkStateListener> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let scanning = false;
+// A media event that lands during a scan would otherwise be dropped by the
+// `scanning` guard. Schedule one follow-up pass instead of relying on the
+// 2-minute rescan overlap (a long first scan can easily outlive that window).
+let rescanQueued = false;
 
 export function isCameraWatchActive(): boolean {
   return mediaSub !== null;
@@ -38,6 +42,7 @@ export function stopCameraWatch(): void {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  rescanQueued = false;
 }
 
 function scheduleWatchScan(delayMs = WATCH_DEBOUNCE_MS): void {
@@ -49,7 +54,11 @@ function scheduleWatchScan(delayMs = WATCH_DEBOUNCE_MS): void {
 }
 
 async function runWatchScan(): Promise<void> {
-  if (scanning || !(await canAutoSyncNow())) return;
+  if (scanning) {
+    rescanQueued = true;
+    return;
+  }
+  if (!(await canAutoSyncNow())) return;
   scanning = true;
   try {
     const raw = await kvGet(WATERMARK_KEY);
@@ -61,5 +70,9 @@ async function runWatchScan(): Promise<void> {
     // Keep the previous watermark so the next trigger retries this window.
   } finally {
     scanning = false;
+    if (rescanQueued) {
+      rescanQueued = false;
+      if (mediaSub) scheduleWatchScan(0);
+    }
   }
 }

@@ -54,9 +54,8 @@ function fmt(n: number): string {
 async function replyStatus(chatId: string, replyTo: number): Promise<void> {
   const s = await getStats();
   const paused = await isRemotePaused();
-  // Informational extra — a failure here must not kill the whole reply (a
-  // thrown /status unwinds past the offset persistence in pollUpdates and
-  // replays the whole batch on the next poll).
+  // Informational extra — a failure here must not kill the whole status reply
+  // (the "largest" query is the only part that touches optional data).
   let largestLine = "";
   try {
     const largest = await getLargestUploaded(3);

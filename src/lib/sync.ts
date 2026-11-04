@@ -107,12 +107,20 @@ export async function scanAndEnqueueAll(
   const seenLocalIds = new Set<string>();
   let scanned = 0;
   let enqueued = 0;
+  // A capped pass (overnight catch-up) has not seen the whole library, so it
+  // must NOT advance lastFullSyncAt: the background recent-scan uses that
+  // timestamp as its floor, and moving it forward would hide the older part of
+  // the backlog from every later incremental scan.
+  let capped = false;
 
   for (const album of albums) {
     // Overnight catch-up passes maxNew — once the per-night budget is spent,
     // stop entirely. The next night continues where this one stopped:
     // enqueueUploads only enqueues rows that aren't uploaded yet.
-    if (maxNew !== undefined && enqueued >= maxNew) break;
+    if (maxNew !== undefined && enqueued >= maxNew) {
+      capped = true;
+      break;
+    }
     let title: string;
     try {
       title = await album.getTitle();
@@ -152,6 +160,7 @@ export async function scanAndEnqueueAll(
       if (items.length > 0) {
         const slice =
           maxNew !== undefined ? items.slice(0, Math.max(0, maxNew - enqueued)) : items;
+        if (slice.length < items.length) capped = true;
         if (slice.length > 0) {
           enqueued += await enqueueUploads(slice, "sync");
         }
@@ -165,7 +174,7 @@ export async function scanAndEnqueueAll(
     }
   }
 
-  await savePrefs({ lastFullSyncAt: Date.now() });
+  if (!capped) await savePrefs({ lastFullSyncAt: Date.now() });
   return { scanned, enqueued };
 }
 

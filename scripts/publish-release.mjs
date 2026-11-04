@@ -52,6 +52,9 @@ if (!apkPath || !tag) {
   fail("--apk and --tag are required (see the header of this script)");
 }
 if (!existsSync(apkPath)) fail(`APK not found: ${apkPath}`);
+if (!apkPath.toLowerCase().endsWith(".apk")) {
+  fail("--apk must be an .apk file — the in-app updater only installs APKs");
+}
 if (!tag.startsWith("v")) fail("--tag must start with 'v' (e.g. v1.0.0)");
 
 const propsPath = join(root, "android", "version.properties");
@@ -84,14 +87,32 @@ if (dryRun) {
   process.exit(0);
 }
 
+function gitCredentialToken() {
+  // Last-resort fallback for boxes where `gh` is not installed/logged in but
+  // git already has a credential helper configured. GIT_TERMINAL_PROMPT=0
+  // keeps a missing helper from blocking the script on an interactive prompt.
+  try {
+    const out = execFileSync("git", ["credential", "fill"], {
+      input: "protocol=https\nhost=github.com\n\n",
+      encoding: "utf8",
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const line = out.split(/\r?\n/).find((l) => l.startsWith("password="));
+    return line ? line.slice("password=".length).trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
 function githubToken() {
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   try {
-    return execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim() || null;
-  } catch {
-    return null;
-  }
+    const fromGh = execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+    if (fromGh) return fromGh;
+  } catch {}
+  return gitCredentialToken();
 }
 
 const token = githubToken();
@@ -141,12 +162,16 @@ async function uploadAsset(uploadUrl, file, contentType) {
 
 // Refuse to reuse a tag: re-running a failed publish should be an explicit
 // decision, not silently overwrite assets the updater may already serve.
-try {
-  await api(`/releases/tags/${encodeURIComponent(tag)}`);
-  fail(`Release ${tag} already exists. Delete it first if you really want to republish.`);
-} catch (e) {
-  const message = String(e?.message ?? e);
-  if (!message.includes("-> 404")) throw e;
+// The list endpoint is used instead of /releases/tags/:tag because the latter
+// returns 404 for DRAFT releases — exactly the state a previous failed run or
+// an old waiter script can leave behind.
+const releases = await api("/releases?per_page=100").then((res) => res.json());
+const collision = Array.isArray(releases) ? releases.find((r) => r.tag_name === tag) : null;
+if (collision) {
+  fail(
+    `Release ${tag} already exists${collision.draft ? " as a DRAFT (invisible to the updater)" : ""}. ` +
+      "Delete it first if you really want to republish."
+  );
 }
 
 let release = null;

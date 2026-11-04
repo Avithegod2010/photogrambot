@@ -63,7 +63,11 @@ export async function listRules(): Promise<Record<string, string>> {
   try {
     const raw = await kvGet(RULES_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return typeof parsed === "object" && parsed ? parsed : {};
+    // Arrays are typeof "object" too, but adding properties to one and then
+    // JSON.stringify-ing it silently drops the rule, so reject them here.
+    return typeof parsed === "object" && parsed && !Array.isArray(parsed)
+      ? (parsed as Record<string, string>)
+      : {};
   } catch {
     return {};
   }

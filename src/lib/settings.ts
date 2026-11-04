@@ -178,9 +178,19 @@ export async function loadPrefs(): Promise<Prefs> {
   }
 }
 
+// Serialize the read-modify-write. Two settings taps in the same tick used to
+// both read the old blob and the second write silently discarded the first
+// patch (e.g. toggling Auto sync and Wi-Fi-only quickly). The chain also keeps
+// going after a failed write; the caller still sees that write's rejection.
+let prefWriteChain: Promise<unknown> = Promise.resolve();
+
 export async function savePrefs(patch: Partial<Prefs>): Promise<Prefs> {
-  const current = await loadPrefs();
-  const next = { ...current, ...patch };
-  await AsyncStorage.setItem("pb_prefs", JSON.stringify(next));
-  return next;
+  const write = prefWriteChain.then(async () => {
+    const current = await loadPrefs();
+    const next = { ...current, ...patch };
+    await AsyncStorage.setItem("pb_prefs", JSON.stringify(next));
+    return next;
+  });
+  prefWriteChain = write.catch(() => undefined);
+  return write;
 }
