@@ -41,6 +41,8 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
         <Text
           style={{ color: theme.colors.onSurface, fontSize: 20 }}
           onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
         >
           ←
         </Text>

@@ -256,13 +256,23 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       {chromeVisible ? (
         <>
           <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
-            <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+            <Pressable
+              onPress={() => navigation.goBack()}
+              style={styles.iconBtn}
+              accessibilityLabel="Back"
+              accessibilityRole="button"
+            >
               <Text style={[styles.iconText, { color: "#fff" }]}>←</Text>
             </Pressable>
             <Text style={[styles.counter, { color: "#fff" }]}>
               {index + 1} / {photos.length}
             </Text>
-            <Pressable onPress={() => setInfoVisible(true)} style={styles.iconBtn}>
+            <Pressable
+              onPress={() => setInfoVisible(true)}
+              style={styles.iconBtn}
+              accessibilityLabel="Photo info"
+              accessibilityRole="button"
+            >
               <Text style={[styles.iconText, { color: "#fff" }]}>ⓘ</Text>
             </Pressable>
           </View>

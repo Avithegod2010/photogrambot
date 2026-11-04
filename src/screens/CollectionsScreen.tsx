@@ -783,7 +783,7 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: 0 }]}>
       <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
@@ -1027,7 +1027,7 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
         {route.params?.tab ? null : (
-          <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn} accessibilityLabel="Back" accessibilityRole="button">
             <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
           </Pressable>
         )}

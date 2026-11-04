@@ -790,7 +790,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <Text style={{ fontSize: 18, color: theme.colors.onSurface }}>◉</Text>
         </Pressable>
         {!decoy ? (
-          <Pressable onPress={() => navigation.navigate("Settings")} style={styles.gear}>
+          <Pressable
+            onPress={() => navigation.navigate("Settings")}
+            style={styles.gear}
+            accessibilityLabel="Settings"
+            accessibilityRole="button"
+          >
             <GearIcon
               color={typeof theme.colors.onSurface === "string" ? theme.colors.onSurface : "#E4E2EA"}
               size={22}
@@ -844,7 +849,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           </Pressable>
         ) : null}
         {!decoy ? (
-          <Pressable onPress={() => void runNaturalLanguageSearch()} hitSlop={6} disabled={nlLoading}>
+          <Pressable
+            onPress={() => void runNaturalLanguageSearch()}
+            hitSlop={6}
+            disabled={nlLoading}
+            accessibilityLabel="AI search"
+            accessibilityRole="button"
+          >
             {nlLoading ? (
               <ActivityIndicator size="small" color={theme.colors.primary} />
             ) : (
@@ -852,11 +863,21 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             )}
           </Pressable>
         ) : null}
-        <Pressable onPress={() => setFilterSheetVisible(true)} hitSlop={6} style={{ paddingHorizontal: 4 }}>
+        <Pressable
+          onPress={() => setFilterSheetVisible(true)}
+          hitSlop={6}
+          style={{ paddingHorizontal: 4 }}
+          accessibilityLabel="Filters"
+          accessibilityRole="button"
+        >
           <Text style={{ color: theme.colors.onSurfaceVariant }}>☰</Text>
         </Pressable>
         {search.length > 0 ? (
-          <Pressable onPress={() => runSearch("")}>
+          <Pressable
+            onPress={() => runSearch("")}
+            accessibilityLabel="Clear search"
+            accessibilityRole="button"
+          >
             <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
           </Pressable>
         ) : null}

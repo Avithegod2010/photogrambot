@@ -102,7 +102,7 @@ export function DestinationsScreen({ navigation }: { navigation: any }) {
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.colors.onSurface }]}>Destinations</Text>

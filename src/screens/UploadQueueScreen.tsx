@@ -96,7 +96,7 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
       style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}
     >
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.colors.onSurface }]}>Upload queue</Text>
@@ -202,6 +202,8 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
                   disabled={busyId === item.id}
                   style={styles.iconBtn}
                   hitSlop={8}
+                  accessibilityLabel="Retry upload"
+                  accessibilityRole="button"
                 >
                   {busyId === item.id ? (
                     <ActivityIndicator size="small" color={theme.colors.primary} />
@@ -214,6 +216,8 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
                   disabled={busyId === item.id}
                   style={styles.iconBtn}
                   hitSlop={8}
+                  accessibilityLabel="Remove failed upload"
+                  accessibilityRole="button"
                 >
                   <TrashIcon color={theme.colors.error} size={20} />
                 </Pressable>
@@ -225,6 +229,8 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
                   disabled={busyId === item.id}
                   style={styles.iconBtn}
                   hitSlop={8}
+                  accessibilityLabel="Remove from queue"
+                  accessibilityRole="button"
                 >
                   <TrashIcon color={theme.colors.onSurfaceVariant} size={20} />
                 </Pressable>

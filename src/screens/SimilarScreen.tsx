@@ -74,7 +74,7 @@ export function SimilarScreen({ route, navigation }: { route: any; navigation: a
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
