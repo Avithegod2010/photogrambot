@@ -32,7 +32,7 @@ import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
 import { EmptyAlbumArt, EmptyTrashArt } from "../components/illustrations";
 import { formatSearchFilterSummary } from "../lib/filterSummary";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
-import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
+import { Dialog, Button, TextField, SectionLabel, Card } from "../components/ui";
 
 export function CollectionsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -305,6 +305,21 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               ))}
             </View>
           )}
+
+          <SectionLabel text="People" theme={theme} />
+          <Card theme={theme} onPress={() => navigation.navigate("People")}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                  People
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                  Face clusters — the embedding model is the remaining step
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+            </View>
+          </Card>
 
           <View style={{ height: 40 }} />
         </ScrollView>

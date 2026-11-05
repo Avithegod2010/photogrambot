@@ -195,6 +195,25 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       filters TEXT NOT NULL DEFAULT 'null',
       created_at INTEGER NOT NULL
     );
+    -- People clustering foundation. The embedding provider (on-device model or
+    -- opt-in cloud pass) writes face_embeddings; peopleCluster.ts groups them.
+    CREATE TABLE IF NOT EXISTS people (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      cover_photo_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS face_embeddings (
+      photo_id TEXT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+      face_index INTEGER NOT NULL,
+      person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+      dim INTEGER NOT NULL,
+      vec BLOB NOT NULL,
+      model TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, face_index)
+    );
+    CREATE INDEX IF NOT EXISTS idx_faces_person ON face_embeddings(person_id);
     CREATE TABLE IF NOT EXISTS kv (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL
@@ -1128,6 +1147,81 @@ export async function createAlbum(name: string): Promise<number> {
 export async function deleteAlbum(id: number): Promise<void> {
   const d = await getDb();
   await d.runAsync("DELETE FROM albums WHERE id = ?", [id]);
+}
+
+// --- People clustering (read side; the embedding provider writes the rows) ---
+
+export interface PersonClusterSummary {
+  id: number;
+  name: string | null;
+  cover_photo_id: string | null;
+  cover_file_id: string | null;
+  count: number;
+}
+
+export async function getPeopleClusters(): Promise<PersonClusterSummary[]> {
+  const d = await getDb();
+  // Avoid a correlated subquery here: this Android SQLite rejects outer
+  // references in some subquery positions (see R35). Two plain queries + a JS
+  // merge are safe.
+  const rows = await d.getAllAsync<any>(
+    `SELECT p.id, p.name, p.cover_photo_id,
+            COUNT(DISTINCT fe.photo_id) AS count,
+            cp.preview_file_id AS curated_preview,
+            cp.thumb_file_id AS curated_thumb,
+            cp.remote_file_id AS curated_remote
+       FROM people p
+       LEFT JOIN face_embeddings fe ON fe.person_id = p.id
+       LEFT JOIN photos cp ON cp.id = p.cover_photo_id
+      GROUP BY p.id
+      ORDER BY count DESC, p.id ASC`
+  );
+  const covers = await d.getAllAsync<any>(
+    `SELECT fe.person_id, ph.preview_file_id, ph.thumb_file_id, ph.remote_file_id
+       FROM face_embeddings fe
+       JOIN photos ph ON ph.id = fe.photo_id
+      WHERE fe.person_id IS NOT NULL
+        AND (ph.preview_file_id IS NOT NULL OR ph.thumb_file_id IS NOT NULL OR ph.remote_file_id IS NOT NULL)
+      GROUP BY fe.person_id`
+  );
+  const coverByPerson = new Map<number, string>();
+  for (const c of covers) {
+    const id = Number(c.person_id);
+    if (!Number.isFinite(id)) continue;
+    coverByPerson.set(
+      id,
+      c.preview_file_id ?? c.thumb_file_id ?? c.remote_file_id
+    );
+  }
+  return rows.map((r) => ({
+    id: Number(r.id),
+    name: r.name ?? null,
+    cover_photo_id: r.cover_photo_id ?? null,
+    cover_file_id:
+      r.curated_preview ?? r.curated_thumb ?? r.curated_remote ?? coverByPerson.get(Number(r.id)) ?? null,
+    count: Number(r.count) || 0,
+  }));
+}
+
+export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
+  const d = await getDb();
+  return d.getAllAsync<PhotoRow>(
+    `SELECT ph.* FROM photos ph
+       JOIN face_embeddings fe ON fe.photo_id = ph.id
+      WHERE fe.person_id = ?
+        AND ph.id NOT IN (SELECT photo_id FROM trash)
+      GROUP BY ph.id
+      ORDER BY ph.taken_at DESC`,
+    [personId]
+  );
+}
+
+export async function getFaceEmbeddingCount(): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM face_embeddings"
+  );
+  return row?.n ?? 0;
 }
 
 export async function renameAlbum(id: number, name: string): Promise<void> {
