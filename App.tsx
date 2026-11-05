@@ -34,6 +34,7 @@ import { PeopleScreen } from "./src/screens/PeopleScreen";
 import { AskScreen } from "./src/screens/AskScreen";
 import { BestOfScreen } from "./src/screens/BestOfScreen";
 import { SlideshowScreen } from "./src/screens/SlideshowScreen";
+import { CompareScreen } from "./src/screens/CompareScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
@@ -256,6 +257,11 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           <Stack.Screen
             name="Slideshow"
             component={SlideshowScreen}
+            options={{ presentation: "fullScreenModal", animation: "fade" }}
+          />
+          <Stack.Screen
+            name="Compare"
+            component={CompareScreen}
             options={{ presentation: "fullScreenModal", animation: "fade" }}
           />
         </Stack.Navigator>

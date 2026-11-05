@@ -629,6 +629,7 @@ function TrashTab({
 
 export function AlbumScreen({ route, navigation }: { route: any; navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const albumId: number = route.params?.albumId ?? -1;
   const albumName: string = route.params?.albumName ?? "Album";
@@ -1289,6 +1290,20 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           >
             <Text style={{ color: theme.colors.primary }}>Invert</Text>
           </Pressable>
+          {selection.size === 2 ? (
+            (() => {
+              const pair = photos.filter((p) => selection.has(p.id));
+              if (pair.length !== 2) return null;
+              return (
+                <Pressable
+                  onPress={() => navigation.navigate("Compare", { left: pair[0], right: pair[1] })}
+                  style={styles.selAction}
+                >
+                  <Text style={{ color: theme.colors.primary }}>{tr("viewer.compare")}</Text>
+                </Pressable>
+              );
+            })()
+          ) : null}
           <Pressable onPress={() => void favoriteSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>{allFav ? "Unfavorite" : "Favorite"}</Text>
           </Pressable>

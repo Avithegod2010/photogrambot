@@ -90,6 +90,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
     return false;
   }, [selection, searchResults, photos]);
+  // Exactly two backed-up rows selected -> offer side-by-side compare.
+  const comparePair = useMemo(() => {
+    if (selection.size !== 2) return null;
+    const src = searchResults ?? photos;
+    const chosen = src.filter((p) => selection.has(p.id));
+    return chosen.length === 2 ? chosen : null;
+  }, [selection, searchResults, photos]);
   const [filters, setFilters] = useState<SearchFilters | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [nlLoading, setNlLoading] = useState(false);
@@ -1359,6 +1366,19 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           >
             <Text style={{ color: theme.colors.primary }}>{tr("common.invert")}</Text>
           </Pressable>
+          {comparePair ? (
+            <Pressable
+              onPress={() =>
+                navigation.navigate("Compare", {
+                  left: comparePair[0],
+                  right: comparePair[1],
+                })
+              }
+              style={styles.selAction}
+            >
+              <Text style={{ color: theme.colors.primary }}>{tr("viewer.compare")}</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Share</Text>
           </Pressable>
