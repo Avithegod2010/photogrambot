@@ -668,6 +668,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const h = height ?? tile;
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Photo ${photo.filename}${photo.favorite ? ", favorite" : ""}${photo.status === "uploaded" ? ", backed up" : ""}`}
         onPress={() => {
           paintState.current = null;
           onTilePress(photo, 0);
@@ -812,7 +814,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const w = width ?? tile;
     const h = height ?? tile;
     return (
-      <Pressable onPress={() => void onLocalPress(item)} style={{ width: w, height: h }}>
+      <Pressable
+        onPress={() => void onLocalPress(item)}
+        accessibilityRole="button"
+        accessibilityLabel={`Photo${backedUp ? ", backed up" : ""}`}
+        style={{ width: w, height: h }}
+      >
         <LocalThumb assetId={a.id} />
         {showVideoBadge && a.mediaType === MediaLibrary.MediaType.VIDEO ? (
           <View style={styles.videoBadge}>

@@ -964,6 +964,8 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           return (
             <Pressable
               style={{ width: tile, height: tile, padding: 1 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Photo${item.favorite ? ", favorite" : ""}`}
               onPress={() => {
                 if (albumId !== -1) {
                   toggleSel(item.id);
