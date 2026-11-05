@@ -446,6 +446,8 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     // Curated album cover (F11): when set and still a member, this photo is
     // preferred over the newest-taken default. NULL = automatic.
     ["cover_photo_id", "TEXT"],
+    // Manual album order (drag-to-reorder). 0 = never ordered.
+    ["sort_order", "INTEGER NOT NULL DEFAULT 0"],
   ]);
   await migrateFtsSchema(db);
   await db.execAsync(`
@@ -1255,7 +1257,7 @@ export async function getTrashPendingRemoteDelete(): Promise<{ photo_id: string;
 export async function createAlbum(name: string): Promise<number> {
   const d = await getDb();
   const res = await d.runAsync(
-    "INSERT OR IGNORE INTO albums (name, created_at) VALUES (?, ?)",
+    "INSERT OR IGNORE INTO albums (name, created_at, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM albums))",
     [name, Date.now()]
   );
   if (res.changes === 0) {
@@ -1497,6 +1499,8 @@ export interface AlbumWithCover extends AlbumRow {
   count: number;
   cover_file_id: string | null;
   cover_preview_id: string | null;
+  /** Up to four newest member previews for the 2x2 cover mosaic. */
+  covers: string[];
 }
 
 export async function getAlbums(): Promise<AlbumWithCover[]> {
@@ -1507,7 +1511,7 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     `SELECT a.*, COUNT(ap.photo_id) as count
      FROM albums a
      LEFT JOIN album_photos ap ON ap.album_id = a.id
-     GROUP BY a.id ORDER BY a.created_at DESC`
+     GROUP BY a.id ORDER BY a.sort_order ASC, a.created_at DESC`
   );
   // Automatic cover: newest-taken non-trashed member of each album.
   const newest = await d.getAllAsync<any>(
@@ -1539,6 +1543,23 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     if (!coverByAlbum.has(c.album_id)) coverByAlbum.set(c.album_id, c);
   }
   for (const c of curated) coverByAlbum.set(c.album_id, c);
+  // 2x2 mosaic inputs: up to four newest non-trashed member previews per
+  // album, resolved in one query and grouped in JS (no correlated subqueries).
+  const mosaicRows = await d.getAllAsync<any>(
+    `SELECT ap.album_id AS album_id, p.preview_file_id, p.remote_file_id
+     FROM album_photos ap
+     JOIN photos p ON p.id = ap.photo_id
+     WHERE p.id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY ap.album_id ASC, p.taken_at DESC`
+  );
+  const mosaicByAlbum = new Map<number, string[]>();
+  for (const m of mosaicRows) {
+    const list = mosaicByAlbum.get(m.album_id) ?? [];
+    if (list.length >= 4) continue;
+    const fileId = m.preview_file_id ?? m.remote_file_id;
+    if (fileId) list.push(fileId);
+    mosaicByAlbum.set(m.album_id, list);
+  }
   return rows.map((r) => {
     const c = coverByAlbum.get(r.id);
     return {
@@ -1551,7 +1572,18 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
       count: r.count,
       cover_file_id: c?.remote_file_id ?? null,
       cover_preview_id: c?.preview_file_id ?? null,
+      covers: mosaicByAlbum.get(r.id) ?? [],
     };
+  });
+}
+
+/** Persist the manual album order (ids in display order). */
+export async function reorderAlbums(ids: number[]): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    for (let i = 0; i < ids.length; i++) {
+      await d.runAsync("UPDATE albums SET sort_order = ? WHERE id = ?", [i + 1, ids[i]]);
+    }
   });
 }
 

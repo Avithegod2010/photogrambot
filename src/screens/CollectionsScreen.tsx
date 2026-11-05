@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -16,11 +16,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
 import { useT } from "../useT";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { ACCENT_PRESETS, albumAccent, isHexColor } from "../lib/appearance";
 import { hasRuleConditions } from "../lib/albumRules";
-import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
+import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, reorderAlbums, type AlbumWithCover, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
 import { getCachedTelegramFile } from "../lib/media";
@@ -47,6 +54,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [savedSearches, setSavedSearches] = useState<SavedSearchRow[]>([]);
   const [renameTarget, setRenameTarget] = useState<SavedSearchRow | null>(null);
   const [renameName, setRenameName] = useState("");
+  const [reorderMode, setReorderMode] = useState(false);
   const albumAccents = useSettingsStore((s) => s.prefs.albumAccents);
   const decoyAlbumNames = useSettingsStore((s) => s.prefs.decoyAlbumNames);
   const decoy = isDecoyActive();
@@ -68,21 +76,32 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
   // Decoy mode shows only the configured fake album names, never real data.
-  const visibleAlbums = decoy
-    ? decoyAlbumNames.map((name, i) => ({
-        id: -1000 - i,
-        name,
-        created_at: 0,
-        locked: 0,
-        query: null,
-        cover_photo_id: null,
-        count: 0,
-        cover_file_id: null,
-        cover_preview_id: null,
-      }))
-    : albums;
-  const visibleTripAlbums = visibleAlbums.filter((album) => !!album.query);
-  const visibleManualAlbums = visibleAlbums.filter((album) => !album.query);
+  const visibleAlbums = useMemo(
+    () =>
+      decoy
+        ? decoyAlbumNames.map((name, i) => ({
+            id: -1000 - i,
+            name,
+            created_at: 0,
+            locked: 0,
+            query: null,
+            cover_photo_id: null,
+            count: 0,
+            cover_file_id: null,
+            cover_preview_id: null,
+            covers: [] as string[],
+          }))
+        : albums,
+    [decoy, decoyAlbumNames, albums]
+  );
+  const visibleTripAlbums = useMemo(
+    () => visibleAlbums.filter((album) => !!album.query),
+    [visibleAlbums]
+  );
+  const visibleManualAlbums = useMemo(
+    () => visibleAlbums.filter((album) => !album.query),
+    [visibleAlbums]
+  );
   const visibleFavorites = decoy ? [] : favorites;
   const visibleTrash = decoy ? [] : trash;
 
@@ -232,9 +251,11 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                     }
                   >
                     <View style={styles.albumTilePlaceholder}>
-                      <TelegramImage
-                        fileId={a.cover_preview_id ?? a.cover_file_id}
-                        style={{ width: tile, height: tile * 0.8 }}
+                      <AlbumCoverMosaic
+                        covers={a.covers}
+                        fallbackFileId={a.cover_preview_id ?? a.cover_file_id}
+                        width={tile}
+                        height={tile * 0.8}
                       />
                     </View>
                     <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
@@ -249,8 +270,32 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </>
           ) : null}
 
-          <SectionLabel text={tr("collections.yourAlbums")} theme={theme} />
-          {visibleManualAlbums.length === 0 ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingRight: 16,
+            }}
+          >
+            <SectionLabel text={tr("collections.yourAlbums")} theme={theme} />
+            {!decoy && visibleManualAlbums.length > 1 ? (
+              <Pressable onPress={() => setReorderMode((v) => !v)} hitSlop={8}>
+                <Text style={{ color: theme.colors.primary, fontWeight: "600", fontSize: 12.5 }}>
+                  {reorderMode ? "Done" : "Reorder"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {reorderMode ? (
+            <ReorderAlbumList
+              albums={visibleManualAlbums}
+              theme={theme}
+              onCommit={(ids) => {
+                void reorderAlbums(ids).then(() => useLibraryStore.getState().refreshMeta());
+              }}
+            />
+          ) : visibleManualAlbums.length === 0 ? (
             <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
               No albums yet. Tap ＋ to create one and organize your backed-up photos.
             </Text>
@@ -308,9 +353,11 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                   }}
                 >
                   <View style={styles.albumTilePlaceholder}>
-                    <TelegramImage
-                      fileId={a.cover_preview_id ?? a.cover_file_id}
-                      style={{ width: tile, height: tile * 0.8 }}
+                    <AlbumCoverMosaic
+                      covers={a.covers}
+                      fallbackFileId={a.cover_preview_id ?? a.cover_file_id}
+                      width={tile}
+                      height={tile * 0.8}
                     />
                   </View>
               <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
@@ -1710,3 +1757,145 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 });
+
+// 2x2 album cover mosaic: up to four newest member previews. Falls back to a
+// single cover when fewer than two previews are available.
+function AlbumCoverMosaic({
+  covers,
+  fallbackFileId,
+  width,
+  height,
+}: {
+  covers: string[] | undefined;
+  fallbackFileId: string | null;
+  width: number;
+  height: number;
+}) {
+  if (!covers || covers.length < 2) {
+    return <TelegramImage fileId={fallbackFileId} style={{ width, height }} />;
+  }
+  const items = covers.slice(0, 4);
+  return (
+    <View style={{ width, height, flexDirection: "row", flexWrap: "wrap" }}>
+      {items.map((fileId, i) => (
+        <TelegramImage
+          key={`${fileId}-${i}`}
+          fileId={fileId}
+          style={{ width: width / 2, height: height / 2 }}
+        />
+      ))}
+      {items.length < 4
+        ? Array.from({ length: 4 - items.length }).map((_, i) => (
+            <View
+              key={`empty-${i}`}
+              style={{ width: width / 2, height: height / 2, backgroundColor: "rgba(128,128,128,0.12)" }}
+            />
+          ))
+        : null}
+    </View>
+  );
+}
+
+const REORDER_ROW_HEIGHT = 54;
+
+function ReorderAlbumList({
+  albums,
+  theme,
+  onCommit,
+}: {
+  albums: AlbumWithCover[];
+  theme: ReturnType<typeof useTheme>;
+  onCommit: (ids: number[]) => void;
+}) {
+  const [items, setItems] = useState(albums);
+  useEffect(() => setItems(albums), [albums]);
+
+  const move = useCallback(
+    (from: number, to: number) => {
+      setItems((prev) => {
+        if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+        const next = [...prev];
+        const [item] = next.splice(from, 1);
+        next.splice(to, 0, item);
+        onCommit(next.map((a) => a.id));
+        return next;
+      });
+    },
+    [onCommit]
+  );
+
+  return (
+    <View style={{ marginHorizontal: 16 }}>
+      {items.map((album, index) => (
+        <ReorderRow
+          key={album.id}
+          index={index}
+          count={items.length}
+          label={album.name}
+          theme={theme}
+          onMove={move}
+        />
+      ))}
+      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 8 }}>
+        Drag a row by its handle to change the order.
+      </Text>
+    </View>
+  );
+}
+
+function ReorderRow({
+  index,
+  count,
+  label,
+  theme,
+  onMove,
+}: {
+  index: number;
+  count: number;
+  label: string;
+  theme: ReturnType<typeof useTheme>;
+  onMove: (from: number, to: number) => void;
+}) {
+  const translateY = useSharedValue(0);
+  const pan = Gesture.Pan()
+    .activateAfterLongPress(120)
+    .onUpdate((e) => {
+      translateY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      const delta = Math.round(e.translationY / REORDER_ROW_HEIGHT);
+      translateY.value = withSpring(0);
+      const target = Math.max(0, Math.min(count - 1, index + delta));
+      if (target !== index) runOnJS(onMove)(index, target);
+    });
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    zIndex: translateY.value === 0 ? 0 : 20,
+  }));
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        style={[
+          {
+            height: REORDER_ROW_HEIGHT,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            paddingHorizontal: 14,
+            marginBottom: 6,
+            borderRadius: 12,
+            backgroundColor: theme.colors.surface,
+          },
+          style,
+        ]}
+      >
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>☰</Text>
+        <Text style={{ color: theme.colors.onSurface, flex: 1 }} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>{index + 1}</Text>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
