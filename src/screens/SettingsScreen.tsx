@@ -1089,6 +1089,13 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               {modelNote}
             </Text>
           ) : null}
+          <ToggleRow
+            title="Run automatically after scans"
+            subtitle="Tag a small scene batch and index a few faces when the models are downloaded. Manual controls stay in Maintenance."
+            value={prefs.autoMlIndex}
+            onChange={(v) => void update({ autoMlIndex: v })}
+            theme={theme}
+          />
           <View style={styles.divider} />
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
             Tagging API key (optional)
