@@ -18,6 +18,7 @@ import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { ACCENT_PRESETS, albumAccent, isHexColor } from "../lib/appearance";
+import { hasRuleConditions } from "../lib/albumRules";
 import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
@@ -601,6 +602,9 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const prefs = useSettingsStore((s) => s.prefs);
   const updatePrefs = useSettingsStore((s) => s.update);
   const [styleDialog, setStyleDialog] = useState(false);
+  const [ruleFolder, setRuleFolder] = useState("");
+  const [ruleTag, setRuleTag] = useState("");
+  const [ruleFavorite, setRuleFavorite] = useState(false);
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Entered via the Collections long-press "Select photos" action or by
@@ -870,7 +874,13 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         </Text>
         {albumId !== -1 && !isDecoyActive() ? (
           <Pressable
-            onPress={() => setStyleDialog(true)}
+            onPress={() => {
+              const rule = prefs.albumRules?.[String(albumId)];
+              setRuleFolder(rule?.folder ?? "");
+              setRuleTag(rule?.tag ?? "");
+              setRuleFavorite(!!rule?.favorite);
+              setStyleDialog(true);
+            }}
             hitSlop={10}
             style={{ marginStart: 8 }}
             accessibilityLabel="Album style"
@@ -1081,6 +1091,106 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
             );
           })}
         </View>
+        <View
+          style={{
+            height: 1,
+            backgroundColor: theme.colors.outlineVariant,
+            marginVertical: 16,
+          }}
+        />
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>
+          Auto-add rule
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, lineHeight: 18, marginBottom: 8 }}>
+          New photos matching all conditions are added to this album after a scan.
+          Leave a field empty to ignore it.
+        </Text>
+        <TextField
+          value={ruleFolder}
+          onChangeText={setRuleFolder}
+          placeholder="Folder contains…"
+          theme={theme}
+        />
+        <TextField
+          value={ruleTag}
+          onChangeText={setRuleTag}
+          placeholder="Tag contains… (e.g. receipt)"
+          theme={theme}
+          style={{ marginTop: 8 }}
+        />
+        <Pressable
+          onPress={() => setRuleFavorite((v) => !v)}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 10,
+            paddingVertical: 4,
+          }}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: ruleFavorite }}
+        >
+          <View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 5,
+              borderWidth: 1,
+              borderColor: ruleFavorite ? theme.colors.primary : theme.colors.outline,
+              backgroundColor: ruleFavorite ? theme.colors.primaryContainer : "transparent",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {ruleFavorite ? (
+              <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 12 }}>✓</Text>
+            ) : null}
+          </View>
+          <Text style={{ color: theme.colors.onSurface, fontSize: 13.5 }}>
+            Favorites only
+          </Text>
+        </Pressable>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          <Button
+            title="Save rule"
+            variant="outlined"
+            theme={theme}
+            onPress={() => {
+              const next = { ...(prefs.albumRules ?? {}) };
+              const rule = {
+                folder: ruleFolder.trim() || undefined,
+                tag: ruleTag.trim() || undefined,
+                favorite: ruleFavorite || undefined,
+              };
+              if (hasRuleConditions(rule)) next[String(albumId)] = rule;
+              else delete next[String(albumId)];
+              void updatePrefs({ albumRules: next }).then(() => {
+                setCoverNote("Auto-add rule saved");
+                void import("../lib/albumRulesApply").then((m) =>
+                  m.applyAlbumRules().then((r) => {
+                    if (r.added > 0) setCoverNote(`Rule applied: ${r.added} photos added`);
+                  })
+                );
+              });
+            }}
+          />
+          <Button
+            title="Clear rule"
+            variant="text"
+            theme={theme}
+            onPress={() => {
+              const next = { ...(prefs.albumRules ?? {}) };
+              delete next[String(albumId)];
+              void updatePrefs({ albumRules: next }).then(() => {
+                setRuleFolder("");
+                setRuleTag("");
+                setRuleFavorite(false);
+                setCoverNote("Auto-add rule cleared");
+              });
+            }}
+          />
+        </View>
+
         {albumId !== -1 && !isTrip ? (
           <Button
             title="Reset cover to newest"

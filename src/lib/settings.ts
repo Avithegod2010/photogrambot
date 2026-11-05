@@ -78,6 +78,7 @@ export interface Prefs {
   aiPrompt: string;
   mlModelUrls: Record<string, string>;
   searchHistory: string[];
+  albumRules: Record<string, { folder?: string; tag?: string; favorite?: boolean }>;
   includeVideos: boolean;
   videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;

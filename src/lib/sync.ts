@@ -233,6 +233,8 @@ export async function runSyncNow(
 ): Promise<ScanResult> {
   const result = await scanAndEnqueueAll(onProgress);
   void processQueue();
+  // Auto-add album rules run after a scan; idempotent, best-effort.
+  void import("./albumRulesApply").then(({ applyAlbumRules }) => applyAlbumRules());
   return result;
 }
 
