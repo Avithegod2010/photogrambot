@@ -3,6 +3,50 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [unreleased] — search, AI & organization wave
+
+### On-device models (download on demand, not in the APK)
+- **Model manager** — BlazeFace short-range (face detection), MobileFaceNet
+  (192-d face embeddings), MobileNetV3-Small (scene labels) and ImageNet labels
+  live in the app's document directory and are downloaded from Settings →
+  On-device AI (~17 MB total). Custom per-model URLs are supported; nothing is
+  bundled, so the APK stays small.
+- Runtime: `react-native-fast-tflite` 3.0.1 + `react-native-nitro-modules`
+  0.37.2; JPEG decode via `jpeg-js`. **Native rebuild required.**
+- **People** — `faceMath` (896-anchor BlazeFace decode + NMS, 7 tests) and
+  `faceEngine` (detect → crop → embed → cosine/union-find clusters) write the
+  `people` / `face_embeddings` tables. Maintenance → On-device AI → **Build
+  people index**; the People screen lists the clusters and their photos.
+- **Scene tags** — on-device MobileNetV3 writes `scene:<label>` tags; opt-in
+  Gemini vision writes `gemini:<label>` tags. Both feed full-text search.
+  Settings → On-device AI stores a separate tagging API key (falls back to the
+  captioning key).
+- **Validation caveat:** the model URLs, input normalization and output tensor
+  order are implemented but not yet verified on hardware. The pipeline fails
+  soft (diagnostics + empty results) rather than crashing.
+
+### Search & organization
+- **Ask your photos** — a chat screen (Collections → Ask your photos) that
+  builds a compact index of candidates (FTS → semantic → recent), asks Gemini
+  with the user's key, and renders `[id]` citations as tappable thumbnails.
+- **Offline natural-language dates** — `today`, `yesterday`, this/last
+  week-month-year, `last summer`, month + year, `before/after`, `from X to Y`,
+  Christmas, `last N days/weeks/months` and bare years. The AI sparkle applies a
+  date range locally without a Gemini call.
+- **Album auto-add rules** — folder contains / tag contains / favorites only,
+  configured from the album style dialog and applied after every
+  `runSyncNow` scan (idempotent).
+- **Best of** — a Collections screen ranking the last year (or the whole
+  library) by favorite, resolution and size; the duplicate finder now keeps the
+  **best** copy of each group instead of an arbitrary row.
+- **OCR** — Gemini extracts text in any language/script without translating; the
+  info sheet shows it selectable with a **Share text** button.
+- **Search history & suggestions** — recent searches appear as chips under the
+  search box (tap to rerun, Clear to reset); a Levenshtein "did you mean" chip
+  appears on empty results.
+- **Places** — Indian cities now show their state (Kochi, Kerala; Mumbai,
+  Maharashtra); other cities keep the country.
+
 ## [unreleased] — next release (top-10 wave)
 
 ### Backup reliability

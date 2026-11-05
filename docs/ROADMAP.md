@@ -57,26 +57,34 @@ intentionally deferred until the owner approves a release.
 
 ## 2. Search, AI & organization
 
-11. **People clustering** — face embeddings (Gemini opt-in / on-device TFLite).
+11. **People clustering** - face embeddings (Gemini opt-in / on-device TFLite).
     *(L, very high)*
-   — ****foundation** — engine, schema and screen; model pending**
+   - **on-device pipeline added** — BlazeFace + MobileFaceNet, downloadable models, People screen; tensor I/O pending device validation
 12. **On-device object/scene tagging** — ML Kit/TFLite "dog", "receipt",
     "whiteboard". *(L, high)*
+   — **done** (MobileNetV3 on-device + opt-in Gemini tags, separate key)
 13. **"Ask your photos" chat** — natural-language Q&A over captions/OCR/metadata
     with citations. *(M, high)*
+   — **done**
 14. **Better NL date parsing** — "last summer", "before the wedding". *(M, high)*
+   — **done** (offline parser)
 15. **Album rules engine** — auto-add by folder/tag/place/favorite. *(M, medium)*
+   — **done** (folder/tag/favorites)
 16. **Burst/duplicate grouping UI** — group near-identical shots, pick the best.
     *(M, high)*
-17. **Reverse geocoding** — offline place names for map, trips, stories.
+   — **done** (existing finder + best-shot sort)
+17. **Reverse geocoding** - offline place names for map, trips, stories.
     *(M, high)*
-   — ****done** (offline gazetteer)**
+   - **done** (offline gazetteer + Indian states)
 18. **Smart "best of" collections** — sharpest/most-favorited per trip/month.
     *(M, medium)*
+   — **done** (Best of screen)
 19. **OCR improvements** — multi-language, selectable text, copy button.
     *(M, medium)*
+   — **done** (any-language + selectable + Share text)
 20. **Search history & suggestions** — recent searches, "did you mean",
     one-tap saved search. *(S, medium)*
+   — **done**
 
 ## 3. UI/UX & customization
 
