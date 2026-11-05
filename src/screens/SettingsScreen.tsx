@@ -80,6 +80,7 @@ import {
   importFromLocalFile,
 } from "../lib/backup";
 import type { ThemeMode } from "../lib/settings";
+import { passwordStrength } from "../lib/passwordStrength";
 
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -1448,6 +1449,29 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
                 Saved on this device. Enter the same passphrase on a new phone before restoring.
               </Text>
+              {passDraft ? (
+                (() => {
+                  const strength = passwordStrength(passDraft);
+                  return (
+                    <Text
+                      style={{
+                        color:
+                          strength.score >= 3
+                            ? theme.colors.success
+                            : strength.score === 2
+                              ? theme.colors.onSurfaceVariant
+                              : theme.colors.error,
+                        fontSize: 11.5,
+                        marginTop: 4,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Strength: {strength.label}
+                      {strength.tips.length > 0 ? ` — ${strength.tips.join(", ")}` : ""}
+                    </Text>
+                  );
+                })()
+              ) : null}
               <ToggleRow
                 title="Include bot token in backups"
                 subtitle="Store the bot connection inside the encrypted backup. A device that restores before setup adopts it automatically; a device with a working token keeps its own."
