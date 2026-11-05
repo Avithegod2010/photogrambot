@@ -306,6 +306,21 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           )}
 
+          <SectionLabel text="Ask your photos" theme={theme} />
+          <Card theme={theme} onPress={() => navigation.navigate("Ask")}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                  Ask your photos
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                  Chat with your library — answers cite the photos (Gemini)
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+            </View>
+          </Card>
+
           <SectionLabel text="People" theme={theme} />
           <Card theme={theme} onPress={() => navigation.navigate("People")}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
