@@ -77,6 +77,7 @@ export interface Prefs {
   aiModel: string;
   aiPrompt: string;
   mlModelUrls: Record<string, string>;
+  searchHistory: string[];
   includeVideos: boolean;
   videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;
@@ -146,6 +147,7 @@ export const defaultPrefs: Prefs = {
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
   mlModelUrls: {},
+  searchHistory: [],
   includeVideos: false,
   videoCompression: "off",
   dbBackupEncrypt: false,

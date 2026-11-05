@@ -40,6 +40,8 @@ import { nlToSearch } from "../lib/ai";
 import { searchSemantic } from "../lib/semsearch";
 import { getAiApiKey } from "../lib/settings";
 import { AUTO_TAGS } from "../lib/autotags";
+import { suggestTerm } from "../lib/suggest";
+import { parseDateQuery } from "../lib/nlDate";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
 
@@ -106,6 +108,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const showDateCounts = useSettingsStore((s) => s.prefs.showDateCounts);
   const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const dateFormat = useSettingsStore((s) => s.prefs.dateFormat);
+  const searchHistory = useSettingsStore((s) => s.prefs.searchHistory);
+  const updatePrefs = useSettingsStore((s) => s.update);
   const includeVideos = useSettingsStore((s) => s.prefs.includeVideos);
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
@@ -412,6 +416,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     };
   }, []);
 
+  function commitSearch(q: string) {
+    const term = q.trim();
+    if (term.length < 2) return;
+    const next = [term, ...(searchHistory ?? []).filter((h) => h !== term)].slice(0, 10);
+    void updatePrefs({ searchHistory: next });
+  }
+
   function runSearch(q: string) {
     setSearch(q);
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -495,6 +506,23 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
   async function runNaturalLanguageSearch() {
     if (nlLoading) return;
+    // Local date phrases first: no API key, no cloud call.
+    const dateHit = parseDateQuery(search);
+    if (dateHit) {
+      setNlLoading(true);
+      try {
+        const rows = await applyNaturalSearch(dateHit.rest, {
+          takenAfter: dateHit.startMs,
+          takenBefore: dateHit.endMs,
+        });
+        if (rows !== null && rows.length === 0) {
+          Alert.alert("Date search", `No photos found for ${dateHit.label}.`);
+        }
+      } finally {
+        setNlLoading(false);
+      }
+      return;
+    }
     const apiKey = await getAiApiKey().catch(() => null);
     if (!apiKey) {
       Alert.alert("AI search", "Add your Gemini API key in Settings → AI captions first.");
@@ -878,6 +906,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           placeholderTextColor={theme.colors.onSurfaceVariant}
           value={search}
           onChangeText={runSearch}
+          onSubmitEditing={() => {
+            commitSearch(search);
+            runSearch(search);
+          }}
+          returnKeyType="search"
           style={[styles.searchInput, { color: theme.colors.onSurface }]}
           selectionColor={theme.colors.primary}
         />
@@ -920,6 +953,56 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           </Pressable>
         ) : null}
       </View>
+
+      {search.length === 0 && !searchResults && (searchHistory?.length ?? 0) > 0 && !decoy ? (
+        <View style={styles.historyRow}>
+          {searchHistory.slice(0, 6).map((term) => (
+            <Pressable
+              key={term}
+              onPress={() => {
+                runSearch(term);
+                commitSearch(term);
+              }}
+              style={[styles.historyChip, { backgroundColor: theme.colors.surfaceHighest }]}
+            >
+              <Text style={{ color: theme.colors.onSurface, fontSize: 11.5 }} numberOfLines={1}>
+                {term}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={() => void updatePrefs({ searchHistory: [] })}
+            hitSlop={6}
+            accessibilityLabel="Clear search history"
+            accessibilityRole="button"
+          >
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>Clear</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {searchResults && searchResults.length === 0 && search.trim().length > 2 && !decoy
+        ? (() => {
+            const suggestion = suggestTerm(search, [
+              ...AUTO_TAGS,
+              ...(searchHistory ?? []),
+            ]);
+            return suggestion ? (
+              <Pressable
+                onPress={() => {
+                  runSearch(suggestion);
+                  commitSearch(suggestion);
+                }}
+                style={{ paddingHorizontal: 16, paddingBottom: 6 }}
+              >
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5 }}>
+                  Did you mean{" "}
+                  <Text style={{ color: theme.colors.primary, fontWeight: "700" }}>{suggestion}</Text>?
+                </Text>
+              </Pressable>
+            ) : null;
+          })()
+        : null}
 
       {progress.running ? (
         <Pressable
@@ -1429,6 +1512,9 @@ function hasAnyFilter(f: SearchFilters | null | undefined): boolean {
   return (
     !!f &&
     (!!(f.takenWithinDays && f.takenWithinDays > 0) ||
+      !!f.takenAfter ||
+      !!f.takenBefore ||
+      !!(f.folder && f.folder.trim()) ||
       !!f.hasGps ||
       !!(f.camera && f.camera.trim()) ||
       !!f.notBackedUp ||
@@ -2068,6 +2154,20 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     paddingHorizontal: 10,
     paddingTop: 8,
+  },
+  historyRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  historyChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    maxWidth: 150,
   },
   searchBar: {
     flexDirection: "row",

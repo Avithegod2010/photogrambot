@@ -823,6 +823,12 @@ export async function getPeriodCountedLocalIds(): Promise<Set<string>> {
 
 export interface SearchFilters {
   takenWithinDays?: number | null;
+  /** Inclusive lower bound (epoch ms) for taken_at. */
+  takenAfter?: number | null;
+  /** Exclusive upper bound (epoch ms) for taken_at. */
+  takenBefore?: number | null;
+  /** Case-insensitive substring match on the folder name. */
+  folder?: string | null;
   hasGps?: boolean;
   camera?: string | null;
   notBackedUp?: boolean;
@@ -847,6 +853,16 @@ export function normalizeSearchFilters(value: unknown): SearchFilters | null {
   if (typeof input.takenWithinDays === "number" && Number.isFinite(input.takenWithinDays)) {
     const days = Math.round(input.takenWithinDays);
     if (days > 0) out.takenWithinDays = Math.min(days, 365);
+  }
+  if (typeof input.takenAfter === "number" && Number.isFinite(input.takenAfter) && input.takenAfter > 0) {
+    out.takenAfter = Math.round(input.takenAfter);
+  }
+  if (typeof input.takenBefore === "number" && Number.isFinite(input.takenBefore) && input.takenBefore > 0) {
+    out.takenBefore = Math.round(input.takenBefore);
+  }
+  if (typeof input.folder === "string") {
+    const folder = input.folder.trim().slice(0, 200);
+    if (folder) out.folder = folder;
   }
   if (input.hasGps === true) out.hasGps = true;
   if (typeof input.camera === "string") {
@@ -886,6 +902,18 @@ export async function searchPhotos(
   if (safeFilters?.takenWithinDays && safeFilters.takenWithinDays > 0) {
     conds.push("p.taken_at >= ?");
     params.push(Date.now() - safeFilters.takenWithinDays * 86400000);
+  }
+  if (safeFilters?.takenAfter) {
+    conds.push("p.taken_at >= ?");
+    params.push(safeFilters.takenAfter);
+  }
+  if (safeFilters?.takenBefore) {
+    conds.push("p.taken_at < ?");
+    params.push(safeFilters.takenBefore);
+  }
+  if (safeFilters?.folder) {
+    conds.push("LOWER(p.folder) LIKE ?");
+    params.push(`%${safeFilters.folder.toLowerCase()}%`);
   }
   if (safeFilters?.hasGps) {
     conds.push("p.latitude IS NOT NULL AND p.longitude IS NOT NULL");
