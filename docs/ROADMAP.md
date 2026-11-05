@@ -92,27 +92,36 @@ intentionally deferred until the owner approves a release.
     *(M, high)*
    — ****done****
 22. **Pinch-to-zoom grid density** — 2–6 columns with live reflow. *(M, medium)*
+   — ****done****
 23. **Custom fonts** — bundle 2–3 families, pick one in Settings. *(M, medium)*
 24. **Icon packs / masks** — rounded/squircle/circle + more color variants.
     *(M, medium)*
+   — ****done** (native build needed)****
 25. **Animated theme transitions** — cross-fade accent/theme changes.
     *(S, medium)*
 26. **Slideshow / screensaver mode** — full-screen auto-advance. *(M, medium)*
+   — ****done****
 27. **Compare mode** — pick two photos, side-by-side pinch/pan. *(M, medium)*
+   — ****done****
 28. **Drag-to-reorder albums + cover collages** — 2×2 mosaic. *(M, medium)*
+   — ****done****
 29. **Selection tools** — select by date, invert, select-all in album. *(S, high)*
 30. **Accessibility pass** — TalkBack labels, high contrast, reduce motion,
     larger targets. *(M, high)*
 31. **Localization** — Hindi/Malayalam/German/etc., RTL. *(M, medium)*
+   — ****done** (core chrome, long copy English)****
 32. **Tablet/foldable/DeX layouts** — two-pane gallery + viewer. *(L, high)*
+   — ****done** (two-pane gallery)****
 33. **More widgets** — "On this day", slideshow, 2×2 mosaic, quick capture.
     *(M, medium)*
+   — ****done** (native build needed)****
 34. **Notification controls** — quiet hours, progress-only vs completion.
     *(S, medium)*
 
 ## 4. Security & privacy
 
 35. **SQLCipher** — encrypt the local index; key in Android Keystore. *(L, high)*
+   — ****done** (native build needed)****
 36. **FLAG_SECURE in viewer/lock** — block screenshots and recents thumbnails.
     *(S, high)*
    — ****done** (native build needed)**
@@ -120,14 +129,20 @@ intentionally deferred until the owner approves a release.
    — ****done****
 38. **Duress/decoy refinements** — separate decoy bot/channel, fake albums,
     panic wipe. *(M, high)*
+   — ****done****
 39. **Passphrase strength meter + recovery key** — avoid a permanent lockout.
     *(M, high)*
+   — ****done****
 40. **Key rotation** — re-encrypt the pinned DB backup with a new passphrase.
     *(M, medium)*
+   — ****done****
 41. **Certificate pinning** — `api.telegram.org`, `api.github.com`. *(M, medium)*
+   — ****done** (native build needed)****
 42. **Audit-log export** — share break-in/diagnostics as a file. *(S, medium)*
+   — ****done****
 43. **Per-album locks on every entry point** — search, memories, map, widgets.
     *(M, high)*
+   — ****done****
 
 ## 5. Remote control & multi-device
 

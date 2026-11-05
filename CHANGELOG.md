@@ -3,7 +3,55 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
-## [unreleased] — customization/security continuation
+## [unreleased] - UI, privacy & platform wave
+
+### Gallery & viewing
+- **Pinch-to-zoom grid** - two-finger pinch reflows the gallery between 2 and 6
+  columns; the choice persists.
+- **Slideshow / screensaver** - full-screen cross-fade auto-advance with
+  play/pause, previous/next, 3-15 s interval, optional shuffle and FLAG_SECURE.
+  Entry points in Collections and album/favourites/trip headers.
+- **Compare mode** - select exactly two photos to open independent pinch/pan
+  panes (side-by-side in landscape, stacked in portrait), double-tap resets.
+- **Album drag-reorder** - Collections gains a Reorder mode with long-press
+  drag rows; order persists in `albums.sort_order`.
+- **2x2 album cover mosaics** - album cards show up to four newest member
+  previews, falling back to the curated/newest single cover.
+- **Tablet / foldable / DeX** - a 720 dp breakpoint enables a master-detail
+  gallery: tapping a tile previews it in a right-hand pane with Open.
+
+### Security & privacy
+- **SQLCipher** - opt-in encryption of the local index. The 256-bit key lives
+  in Android Keystore via SecureStore; Settings re-encrypts the current
+  database in place and verifies it. The key is never part of channel backups.
+- **Recovery key** - a one-time 32-character Crockford base32 key wraps the
+  backup passphrase; Settings can create/regenerate it and unlock a forgotten
+  passphrase before restoring.
+- **Passphrase rotation** - verifies the current passphrase against the pinned
+  backup, re-encrypts the index with the new one and re-pins it; media is not
+  re-uploaded. The old recovery key is invalidated.
+- **Decoy connection** - a decoy session can use a separate bot token and
+  channel, and Collections shows configurable fake album names instead of an
+  empty list.
+- **Panic wipe** - optional 2.5-second long-press on the lock-screen title
+  erases the local index, cached media, SecureStore secrets and prefs. The
+  channel archive is untouched.
+- **Certificate pinning** - Android network-security-config pins
+  api.telegram.org and api.github.com (leaf + intermediate + root, plus a
+  backup root for GitHub); cleartext traffic is disabled.
+
+### Platform & appearance
+- **Icon colour and shape variants** - seven palettes x four foreground insets
+  (default/rounded/squircle/circle) generate 26 launcher aliases.
+- **Localization / RTL** - English, Hindi, Malayalam, German, Spanish and
+  Arabic for tabs, settings sections, gallery chrome, collections and common
+  actions; Arabic switches the layout to RTL after a restart.
+- **Extra widgets** - On this day, 2x2 Photo mosaic and Quick capture (camera
+  to upload queue).
+- **Share/quick-capture staging fix** - `enqueueUploads` now honours a staged
+  `local_uri`; share-target and camera captures are not MediaLibrary ids.
+
+## [unreleased] - customization/security continuation
 
 ### Models & people
 - **Models mirrored** to the project's `models-v1` GitHub release (stable
