@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "../rn";
+import { Alert, Pressable, StyleSheet, Text, View } from "../rn";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -19,6 +19,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const theme = useTheme();
   const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const secureViewer = useSettingsStore((s) => s.prefs.secureViewer);
+  const panicWipeEnabled = useSettingsStore((s) => s.prefs.panicWipeEnabled);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pinWrong, setPinWrong] = useState(false);
@@ -147,9 +148,44 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
           🔒
         </Text>
       </View>
-      <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-        {appDisplayName || "PhotogramBot"} is locked
-      </Text>
+      <Pressable
+        delayLongPress={2500}
+        onLongPress={() => {
+          if (!panicWipeEnabled) return;
+          Alert.alert(
+            "Panic wipe?",
+            "Erase the local index, cached photos and every saved credential on this phone. The Telegram channel archive is not touched and can be restored later.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Wipe",
+                style: "destructive",
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      const { panicWipe } = await import("../lib/panicWipe");
+                      await panicWipe();
+                      Alert.alert(
+                        "Wiped",
+                        "Local data and credentials are gone. Close the app; the channel archive is still intact."
+                      );
+                    } catch (e: any) {
+                      Alert.alert("Wipe failed", e?.message ?? "Could not wipe local data.");
+                    }
+                  })();
+                },
+              },
+            ],
+            { cancelable: true }
+          );
+        }}
+        accessibilityRole="header"
+        accessibilityHint={panicWipeEnabled ? "Long-press to panic-wipe local data" : undefined}
+      >
+        <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+          {appDisplayName || "PhotogramBot"} is locked
+        </Text>
+      </Pressable>
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
         {backoffMs > 0
           ? `Too many attempts — try again in ${fmtBackoff(backoffMs)}`

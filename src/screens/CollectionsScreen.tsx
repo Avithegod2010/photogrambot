@@ -46,6 +46,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [renameTarget, setRenameTarget] = useState<SavedSearchRow | null>(null);
   const [renameName, setRenameName] = useState("");
   const albumAccents = useSettingsStore((s) => s.prefs.albumAccents);
+  const decoyAlbumNames = useSettingsStore((s) => s.prefs.decoyAlbumNames);
   const decoy = isDecoyActive();
 
   useFocusEffect(
@@ -64,7 +65,20 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   );
 
   const tile = (Dimensions.get("window").width - 32 - 12) / 2;
-  const visibleAlbums = decoy ? [] : albums;
+  // Decoy mode shows only the configured fake album names, never real data.
+  const visibleAlbums = decoy
+    ? decoyAlbumNames.map((name, i) => ({
+        id: -1000 - i,
+        name,
+        created_at: 0,
+        locked: 0,
+        query: null,
+        cover_photo_id: null,
+        count: 0,
+        cover_file_id: null,
+        cover_preview_id: null,
+      }))
+    : albums;
   const visibleTripAlbums = visibleAlbums.filter((album) => !!album.query);
   const visibleManualAlbums = visibleAlbums.filter((album) => !album.query);
   const visibleFavorites = decoy ? [] : favorites;
@@ -252,11 +266,13 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                     },
                   ]}
                   onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, locked: !!a.locked })}
-                  onLongPress={() =>
+                  onLongPress={() => {
+                    // Decoy albums are display-only: no management menu.
+                    if (decoy) return;
                     // Long-press is the album-management menu; "Select photos"
                     // is the entry into the bulk-selection grid (tap still
                     // opens the album). Android Alert renders at most 3
-                    // buttons and silently drops the rest — dismissal is
+                    // buttons and silently drops the rest - dismissal is
                     // cancelable:true, never a 4th Cancel button.
                     Alert.alert(
                       a.name,
@@ -286,8 +302,8 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                         },
                       ],
                       { cancelable: true }
-                    )
-                  }
+                    );
+                  }}
                 >
                   <View style={styles.albumTilePlaceholder}>
                     <TelegramImage

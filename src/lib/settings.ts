@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isDecoyActive } from "./applock";
 import { DEFAULT_CAPTION_FIELDS } from "./captionFields";
 import type { VideoCompressionTarget } from "./videoCompress";
 
@@ -11,6 +12,8 @@ const DEVICE_KEY = "pb_device_id";
 const AI_KEY = "pb_ai_api_key";
 const TAGGING_KEY = "pb_tag_api_key";
 const BACKUP_PASS_KEY = "pb_backup_pass";
+const DECOY_TOKEN_KEY = "pb_decoy_bot_token";
+const DECOY_CHANNEL_KEY = "pb_decoy_channel_id";
 
 export type UploadQuality = "document" | "photo";
 export type ThemeMode = "dark" | "amoled" | "light" | "system";
@@ -72,6 +75,8 @@ export interface Prefs {
   appLock: boolean;
   secureViewer: boolean;
   autoLockTimeoutSec: number;
+  panicWipeEnabled: boolean;
+  decoyAlbumNames: string[];
   trashAutoPurgeDays: number;
   dbAutoBackup: boolean;
   aiCaptions: boolean;
@@ -152,6 +157,8 @@ export const defaultPrefs: Prefs = {
   appLock: false,
   secureViewer: true,
   autoLockTimeoutSec: 0,
+  panicWipeEnabled: false,
+  decoyAlbumNames: [],
   trashAutoPurgeDays: 30,
   dbAutoBackup: true,
   aiCaptions: false,
@@ -187,8 +194,40 @@ export const defaultPrefs: Prefs = {
   deviceName: "",
 };
 
+// A decoy session can be pointed at a separate bot/channel. Real credentials
+// are never returned while the decoy is active when a decoy pair is configured.
+export async function getDecoyBotToken(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(DECOY_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setDecoyBotToken(token: string | null): Promise<void> {
+  if (token === null) await SecureStore.deleteItemAsync(DECOY_TOKEN_KEY);
+  else await SecureStore.setItemAsync(DECOY_TOKEN_KEY, token);
+}
+
+export async function getDecoyChannelId(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(DECOY_CHANNEL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setDecoyChannelId(id: string | null): Promise<void> {
+  if (id === null) await SecureStore.deleteItemAsync(DECOY_CHANNEL_KEY);
+  else await SecureStore.setItemAsync(DECOY_CHANNEL_KEY, id);
+}
+
 export async function getBotToken(): Promise<string | null> {
   try {
+    if (isDecoyActive()) {
+      const decoy = await getDecoyBotToken();
+      if (decoy) return decoy;
+    }
     return await SecureStore.getItemAsync(TOKEN_KEY);
   } catch {
     return null;
@@ -205,6 +244,10 @@ export async function setBotToken(token: string | null): Promise<void> {
 
 export async function getChannelId(): Promise<string | null> {
   try {
+    if (isDecoyActive()) {
+      const decoy = await getDecoyChannelId();
+      if (decoy) return decoy;
+    }
     return await SecureStore.getItemAsync(CHANNEL_KEY);
   } catch {
     return null;

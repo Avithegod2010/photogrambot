@@ -40,6 +40,10 @@ import {
   CAPTION_FIELD_LABELS,
   getTaggingApiKey,
   setTaggingApiKey,
+  getDecoyChannelId,
+  setDecoyChannelId,
+  getDecoyBotToken,
+  setDecoyBotToken,
 } from "../lib/settings";
 import {
   MODELS,
@@ -113,6 +117,11 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [rotateDialog, setRotateDialog] = useState(false);
   const [rotateOld, setRotateOld] = useState("");
   const [rotateNew, setRotateNew] = useState("");
+  const [decoyChannelDraft, setDecoyChannelDraft] = useState("");
+  const [decoyTokenDraft, setDecoyTokenDraft] = useState("");
+  const [decoyAlbumsDraft, setDecoyAlbumsDraft] = useState(
+    (prefs.decoyAlbumNames ?? []).join(", ")
+  );
   const [bgSync, setBgSync] = useState<{ available: boolean; registered: boolean } | null>(null);
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
@@ -168,6 +177,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void getTaggingApiKey().then((k) => setTaggingKeyDraft(k ?? ""));
     void hasRecoveryKey().then(setRecoveryExists);
     void recoveryKeyCreatedAt().then(setRecoveryCreatedAt);
+    void getDecoyChannelId().then((v) => setDecoyChannelDraft(v ?? ""));
+    void getDecoyBotToken().then((v) => setDecoyTokenDraft(v ?? ""));
   }, []);
 
   async function shareDiagnostics() {
@@ -1334,6 +1345,54 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                 </View>
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
               </Pressable>
+              <View style={styles.divider} />
+              <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+                Decoy session
+              </Text>
+              <TextField
+                value={decoyChannelDraft}
+                onChangeText={setDecoyChannelDraft}
+                onEndEditing={() => void setDecoyChannelId(decoyChannelDraft.trim() || null)}
+                placeholder="Decoy channel id (-100…)"
+                theme={theme}
+              />
+              <View style={{ height: 8 }} />
+              <TextField
+                value={decoyTokenDraft}
+                onChangeText={setDecoyTokenDraft}
+                onEndEditing={() => void setDecoyBotToken(decoyTokenDraft.trim() || null)}
+                placeholder="Decoy bot token (optional)"
+                secureTextEntry
+                theme={theme}
+              />
+              <View style={{ height: 8 }} />
+              <TextField
+                value={decoyAlbumsDraft}
+                onChangeText={setDecoyAlbumsDraft}
+                onEndEditing={() =>
+                  void update({
+                    decoyAlbumNames: decoyAlbumsDraft
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 12),
+                  })
+                }
+                placeholder="Fake album names, comma separated"
+                theme={theme}
+              />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 6 }}>
+                A decoy session uses these credentials for any channel activity and shows only
+                these fake album names. Leave the fields empty to keep the decoy fully offline.
+              </Text>
+              <View style={styles.divider} />
+              <ToggleRow
+                title="Panic wipe gesture"
+                subtitle="Long-press the lock-screen title for 2.5 seconds to erase the local index, cached media and every saved credential. The channel archive is untouched."
+                value={prefs.panicWipeEnabled}
+                onChange={(v) => void update({ panicWipeEnabled: v })}
+                theme={theme}
+              />
             </>
           ) : null}
         </Card>

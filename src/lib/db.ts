@@ -135,6 +135,22 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
+/** Closes the cached handle (panic wipe / database encryption swap). */
+export async function closeDb(): Promise<void> {
+  const pending = dbPromise;
+  dbPromise = null;
+  if (!pending) return;
+  try {
+    const d = await pending;
+    await d.closeAsync();
+  } catch {}
+}
+
+/** Deletes the local index file entirely. Used only by panic wipe. */
+export async function deleteLocalDatabase(): Promise<void> {
+  await SQLite.deleteDatabaseAsync(DB_NAME);
+}
+
 /**
  * Re-encrypt the current plaintext database in place with SQLCipher, using a
  * key held in SecureStore. Requires a native build with `useSQLCipher`.
