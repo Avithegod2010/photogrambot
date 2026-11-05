@@ -45,8 +45,13 @@ check("cutoff is enforced", () => {
   assert.equal(nearestCity(12.0, 77.0, 60)?.city.name, "Mysuru");
 });
 
-check("placeLabel includes country", () => {
-  assert.equal(placeLabel(9.9312, 76.2673), "Kochi, India");
+check("placeLabel prefers the Indian state", () => {
+  assert.equal(placeLabel(9.9312, 76.2673), "Kochi, Kerala");
+  assert.equal(placeLabel(19.076, 72.8777), "Mumbai, Maharashtra");
+});
+
+check("placeLabel falls back to the country outside India", () => {
+  assert.equal(placeLabel(48.8566, 2.3522), "Paris, France");
 });
 
 check("gazetteer has no duplicate city names", () => {
