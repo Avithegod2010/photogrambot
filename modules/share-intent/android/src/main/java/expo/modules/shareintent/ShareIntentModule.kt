@@ -114,7 +114,7 @@ class ShareIntentModule : Module() {
       val shapes = listOf("default", "round", "squircle", "circle")
       for (color in colors) {
         for (shape in shapes) {
-          if (color == "default" && (shape == "default" || shape == "round")) continue
+          if (color == "default" && shape == "default") continue
           names["$color-$shape"] = "$pkg.Icon_${color}_${shape}"
         }
       }

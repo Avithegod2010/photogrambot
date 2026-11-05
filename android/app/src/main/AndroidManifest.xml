@@ -70,7 +70,18 @@
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
-    </activity-alias>    <activity-alias android:name=".Icon_default_squircle"
+    </activity-alias>    <activity-alias android:name=".Icon_default_round"
+        android:targetActivity=".MainActivity"
+        android:exported="true"
+        android:icon="@mipmap/ic_launcher_default_round"
+        android:label="@string/app_name"
+        android:enabled="false">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity-alias>
+    <activity-alias android:name=".Icon_default_squircle"
         android:targetActivity=".MainActivity"
         android:exported="true"
         android:icon="@mipmap/ic_launcher_default_squircle"
