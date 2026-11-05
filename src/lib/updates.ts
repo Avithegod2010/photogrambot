@@ -8,7 +8,7 @@ import {
 import { getUpdates, type TgUpdate } from "./telegram";
 import { parseCaption } from "./caption";
 import { getChannelId } from "./settings";
-import { handleRemoteCommand } from "./remote";
+import { handleCallbackQuery, handleRemoteCommand } from "./remote";
 import { logDiag } from "./diaglog";
 
 export interface UpdatesResult {
@@ -32,6 +32,15 @@ const NOTHING: IngestResult = { newPhotos: 0, backups: 0, commands: 0 };
 // photo inserts are guarded by message-id/hash lookups and remote commands are
 // idempotent or explicitly armed.
 async function ingestUpdate(u: TgUpdate, channelId: string): Promise<IngestResult> {
+  // Inline-keyboard presses arrive as callback_query updates (no channel_post).
+  // Only callbacks attached to the configured channel are considered, and the
+  // handler verifies the presser is a channel admin before acting.
+  if (u.callback_query) {
+    const cbChatId = String(u.callback_query.message?.chat?.id ?? "");
+    if (cbChatId !== channelId) return NOTHING;
+    const handled = await handleCallbackQuery(u.callback_query, channelId);
+    return handled ? { ...NOTHING, commands: 1 } : NOTHING;
+  }
   const msg = u.channel_post ?? u.message;
   if (!msg) return NOTHING;
   // getUpdates returns messages from every chat the bot can see; only ingest

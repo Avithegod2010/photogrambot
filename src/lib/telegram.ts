@@ -96,10 +96,18 @@ export interface TgMessage {
   reply_to_message?: TgMessage;
 }
 
+export interface TgCallbackQuery {
+  id: string;
+  from?: TgUser;
+  data?: string;
+  message?: TgMessage;
+}
+
 export interface TgUpdate {
   update_id: number;
   channel_post?: TgMessage;
   message?: TgMessage;
+  callback_query?: TgCallbackQuery;
 }
 
 export interface TgUser {
@@ -176,10 +184,19 @@ export async function unpinChatMessage(chatId: string | number, messageId: numbe
 // escaping every dynamic fragment — not worth it for bot-operator output.
 // Returns whether the send landed — the weekly digest keys its schedule off
 // this, so a failed post retries on the next app start instead of going silent.
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
 export async function sendMessage(
   chatId: string | number,
   text: string,
-  options: { replyToMessageId?: number; token?: string } = {}
+  options: {
+    replyToMessageId?: number;
+    token?: string;
+    inlineKeyboard?: InlineKeyboardButton[][];
+  } = {}
 ): Promise<boolean> {
   try {
     await call(
@@ -194,6 +211,9 @@ export async function sendMessage(
         ...(options.replyToMessageId
           ? { reply_parameters: { message_id: options.replyToMessageId } }
           : {}),
+        ...(options.inlineKeyboard
+          ? { reply_markup: { inline_keyboard: options.inlineKeyboard } }
+          : {}),
       },
       options.token
     );
@@ -202,6 +222,34 @@ export async function sendMessage(
     // Status replies are best-effort — a failed reply must never crash the poll loop.
     return false;
   }
+}
+
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+  showAlert = false
+): Promise<boolean> {
+  try {
+    await call("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text: text.slice(0, 200) } : {}),
+      show_alert: showAlert,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getChatAdministrators(
+  chatId: string | number,
+  tokenOverride?: string
+): Promise<{ user?: TgUser; status?: string }[]> {
+  return call<{ user?: TgUser; status?: string }[]>(
+    "getChatAdministrators",
+    { chat_id: String(chatId) },
+    tokenOverride
+  );
 }
 
 export interface FileSendOptions {
