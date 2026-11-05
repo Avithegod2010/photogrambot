@@ -3,6 +3,58 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [unreleased] - remote, multi-device & engineering wave
+
+### Remote control & multi-device
+- **Admin roles** - channel posts stay owner/admin; allowlisted Telegram
+  user ids can DM the bot with `read`, `write` or `admin` roles. Destructive
+  commands (`/delete`, `/wipe`, `/revoke`) require admin.
+- **Inline keyboards** - paginated `/find`, delete confirmation, wipe
+  confirmation, album picking, status/queue/stats/devices buttons.
+- **New commands** - `/queue`, `/devices`, `/revoke`, `/unrevoke`, and
+  per-device `/pause <id>` / `/resume <id>`.
+- **Device management** - device list with counts/last upload, rename,
+  pause/revoke this phone; revocation is cooperative and documented.
+- **Webhook mode** - optional self-hosted HTTPS relay (Cloudflare Worker
+  example in `docs/WEBHOOK_RELAY.md`) with automatic fallback to polling.
+- **Public read-only sharing** - create channel invite links and export a
+  standalone HTML index of the archive.
+- **Channel merge** - copy a source channel's pinned index via Telegram
+  `copyMessage` (no re-upload), remap message ids and merge albums.
+- **Multi-device index sync** - Lamport-clock last-write-wins for favorites,
+  tags, album membership/name and covers. Ops travel as chunked `#sync_ops`
+  documents; conflicts are recorded and resolvable from Settings.
+
+### Performance & engineering
+- **Crash/ANR reporting (opt-in)** - queued JS crashes and main-thread stalls
+  POST to a user-configured HTTPS endpoint with the last diagnostics entries.
+- **Startup profiling** - module/settings/db/nav marks stored per cold start
+  and shown in Settings; heavy screens are lazy-loaded.
+- **Thumbnail prefetch** - warms the first 24 Telegram previews with bounded
+  concurrency.
+- **Maestro smoke** - viewer + Remote & sharing flows, testIDs, and a
+  manual/PR emulator workflow.
+- **Backup schema guard** - tests compare `importAllData` columns against the
+  schema/placeholders, assert `SELECT *` export, and fuzz the queue sanitizer.
+- **EAS Update** - `expo-updates` installed, appVersion runtime policy,
+  preview/production channels, manifest meta-data and docs.
+- **Release automation** - tag-triggered workflow builds an EAS APK and
+  publishes the APK + `latest.json`.
+- **Signing preflight** - `npm run release:check-signing` verifies the local
+  keystore files and prints the `eas credentials` upload step.
+- **SDK 58** - target matrix and prebuild caveats documented; the upgrade is
+  deliberately left to a native build window (see below).
+
+### Not executed in this wave
+- **SDK 58 upgrade** - requires regenerating the committed `android/` tree
+  (RN 0.88.1, React 19.3, Reanimated 4.7.1/Worklets 0.13, Gesture Handler 3.3).
+  A blind prebuild would drop the icon aliases and OpenSSL dependency; the
+  exact target versions and migration order are in `docs/SDK58_MIGRATION.md`.
+- **Stable keystore upload** - owner action (`eas credentials`); the preflight
+  script and docs are ready.
+- **FlashList swap** - image prefetch landed instead; a list swap is deferred
+  until device profiling.
+
 ## [unreleased] - UI, privacy & platform wave
 
 ### Gallery & viewing

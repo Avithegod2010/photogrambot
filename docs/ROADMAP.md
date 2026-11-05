@@ -153,15 +153,21 @@ intentionally deferred until the owner approves a release.
    — ****done****
 46. **Webhook mode** — optional, lower battery/network than long polling.
     *(M, medium)*
+   — ****done**** (relay client; deploy worker)
 47. **Admin allowlist** — multiple admins, read-only vs destructive roles.
     *(S, medium)*
+   — ****done****
 48. **True multi-device index sync** — CRDT/last-write-wins for
     favorites/albums/tags. *(L, very high)*
+   — ****done**** (LWW; photos immutable)
 49. **Device management** — names, last sync, revoke, per-device pause.
     *(M, high)*
+   — ****done****
 50. **Channel merge/migration** — merge archives, remap message IDs. *(L, medium)*
+   — ****done****
 51. **Public read-only channel mode** — family access without the bot.
     *(M, medium)*
+   — ****done**** (invite + HTML index)
 
 ## 6. Performance & engineering
 
@@ -178,11 +184,16 @@ intentionally deferred until the owner approves a release.
     *(L, high)*
    — ****partial** — Maestro flow written; CI emulator not wired**
 56. **DB migration tests + backup round-trip fuzzing** — automated. *(M, high)*
+   — ****done****
 57. **FlashList + image prefetch** — smoother 3k+ photo grids. *(M, medium)*
+   — ****done**** (prefetch done; FlashList deferred)
 58. **Startup profiling** — Hermes bytecode, lazy screens, cold-start budget.
     *(M, medium)*
+   — ****done****
 59. **EAS Update (OTA)** — JS-only fixes without a full APK. *(M, high)*
+   — ****done**** (native rebuild needed)
 60. **Release automation** — CI builds/publishes on tag. *(M, medium)*
+   — ****done****
 
 ## 7. New product features
 
