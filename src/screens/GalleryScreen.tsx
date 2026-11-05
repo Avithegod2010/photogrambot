@@ -17,6 +17,7 @@ import {
 } from "../rn";
 import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSetupStore } from "../store/useSetupStore";
@@ -57,7 +58,7 @@ type LocalItem = {
 const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
 const COLUMNS = 3;
-const clampColumns = (n: number) => Math.max(2, Math.min(5, Math.round(n || COLUMNS)));
+const clampColumns = (n: number) => Math.max(2, Math.min(6, Math.round(n || COLUMNS)));
 
 // Local-roll page size. The new Query builder exposes no cursor API
 // (offset/limit only), so infinite scroll pages through the media store by
@@ -113,6 +114,23 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const searchHistory = useSettingsStore((s) => s.prefs.searchHistory);
   const updatePrefs = useSettingsStore((s) => s.update);
   const includeVideos = useSettingsStore((s) => s.prefs.includeVideos);
+  // Pinch to change grid density (2-6 columns) without leaving the grid.
+  // Two-finger gestures never collide with one-finger scroll/paint-select.
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .runOnJS(true)
+        .onEnd((e) => {
+          const current = clampColumns(useSettingsStore.getState().prefs.gridColumns);
+          let next = current;
+          if (e.scale > 1.18) next = current - 1;
+          else if (e.scale < 0.85) next = current + 1;
+          if (next !== current) {
+            void updatePrefs({ gridColumns: clampColumns(next) });
+          }
+        }),
+    [updatePrefs]
+  );
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
   // The Gallery tab mirrors the phone's own gallery: every local asset, with
@@ -838,7 +856,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
+    <GestureDetector gesture={pinchGesture}>
+      <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={[styles.appTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
@@ -1436,7 +1455,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
-    </View>
+      </View>
+    </GestureDetector>
   );
 }
 

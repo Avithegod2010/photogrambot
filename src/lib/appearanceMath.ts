@@ -36,7 +36,7 @@ export const MAP_STYLES: { key: MapStyle; label: string }[] = [
   { key: "terrain", label: "Terrain" },
 ];
 
-export const GRID_COLUMNS = [2, 3, 4, 5];
+export const GRID_COLUMNS = [2, 3, 4, 5, 6];
 
 export const FONT_SCALES: { key: number; label: string }[] = [
   { key: 0.9, label: "Small" },
