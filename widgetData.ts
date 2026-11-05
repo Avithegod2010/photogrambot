@@ -20,12 +20,13 @@ export async function getRandomPhotoForWidget(): Promise<{
       `SELECT id, preview_file_id, thumb_file_id, remote_file_id, taken_at, width, height FROM photos
        WHERE status IN ('uploaded','local')
        AND id NOT IN (SELECT photo_id FROM trash)
+       AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        ${scopeSql}
        AND (preview_file_id IS NOT NULL OR thumb_file_id IS NOT NULL OR remote_file_id IS NOT NULL)
        ORDER BY RANDOM() LIMIT 1`
     );
     const total = await db.getFirstAsync<{ n: number }>(
-      `SELECT COUNT(*) as n FROM photos WHERE status IN ('uploaded','local') AND id NOT IN (SELECT photo_id FROM trash) ${scopeSql}`
+      `SELECT COUNT(*) as n FROM photos WHERE status IN ('uploaded','local') AND id NOT IN (SELECT photo_id FROM trash) AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1) ${scopeSql}`
     );
     if (!row) {
       return {

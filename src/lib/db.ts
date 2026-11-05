@@ -264,6 +264,7 @@ export async function getScreenshotOcrPending(limit = 200): Promise<PhotoRow[]> 
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC
      LIMIT ?`,
     [limit]
@@ -301,7 +302,8 @@ export async function getScreenshotOcrCount(): Promise<number> {
      WHERE status = 'uploaded' AND ocr_text IS NULL
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
-       AND id NOT IN (SELECT photo_id FROM trash)`
+       AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`
   );
   return row?.n ?? 0;
 }
@@ -682,6 +684,7 @@ export async function getEmbeddingCoverage(): Promise<{ embedded: number; missin
        (SELECT COUNT(*) FROM photos
           WHERE status = 'uploaded'
             AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
             AND id NOT IN (SELECT photo_id FROM photo_embeddings)) AS missing`
   );
   return { embedded: row?.embedded ?? 0, missing: row?.missing ?? 0 };
@@ -727,7 +730,8 @@ export async function getPhotosByIds(ids: string[]): Promise<PhotoRow[]> {
     if (chunk.length === 0) continue;
     const placeholders = chunk.map(() => "?").join(",");
     const rows = await d.getAllAsync<any>(
-      `SELECT * FROM photos WHERE id IN (${placeholders}) AND id NOT IN (SELECT photo_id FROM trash)`,
+      `SELECT * FROM photos WHERE id IN (${placeholders}) AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`,
       chunk
     );
     for (const r of rows) found.set(r.id as string, rowToPhoto(r));
@@ -775,7 +779,8 @@ export async function getGalleryPage(
   const d = await getDb();
   let sql = `SELECT * FROM photos
              WHERE status IN ('uploaded', 'local', 'failed')
-             AND id NOT IN (SELECT photo_id FROM trash)`;
+             AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`;
   const params: any[] = [];
   if (before) {
     sql += " AND (taken_at < ? OR (taken_at = ? AND id < ?))";
@@ -816,7 +821,8 @@ export async function getPeriodCountedLocalIds(): Promise<Set<string>> {
     `SELECT DISTINCT local_id FROM photos
      WHERE local_id IS NOT NULL
      AND status IN ('uploaded','local','failed')
-     AND id NOT IN (SELECT photo_id FROM trash)`
+     AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`
   );
   return new Set(rows.map((r) => r.local_id));
 }
@@ -897,7 +903,11 @@ export async function searchPhotos(
   const d = await getDb();
   const safeFilters = normalizeSearchFilters(filters);
   const cleaned = query.trim();
-  const conds: string[] = ["p.id NOT IN (SELECT photo_id FROM trash)"];
+  const conds: string[] = [
+    "p.id NOT IN (SELECT photo_id FROM trash)",
+    // Photos inside a locked album must not leak through search/memories/map.
+    "p.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)",
+  ];
   const params: any[] = [];
   if (safeFilters?.takenWithinDays && safeFilters.takenWithinDays > 0) {
     conds.push("p.taken_at >= ?");
@@ -989,6 +999,7 @@ export async function getLargestUploaded(n = 3): Promise<PhotoRow[]> {
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos
      WHERE status = 'uploaded' AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY COALESCE(size, 0) DESC LIMIT ?`,
     [n]
   );
@@ -1103,7 +1114,8 @@ export async function getFavorites(): Promise<PhotoRow[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos WHERE favorite = 1 AND status IN ('uploaded','local','failed')
-     AND id NOT IN (SELECT photo_id FROM trash) ORDER BY taken_at DESC`
+     AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1) ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
 }
@@ -1244,6 +1256,7 @@ export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
        JOIN face_embeddings fe ON fe.photo_id = ph.id
       WHERE fe.person_id = ?
         AND ph.id NOT IN (SELECT photo_id FROM trash)
+        AND ph.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
       GROUP BY ph.id
       ORDER BY ph.taken_at DESC`,
     [personId]
@@ -1288,6 +1301,7 @@ export async function getPhotosMissingSceneTags(limit = 50): Promise<PhotoRow[]>
     `SELECT * FROM photos
       WHERE status IN ('uploaded','local')
         AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
         AND (tags IS NULL OR tags NOT LIKE '%scene:%')
         AND (preview_file_id IS NOT NULL OR thumb_file_id IS NOT NULL OR local_uri IS NOT NULL)
       ORDER BY taken_at DESC
@@ -1537,6 +1551,7 @@ export async function syncTripAlbums(): Promise<number> {
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`
   );
   const clusters = clusterTrips(rows.map(rowToPhoto));
@@ -1926,6 +1941,7 @@ export async function getDuplicateHashGroups(): Promise<PhotoRow[][]> {
     `SELECT content_hash FROM photos
      WHERE content_hash IS NOT NULL AND message_id IS NOT NULL
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY content_hash
      HAVING COUNT(*) > 1
      LIMIT 200`
@@ -1936,6 +1952,7 @@ export async function getDuplicateHashGroups(): Promise<PhotoRow[][]> {
       `SELECT * FROM photos
        WHERE content_hash = ? AND message_id IS NOT NULL
          AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        ORDER BY uploaded_at DESC`,
       [h.content_hash]
     );
@@ -1999,6 +2016,7 @@ export async function getPhotosByUploadStatus(
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos
      WHERE ${cond} AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
@@ -2019,6 +2037,7 @@ export async function getUploadedPhotosInMonth(
        AND remote_file_id IS NOT NULL
        AND taken_at >= ? AND taken_at < ?
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`,
     [start, end]
   );
@@ -2036,6 +2055,7 @@ export async function getFreeUpCandidates(): Promise<PhotoRow[]> {
        AND local_id IS NOT NULL
        AND size IS NOT NULL AND size > 0
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
@@ -2060,6 +2080,7 @@ export async function getScreenshotSunsetCandidates(days: number): Promise<Photo
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`
   , [cutoff]);
   return rows.map(rowToPhoto);
@@ -2134,6 +2155,7 @@ export async function getStorageSummary(): Promise<StorageSummary> {
      WHERE COALESCE(uploaded_at, taken_at) >= ?
        AND status = 'uploaded'
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY ym`,
     [since.getTime()]
   );
@@ -2172,6 +2194,7 @@ export async function getMonthlyBuckets(monthsBack = 6): Promise<MonthBucket[]> 
             COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
      FROM photos
      WHERE taken_at >= ? AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY ym`,
     [since.getTime()]
   );
@@ -2212,6 +2235,7 @@ export async function getYearGroups(): Promise<PeriodGroup[]> {
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY key ORDER BY key DESC`
   );
   const covers = await d.getAllAsync<any>(
@@ -2220,6 +2244,7 @@ export async function getYearGroups(): Promise<PeriodGroup[]> {
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   const coverByKey = new Map<string, any>();
@@ -2254,6 +2279,7 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ${yearFilter}
      GROUP BY key ORDER BY key DESC`,
     params
@@ -2264,6 +2290,7 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ${yearFilter}
      ORDER BY taken_at DESC`,
     params
@@ -2293,6 +2320,7 @@ export async function getPhotosInRange(startMs: number, endMs: number): Promise<
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+     AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      AND taken_at >= ? AND taken_at <= ?
      ORDER BY taken_at DESC`,
     [startMs, endMs]
@@ -2332,6 +2360,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
         (SELECT p2.preview_file_id FROM photos p2
           WHERE p2.status IN ('uploaded','local','failed')
           AND p2.id NOT IN (SELECT photo_id FROM trash)
+          AND p2.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
           AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
           AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
@@ -2339,6 +2368,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
         (SELECT p3.remote_file_id FROM photos p3
           WHERE p3.status IN ('uploaded','local','failed')
           AND p3.id NOT IN (SELECT photo_id FROM trash)
+          AND p3.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
           AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
           AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
@@ -2346,6 +2376,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
       FROM photos p
       WHERE status IN ('uploaded','local','failed')
       AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
       AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) < ?
       AND strftime('%m-%d', taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
       GROUP BY year ORDER BY year DESC`,
@@ -2380,6 +2411,7 @@ export async function getGeotagged(limit = 800): Promise<GeotaggedPhoto[]> {
      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
      AND status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+     AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC LIMIT ?`,
     [limit]
   );
@@ -2398,6 +2430,7 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
     `SELECT content_hash, COUNT(*) as n FROM photos
      WHERE content_hash IS NOT NULL
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY content_hash HAVING n > 1
      ORDER BY n DESC`
   );
@@ -2405,6 +2438,7 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
   for (const h of hashes) {
     const rows = await d.getAllAsync<any>(
       `SELECT * FROM photos WHERE content_hash = ? AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        ORDER BY CASE WHEN status = 'uploaded' THEN 0 ELSE 1 END, taken_at DESC`,
       [h.content_hash]
     );
@@ -2483,6 +2517,7 @@ export async function getJpegRowsForPhash(): Promise<PhotoRow[]> {
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        AND (mime = 'image/jpeg'
             OR LOWER(filename) LIKE '%.jpg'
             OR LOWER(filename) LIKE '%.jpeg')
