@@ -1126,6 +1126,54 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
+        <SectionLabel text="Notifications" theme={theme} />
+        <Card theme={theme}>
+          <ToggleRow
+            title="Upload progress"
+            subtitle="Show background upload progress"
+            value={prefs.notifyProgress}
+            onChange={(v) => void update({ notifyProgress: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Backup complete"
+            subtitle="Show a completion notification"
+            value={prefs.notifyComplete}
+            onChange={(v) => void update({ notifyComplete: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Uploads failed"
+            subtitle="Show the tap-to-review failure banner"
+            value={prefs.notifyFailed}
+            onChange={(v) => void update({ notifyFailed: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Quiet hours"
+            subtitle="Suppress notifications during this window"
+            value={prefs.notifyQuiet}
+            onChange={(v) => void update({ notifyQuiet: v })}
+            theme={theme}
+          />
+          {prefs.notifyQuiet ? (
+            <>
+              <StepperRow
+                label="Quiet starts"
+                minutes={prefs.notifyQuietStart}
+                onChange={(m) => void update({ notifyQuietStart: m })}
+                theme={theme}
+              />
+              <StepperRow
+                label="Quiet ends"
+                minutes={prefs.notifyQuietEnd}
+                onChange={(m) => void update({ notifyQuietEnd: m })}
+                theme={theme}
+              />
+            </>
+          ) : null}
+        </Card>
+
         <SectionLabel text="Privacy & security" theme={theme} />
         <Card theme={theme}>
           <ToggleRow

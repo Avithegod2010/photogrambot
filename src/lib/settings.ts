@@ -78,6 +78,12 @@ export interface Prefs {
   aiPrompt: string;
   mlModelUrls: Record<string, string>;
   autoMlIndex: boolean;
+  notifyProgress: boolean;
+  notifyComplete: boolean;
+  notifyFailed: boolean;
+  notifyQuiet: boolean;
+  notifyQuietStart: number;
+  notifyQuietEnd: number;
   searchHistory: string[];
   albumRules: Record<string, { folder?: string; tag?: string; favorite?: boolean }>;
   includeVideos: boolean;
@@ -150,6 +156,12 @@ export const defaultPrefs: Prefs = {
   aiPrompt: DEFAULT_AI_PROMPT,
   mlModelUrls: {},
   autoMlIndex: false,
+  notifyProgress: true,
+  notifyComplete: true,
+  notifyFailed: true,
+  notifyQuiet: false,
+  notifyQuietStart: 22 * 60,
+  notifyQuietEnd: 7 * 60,
   searchHistory: [],
   albumRules: {},
   includeVideos: false,
