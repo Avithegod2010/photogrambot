@@ -1,0 +1,23 @@
+# Maestro smoke flow for PhotogramBot.
+#
+# Run against an installed build:
+#   maestro test .maestro/smoke.yaml
+#
+# Assumes app lock is OFF (the flow cannot type a PIN) and a configured
+# library. It only navigates read-only screens; it never uploads or deletes.
+appId: com.photogrambot.app
+---
+- launchApp
+- assertVisible: "Gallery"
+- tapOn: "Settings"
+- assertVisible: "Reconfigure bot"
+- scrollUntilVisible:
+    element:
+      text: "Accent color"
+    direction: DOWN
+- assertVisible: "Accent color"
+- back
+- tapOn: "Collections"
+- assertVisible: "Collections"
+- tapOn: "Gallery"
+- assertVisible: "Gallery"

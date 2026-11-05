@@ -49,6 +49,10 @@ import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
+import { installCrashHandler } from "./src/lib/crashlog";
+
+// Record uncaught JS errors in the on-device diagnostics log.
+installCrashHandler();
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();

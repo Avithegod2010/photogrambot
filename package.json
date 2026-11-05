@@ -56,6 +56,7 @@
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
+    "test:e2e": "maestro test .maestro/smoke.yaml",
     "release:manifest": "node scripts/make-latest-json.mjs",
     "release:publish": "node scripts/publish-release.mjs",
     "release:resign": "node scripts/resign-apk.mjs"

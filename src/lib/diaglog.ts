@@ -17,7 +17,8 @@ export type DiagKind =
   | "updates"
   | "remote"
   | "repair"
-  | "motion";
+  | "motion"
+  | "crash";
 
 export interface DiagEvent {
   t: number;
