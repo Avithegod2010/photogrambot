@@ -84,6 +84,12 @@ import {
 } from "../lib/backup";
 import type { ThemeMode } from "../lib/settings";
 import { passwordStrength } from "../lib/passwordStrength";
+import {
+  createRecoveryKey,
+  recoverPassphrase,
+  hasRecoveryKey,
+  recoveryKeyCreatedAt,
+} from "../lib/recoveryKey";
 
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -98,6 +104,11 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [restoreDialog, setRestoreDialog] = useState(false);
   const [importDialog, setImportDialog] = useState(false);
+  const [recoveryDialog, setRecoveryDialog] = useState<string | null>(null);
+  const [recoveryInputVisible, setRecoveryInputVisible] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState("");
+  const [recoveryExists, setRecoveryExists] = useState(false);
+  const [recoveryCreatedAt, setRecoveryCreatedAt] = useState<number | null>(null);
   const [bgSync, setBgSync] = useState<{ available: boolean; registered: boolean } | null>(null);
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
@@ -151,6 +162,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void getBackupPassphrase().then((p) => setPassDraft(p ?? ""));
     void allModelStatuses().then(setModelStatuses);
     void getTaggingApiKey().then((k) => setTaggingKeyDraft(k ?? ""));
+    void hasRecoveryKey().then(setRecoveryExists);
+    void recoveryKeyCreatedAt().then(setRecoveryCreatedAt);
   }, []);
 
   async function shareDiagnostics() {
@@ -1515,6 +1528,38 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                 onChange={(v) => void update({ dbBackupIncludeToken: v })}
                 theme={theme}
               />
+              <View style={styles.buttonGrid}>
+                <Button
+                  title={recoveryExists ? "New recovery key" : "Create recovery key"}
+                  variant="outlined"
+                  theme={theme}
+                  onPress={() => {
+                    void (async () => {
+                      try {
+                        const key = await createRecoveryKey(passDraft);
+                        setRecoveryExists(true);
+                        setRecoveryCreatedAt(Date.now());
+                        setRecoveryDialog(key);
+                      } catch (e: any) {
+                        Alert.alert("Recovery key", e?.message ?? "Could not create a recovery key.");
+                      }
+                    })();
+                  }}
+                />
+                {recoveryExists ? (
+                  <Button
+                    title="Use recovery key"
+                    variant="outlined"
+                    theme={theme}
+                    onPress={() => setRecoveryInputVisible(true)}
+                  />
+                ) : null}
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+                {recoveryExists
+                  ? `A recovery key${recoveryCreatedAt ? ` created ${new Date(recoveryCreatedAt).toLocaleDateString()}` : ""} can unlock this passphrase. Store it offline — anyone with it can read your backup.`
+                  : "Create a one-time recovery key so a forgotten passphrase does not lock you out of the index backup."}
+              </Text>
             </>
           ) : null}
           <View style={styles.buttonGrid}>
@@ -1851,6 +1896,82 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
         </View>
         <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 14 }}>
           <Button title="Close" variant="text" theme={theme} disabled={zipBusy} onPress={() => setZipDialog(false)} />
+        </View>
+      </Dialog>
+
+      <Dialog
+        visible={!!recoveryDialog}
+        theme={theme}
+        title="Your recovery key"
+        message="Write this down and keep it offline. It is shown once and cannot be recovered from the app. Anyone with it can unlock your backup passphrase."
+      >
+        <Text
+          selectable
+          style={{
+            color: theme.colors.onSurface,
+            fontFamily: "monospace",
+            fontSize: 17,
+            lineHeight: 26,
+            letterSpacing: 0.5,
+            textAlign: "center",
+            marginVertical: 14,
+          }}
+        >
+          {recoveryDialog}
+        </Text>
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+          <Button
+            title="I saved it"
+            theme={theme}
+            onPress={() => setRecoveryDialog(null)}
+          />
+        </View>
+      </Dialog>
+
+      <Dialog
+        visible={recoveryInputVisible}
+        theme={theme}
+        title="Use a recovery key"
+        message="Enter the key to unlock the stored backup passphrase. Dashes, spaces and lower case are fine."
+      >
+        <TextField
+          value={recoveryInput}
+          onChangeText={setRecoveryInput}
+          placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+          autoCapitalize="characters"
+          theme={theme}
+        />
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Button
+            title="Cancel"
+            variant="text"
+            theme={theme}
+            onPress={() => {
+              setRecoveryInputVisible(false);
+              setRecoveryInput("");
+            }}
+          />
+          <Button
+            title="Unlock"
+            theme={theme}
+            onPress={() => {
+              void (async () => {
+                try {
+                  const pass = await recoverPassphrase(recoveryInput);
+                  await setBackupPassphrase(pass);
+                  setPassDraft(pass);
+                  setRecoveryInputVisible(false);
+                  setRecoveryInput("");
+                  Alert.alert(
+                    "Passphrase restored",
+                    "The backup passphrase is loaded. You can now restore from the channel."
+                  );
+                } catch (e: any) {
+                  Alert.alert("Recovery key", e?.message ?? "Could not unlock the passphrase.");
+                }
+              })();
+            }}
+          />
         </View>
       </Dialog>
 
