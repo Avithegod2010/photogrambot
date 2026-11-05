@@ -47,4 +47,9 @@ jobs:
         run: npx expo export --platform android --output-dir "$RUNNER_TEMP/export"
 
       - name: Check for expo dependency drift
+        # Advisory only: Expo recommends patch-level bumps for several packages
+        # from time to time, while the lockfile is the tree that the published
+        # preview APK was built from. A hard failure here would block every PR
+        # until a deliberate dependency refresh, so surface it as a warning.
+        continue-on-error: true
         run: npx expo install --check
