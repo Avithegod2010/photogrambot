@@ -14,6 +14,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Sharing from "expo-sharing";
 import { File, Paths } from "expo-file-system";
 import { getDiagLog } from "../lib/diaglog";
+import {
+  flushCrashReports,
+  pendingCrashReportCount,
+  sendTestCrashReport,
+} from "../lib/crashReport";
+import { getLastStartup, type StartupInfo } from "../lib/startup";
 import { useTheme } from "../useTheme";
 import { useSetupStore } from "../store/useSetupStore";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -116,6 +122,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [recoveryInput, setRecoveryInput] = useState("");
   const [recoveryExists, setRecoveryExists] = useState(false);
   const [recoveryCreatedAt, setRecoveryCreatedAt] = useState<number | null>(null);
+  const [crashPending, setCrashPending] = useState(0);
+  const [crashNote, setCrashNote] = useState<string | null>(null);
+  const [startupInfo, setStartupInfo] = useState<StartupInfo | null>(null);
   const [rotateDialog, setRotateDialog] = useState(false);
   const [rotateOld, setRotateOld] = useState("");
   const [rotateNew, setRotateNew] = useState("");
@@ -181,6 +190,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void recoveryKeyCreatedAt().then(setRecoveryCreatedAt);
     void getDecoyChannelId().then((v) => setDecoyChannelDraft(v ?? ""));
     void getDecoyBotToken().then((v) => setDecoyTokenDraft(v ?? ""));
+    void pendingCrashReportCount().then(setCrashPending);
+    void getLastStartup().then(setStartupInfo);
   }, []);
 
   async function shareDiagnostics() {
@@ -1502,6 +1513,65 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             style={{ marginTop: 12 }}
             onPress={() => void shareDiagnostics()}
           />
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 8 }}>
+            Last cold start:{" "}
+            {startupInfo
+              ? `${startupInfo.totalMs} ms (${Object.entries(startupInfo.marks)
+                  .map(([k, v]) => `${k} ${v}ms`)
+                  .join(", ")})`
+              : "not measured yet"}
+          </Text>
+          <View style={styles.divider} />
+          <ToggleRow
+            title="Crash reporting (opt-in)"
+            subtitle="Queue crashes and main-thread stalls and POST them to your own HTTPS endpoint. Includes the diagnostics log; no photos, tokens or channel ids."
+            value={prefs.crashReporting}
+            onChange={(v) => void update({ crashReporting: v })}
+            theme={theme}
+          />
+          {prefs.crashReporting ? (
+            <>
+              <TextField
+                value={prefs.crashEndpoint}
+                onChangeText={(v) => void update({ crashEndpoint: v })}
+                placeholder="https://crash.example.com/report"
+                theme={theme}
+                autoCapitalize="none"
+              />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+                {crashPending} queued report{crashPending === 1 ? "" : "s"}.
+                {crashNote ? ` ${crashNote}` : ""}
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                <Button
+                  title="Send now"
+                  variant="outlined"
+                  theme={theme}
+                  onPress={() => {
+                    void flushCrashReports()
+                      .then(async (n) => {
+                        setCrashNote(`Sent ${n}.`);
+                        setCrashPending(await pendingCrashReportCount());
+                      })
+                      .catch((e: any) => setCrashNote(e?.message ?? "Send failed."));
+                  }}
+                />
+                <Button
+                  title="Send test"
+                  variant="text"
+                  theme={theme}
+                  onPress={() => {
+                    void sendTestCrashReport()
+                      .then(async () => {
+                        setCrashNote("Test report queued/sent.");
+                        setCrashPending(await pendingCrashReportCount());
+                      })
+                      .catch((e: any) => setCrashNote(e?.message ?? "Send failed."));
+                  }}
+                />
+              </View>
+            </>
+          ) : null}
         </Card>
 
         <SectionLabel text={t("settings.maintenance", prefs.language)} theme={theme} />

@@ -1,3 +1,4 @@
+import { markStartup, finishStartup } from "./src/lib/startup";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
@@ -23,20 +24,41 @@ import {
   MonthsOfYearScreen,
   PeriodPhotosScreen,
 } from "./src/screens/PeriodScreens";
-import { MapScreen } from "./src/screens/MapScreen";
-import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
 import { UploadQueueScreen } from "./src/screens/UploadQueueScreen";
 import { FreeUpSpaceScreen } from "./src/screens/FreeUpSpaceScreen";
 import { DestinationsScreen } from "./src/screens/DestinationsScreen";
-import { SearchResultsScreen } from "./src/screens/SearchResultsScreen";
-import { SimilarScreen } from "./src/screens/SimilarScreen";
-import { PeopleScreen } from "./src/screens/PeopleScreen";
-import { AskScreen } from "./src/screens/AskScreen";
-import { BestOfScreen } from "./src/screens/BestOfScreen";
 import { SlideshowScreen } from "./src/screens/SlideshowScreen";
 import { CompareScreen } from "./src/screens/CompareScreen";
-import { RemoteScreen } from "./src/screens/RemoteScreen";
-import { SyncScreen } from "./src/screens/SyncScreen";
+
+// Heavy, less-frequently-opened screens are evaluated on first navigation.
+const LazyMapScreen = React.lazy(() =>
+  import("./src/screens/MapScreen").then((m) => ({ default: m.MapScreen }))
+);
+const LazyMaintenanceScreen = React.lazy(() =>
+  import("./src/screens/MaintenanceScreen").then((m) => ({ default: m.MaintenanceScreen }))
+);
+const LazySearchResultsScreen = React.lazy(() =>
+  import("./src/screens/SearchResultsScreen").then((m) => ({ default: m.SearchResultsScreen }))
+);
+const LazySimilarScreen = React.lazy(() =>
+  import("./src/screens/SimilarScreen").then((m) => ({ default: m.SimilarScreen }))
+);
+const LazyPeopleScreen = React.lazy(() =>
+  import("./src/screens/PeopleScreen").then((m) => ({ default: m.PeopleScreen }))
+);
+const LazyAskScreen = React.lazy(() =>
+  import("./src/screens/AskScreen").then((m) => ({ default: m.AskScreen }))
+);
+const LazyBestOfScreen = React.lazy(() =>
+  import("./src/screens/BestOfScreen").then((m) => ({ default: m.BestOfScreen }))
+);
+const LazyRemoteScreen = React.lazy(() =>
+  import("./src/screens/RemoteScreen").then((m) => ({ default: m.RemoteScreen }))
+);
+const LazySyncScreen = React.lazy(() =>
+  import("./src/screens/SyncScreen").then((m) => ({ default: m.SyncScreen }))
+);
+markStartup("app-module");
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
@@ -57,11 +79,15 @@ import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
 import { installCrashHandler } from "./src/lib/crashlog";
+import { installCrashReporter, startStallWatchdog, flushCrashReports } from "./src/lib/crashReport";
 import { t, isRTLLanguage, resolveLanguage } from "./src/lib/i18n";
 import { I18nManager } from "./src/rn";
 
-// Record uncaught JS errors in the on-device diagnostics log.
+// Record uncaught JS errors in the on-device diagnostics log and queue them
+// for the opt-in crash reporter. The stall watchdog approximates ANR detection.
 installCrashHandler();
+installCrashReporter();
+startStallWatchdog();
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -279,6 +305,8 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
+          markStartup("nav");
+          void finishStartup();
           void Linking.getInitialURL().then(openPhotoFromUrl);
           if (pendingNotificationScreen) {
             const screen = pendingNotificationScreen;
@@ -287,6 +315,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           }
         }}
       >
+        <React.Suspense fallback={<Splash />}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Main" component={Tabs} />
           <Stack.Screen
@@ -296,21 +325,21 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           />
           <Stack.Screen name="Album" component={AlbumScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen name="Remote" component={RemoteScreen} />
-          <Stack.Screen name="Sync" component={SyncScreen} />
+          <Stack.Screen name="Remote" component={LazyRemoteScreen} />
+          <Stack.Screen name="Sync" component={LazySyncScreen} />
           <Stack.Screen name="FolderSync" component={FolderSyncScreen} />
-          <Stack.Screen name="Map" component={MapScreen} options={{ presentation: "fullScreenModal" }} />
+          <Stack.Screen name="Map" component={LazyMapScreen} options={{ presentation: "fullScreenModal" }} />
           <Stack.Screen name="MonthsOfYear" component={MonthsOfYearScreen} />
           <Stack.Screen name="PeriodPhotos" component={PeriodPhotosScreen} />
-          <Stack.Screen name="Maintenance" component={MaintenanceScreen} />
+          <Stack.Screen name="Maintenance" component={LazyMaintenanceScreen} />
           <Stack.Screen name="UploadQueue" component={UploadQueueScreen} />
           <Stack.Screen name="FreeUpSpace" component={FreeUpSpaceScreen} />
           <Stack.Screen name="Destinations" component={DestinationsScreen} />
-          <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
-          <Stack.Screen name="Similar" component={SimilarScreen} />
-          <Stack.Screen name="People" component={PeopleScreen} />
-          <Stack.Screen name="Ask" component={AskScreen} />
-          <Stack.Screen name="BestOf" component={BestOfScreen} />
+          <Stack.Screen name="SearchResults" component={LazySearchResultsScreen} />
+          <Stack.Screen name="Similar" component={LazySimilarScreen} />
+          <Stack.Screen name="People" component={LazyPeopleScreen} />
+          <Stack.Screen name="Ask" component={LazyAskScreen} />
+          <Stack.Screen name="BestOf" component={LazyBestOfScreen} />
           <Stack.Screen
             name="Slideshow"
             component={SlideshowScreen}
@@ -322,6 +351,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
             options={{ presentation: "fullScreenModal", animation: "fade" }}
           />
         </Stack.Navigator>
+        </React.Suspense>
       </NavigationContainer>
     );
   }
@@ -391,6 +421,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await loadSettings();
+      markStartup("settings");
+      // Opt-in crash reports from the previous session, best-effort.
+      void flushCrashReports();
       // Apply the persisted language direction. Android only re-lays out on
       // the next launch, which is why Settings asks for a restart.
       I18nManager.allowRTL(true);
@@ -399,6 +432,7 @@ export default function App() {
       if (I18nManager.isRTL !== rtl) I18nManager.forceRTL(rtl);
       await ensureDeviceId();
       await initialize();
+      markStartup("db");
       // Resolve the lock state from freshly loaded prefs BEFORE the first
       // non-splash paint, or an app-locked device flashes the gallery a frame.
       setLocked(useSettingsStore.getState().prefs.appLock);
