@@ -513,6 +513,27 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onChange={(v) => void update({ includeVideos: v })}
             theme={theme}
           />
+          {prefs.includeVideos ? (
+            <>
+              <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+                Video compression
+              </Text>
+              <ChipRow
+                options={[
+                  { key: "off", label: "Off" },
+                  { key: "720p", label: "720p" },
+                  { key: "1080p", label: "1080p" },
+                ]}
+                value={prefs.videoCompression}
+                onSelect={(v) => void update({ videoCompression: v as any })}
+                theme={theme}
+              />
+              <Text style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
+                The planner is in this build; the native transcoder lands in the
+                next build. Until then uploads keep the original file.
+              </Text>
+            </>
+          ) : null}
           <View style={styles.divider} />
           <ToggleRow
             title="Organize by folder (topics)"

@@ -1,6 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DEFAULT_CAPTION_FIELDS } from "./captionFields";
+import type { VideoCompressionTarget } from "./videoCompress";
 
 export { DEFAULT_CAPTION_FIELDS, CAPTION_FIELD_LABELS } from "./captionFields";
 
@@ -75,6 +76,7 @@ export interface Prefs {
   aiModel: string;
   aiPrompt: string;
   includeVideos: boolean;
+  videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;
   dbBackupIncludeToken: boolean;
   nearDupGuard: boolean;
@@ -142,6 +144,7 @@ export const defaultPrefs: Prefs = {
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
   includeVideos: false,
+  videoCompression: "off",
   dbBackupEncrypt: false,
   dbBackupIncludeToken: false,
   nearDupGuard: true,
