@@ -6,6 +6,7 @@ import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { getGeotagged, type GeotaggedPhoto } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
+import { placeLabel } from "../lib/places";
 
 export function MapScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -99,6 +100,11 @@ export function MapScreen({ navigation }: { navigation: any }) {
               <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
             </Pressable>
           </View>
+          {placeLabel(selected[0].latitude, selected[0].longitude) ? (
+            <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: "600", marginBottom: 2 }}>
+              {placeLabel(selected[0].latitude, selected[0].longitude)}
+            </Text>
+          ) : null}
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginBottom: 8 }}>
             {new Date(selected[0].taken_at).toLocaleDateString()} —{" "}
             {selected[selected.length - 1] &&

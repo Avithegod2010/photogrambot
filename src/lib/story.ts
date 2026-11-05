@@ -11,6 +11,7 @@ import type { PhotoRow } from "./db";
 import { sendMessage } from "./telegram";
 import { getChannelId } from "./settings";
 import { formatBytes, formatDate } from "./format";
+import { placeLabel } from "./places";
 
 export interface TripStoryStats {
   name: string;
@@ -42,8 +43,9 @@ export function buildTripStoryText(s: TripStoryStats): string {
 }
 
 // Coarse place labels: ~5 km grid cells of the geotagged photos, most-shot
-// first. Deliberately NOT reverse-geocoded (no network dependency, no
-// third-party location lookup) — coordinates-as-place is honest and cheap.
+// first. Cells are labelled with the nearest city from the OFFLINE gazetteer
+// (places.ts) when one is within 75 km; otherwise the coordinates are shown
+// verbatim. No network, no third-party lookup.
 export function summarizeTrip(name: string, photos: PhotoRow[]): TripStoryStats {
   const geo = photos.filter((p) => p.latitude != null && p.longitude != null);
   const cells = new Map<string, number>();
@@ -56,7 +58,12 @@ export function summarizeTrip(name: string, photos: PhotoRow[]): TripStoryStats 
     .slice(0, 3)
     .map(([key, count]) => {
       const [lat, lng] = key.split(":");
-      return { label: `${Number(lat).toFixed(2)}°, ${Number(lng).toFixed(2)}°`, count };
+      return {
+        label:
+          placeLabel(Number(lat), Number(lng)) ??
+          `${Number(lat).toFixed(2)}°, ${Number(lng).toFixed(2)}°`,
+        count,
+      };
     });
   const dated = photos.filter((p) => p.taken_at > 0).sort((a, b) => a.taken_at - b.taken_at);
   const largest = photos.reduce<{ filename: string; size: number } | null>((acc, p) => {

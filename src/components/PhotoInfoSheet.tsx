@@ -18,6 +18,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
 import { savePhotoToDevice, saveMotionClip } from "../lib/restore";
+import { placeLabel } from "../lib/places";
 import { Button } from "./ui";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { getCachedTelegramFile } from "../lib/media";
@@ -115,6 +116,7 @@ export function PhotoInfoSheet({
   })();
 
   const hasGps = p.latitude != null && p.longitude != null;
+  const place = hasGps ? placeLabel(p.latitude!, p.longitude!) : null;
   const taken = new Date(p.taken_at);
   const dateHeader = taken.toLocaleDateString(undefined, {
     weekday: "long",
@@ -153,6 +155,11 @@ export function PhotoInfoSheet({
             {hasGps ? (
               <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Location</Text>
+                {place ? (
+                  <Text style={{ color: theme.colors.onSurface, fontSize: 13.5, fontWeight: "600", marginTop: -4, marginBottom: 8 }}>
+                    {place}
+                  </Text>
+                ) : null}
                 <Pressable onPress={openInMaps} style={styles.mapWrap}>
                   <MapView
                     style={styles.map}
