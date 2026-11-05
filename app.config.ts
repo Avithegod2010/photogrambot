@@ -37,6 +37,33 @@ const widgetConfig: WithAndroidWidgetsParams = {
       resizeMode: "horizontal|vertical",
       updatePeriodMillis: 6 * 60 * 60 * 1000,
     },
+    {
+      name: "OnThisDay",
+      label: "On this day",
+      description: "A photo taken on today's date in an earlier year",
+      minWidth: "180dp",
+      minHeight: "180dp",
+      resizeMode: "horizontal|vertical",
+      updatePeriodMillis: 24 * 60 * 60 * 1000,
+    },
+    {
+      name: "Mosaic",
+      label: "Photo mosaic",
+      description: "A 2x2 mosaic of photos from your archive",
+      minWidth: "250dp",
+      minHeight: "250dp",
+      resizeMode: "horizontal|vertical",
+      updatePeriodMillis: 6 * 60 * 60 * 1000,
+    },
+    {
+      name: "QuickCapture",
+      label: "Quick capture",
+      description: "Open the camera and back up a shot immediately",
+      minWidth: "110dp",
+      minHeight: "110dp",
+      resizeMode: "horizontal|vertical",
+      updatePeriodMillis: 24 * 60 * 60 * 1000,
+    },
   ],
 };
 
@@ -73,6 +100,7 @@ const config: ExpoConfig = {
       "READ_MEDIA_VIDEO",
       "ACCESS_MEDIA_LOCATION",
       "READ_EXTERNAL_STORAGE",
+      "CAMERA",
     ],
     predictiveBackGestureEnabled: false,
     intentFilters: [
@@ -108,6 +136,13 @@ const config: ExpoConfig = {
     "react-native-fast-tflite",
     // Android certificate pinning for api.telegram.org + api.github.com.
     "./plugins/withCertificatePinning",
+    [
+      "expo-image-picker",
+      {
+        cameraPermission:
+          "PhotogramBot uses the camera for quick capture from the home-screen widget.",
+      },
+    ],
   ],
 };
 

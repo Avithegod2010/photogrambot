@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
+import { ActivityIndicator, Alert, Animated, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -66,7 +66,12 @@ const Tab = createBottomTabNavigator();
 const navigationRef = createNavigationContainerRef<any>();
 
 async function openPhotoFromUrl(url: string | null): Promise<void> {
-  if (!url || !url.startsWith("photogrambot://photo/")) return;
+  if (!url) return;
+  if (url.startsWith("photogrambot://capture")) {
+    if (!isDecoyActive()) void captureFromWidget();
+    return;
+  }
+  if (!url.startsWith("photogrambot://photo/")) return;
   if (isDecoyActive()) return;
   const id = url.replace("photogrambot://photo/", "").split("?")[0];
   if (!id) return;
@@ -77,6 +82,48 @@ async function openPhotoFromUrl(url: string | null): Promise<void> {
       navigationRef.navigate("Viewer", { photos: [photo], index: 0 });
     }
   } catch {}
+}
+
+/** Quick-capture widget: camera -> cache copy -> normal upload queue. */
+async function captureFromWidget(): Promise<void> {
+  try {
+    const ImagePicker = await import("expo-image-picker");
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Camera permission", "Allow camera access to use quick capture.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const { File, Paths } = await import("expo-file-system");
+    const name = asset.fileName ?? `capture_${Date.now()}.jpg`;
+    const dest = new File(Paths.cache, `pb_capture_${Date.now()}_${name}`);
+    await new File(asset.uri).copy(dest);
+    const { enqueueUploads, processQueue } = await import("./src/lib/uploader");
+    const n = await enqueueUploads(
+      [
+        {
+          local_id: `capture_${dest.uri}`,
+          local_uri: dest.uri,
+          filename: name,
+          folder: "Camera",
+          size: dest.size || null,
+          width: asset.width ?? null,
+          height: asset.height ?? null,
+          taken_at: Date.now(),
+          added_at: Date.now(),
+        },
+      ],
+      "manual"
+    );
+    if (n > 0) {
+      void processQueue();
+      Alert.alert("Captured", "The photo was queued for backup to your channel.");
+    }
+  } catch (e: any) {
+    Alert.alert("Quick capture failed", e?.message ?? "Could not open the camera.");
+  }
 }
 
 // Notification tap-actions (#10): a failed-uploads notification carries

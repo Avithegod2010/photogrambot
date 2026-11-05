@@ -162,6 +162,9 @@ export function requestCancelUpload(): void {
 
 export interface LocalAssetRef {
   local_id: string;
+  /** Staged file URI for share-target / quick-capture assets that are not
+   *  MediaLibrary entries. Real gallery assets omit it and are resolved by id. */
+  local_uri?: string | null;
   filename: string;
   folder: string | null;
   size: number | null;
@@ -205,7 +208,9 @@ export async function enqueueUploads(
     // A full-gallery sync can run for minutes — never stack duplicate queue
     // rows for an asset that is already pending or mid-upload.
     if (await hasActiveQueuedUpload(item.local_id)) continue;
-    let localUri = existing?.local_uri ?? null;
+    // Staged share/capture files carry their own URI; real gallery assets are
+    // resolved through MediaLibrary by id.
+    let localUri = item.local_uri ?? existing?.local_uri ?? null;
     if (!localUri) {
       try {
         const asset = new MediaLibrary.Asset(item.local_id);
