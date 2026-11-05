@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -131,6 +132,20 @@ class ShareIntentModule : Module() {
       } catch (e: Exception) {
         false
       }
+    }
+
+    // Screenshot / recents protection. Applied only while the viewer or the
+    // lock screen is mounted, then cleared when it unmounts.
+    Function("setSecureFlag") { enabled: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function false
+      activity.runOnUiThread {
+        if (enabled) {
+          activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+          activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+      }
+      true
     }
 
     Function("openInstallSettings") {

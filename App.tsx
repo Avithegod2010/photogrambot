@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -333,11 +333,30 @@ export default function App() {
     };
   }, [step, locked]);
 
+  const backgroundedAt = useRef<number | null>(null);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "background" && useSettingsStore.getState().prefs.appLock) {
-        setDecoyActive(false);
-        setLocked(true);
+      const prefs = useSettingsStore.getState().prefs;
+      if (!prefs.appLock) return;
+      if (state === "background") {
+        backgroundedAt.current = Date.now();
+        // Timeout 0 = immediate (the historical behavior). Longer timeouts
+        // leave the app unlocked in the background and lock on return if the
+        // elapsed time crossed the threshold.
+        if ((prefs.autoLockTimeoutSec ?? 0) <= 0) {
+          setDecoyActive(false);
+          setLocked(true);
+        }
+        return;
+      }
+      if (state === "active") {
+        const at = backgroundedAt.current;
+        backgroundedAt.current = null;
+        const timeout = prefs.autoLockTimeoutSec ?? 0;
+        if (at && timeout > 0 && Date.now() - at >= timeout * 1000) {
+          setDecoyActive(false);
+          setLocked(true);
+        }
       }
     });
     return () => sub.remove();

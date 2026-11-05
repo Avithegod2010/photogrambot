@@ -21,6 +21,7 @@ import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
 import { CloudUploadIcon, DownloadIcon, HeartIcon, InfoIcon, ShareIcon, TrashIcon } from "../components/icons";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
+import { setSecureFlag } from "../../modules/share-intent";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
 import { isVideoMime } from "../lib/format";
@@ -96,6 +97,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   const [infoVisible, setInfoVisible] = useState(false);
   const autoHideChrome = useSettingsStore((s) => s.prefs.viewerAutoHideChrome);
   const chromeDelaySec = useSettingsStore((s) => s.prefs.viewerChromeDelaySec);
+  const secureViewer = useSettingsStore((s) => s.prefs.secureViewer);
   const [saving, setSaving] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const zoomedRef = useRef(false);
@@ -106,6 +108,14 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     photo &&
     (photo.remote_file_id || photo.preview_file_id || photo.thumb_file_id)
   );
+
+  // Screenshot / recents protection while a private photo is on screen.
+  useEffect(() => {
+    setSecureFlag(secureViewer);
+    return () => {
+      setSecureFlag(false);
+    };
+  }, [secureViewer]);
 
   // Google Photos-style auto-hide: once the chrome is shown (or the photo
   // changes), tuck it away again after the configured delay.

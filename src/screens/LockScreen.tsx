@@ -7,6 +7,7 @@ import { Button } from "../components/ui";
 import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../lib/applock";
 import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
 import { logBreakIn } from "../lib/breakin";
+import { setSecureFlag } from "../../modules/share-intent";
 
 function fmtBackoff(ms: number): string {
   const s = Math.ceil(ms / 1000);
@@ -17,6 +18,7 @@ function fmtBackoff(ms: number): string {
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const theme = useTheme();
   const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
+  const secureViewer = useSettingsStore((s) => s.prefs.secureViewer);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pinWrong, setPinWrong] = useState(false);
@@ -28,6 +30,14 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   // is what an attacker can brute) but biometric stays live — a biometric
   // success proves ownership and clears the counter.
   const [backoffMs, setBackoffMs] = useState(0);
+
+  // Hide the lock screen (and its PIN entry) from screenshots/recents.
+  useEffect(() => {
+    setSecureFlag(secureViewer);
+    return () => {
+      setSecureFlag(false);
+    };
+  }, [secureViewer]);
   const backoffTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {

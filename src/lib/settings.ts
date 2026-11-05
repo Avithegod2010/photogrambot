@@ -67,6 +67,8 @@ export interface Prefs {
   splashAccent: boolean;
   notificationAccent: boolean;
   appLock: boolean;
+  secureViewer: boolean;
+  autoLockTimeoutSec: number;
   trashAutoPurgeDays: number;
   dbAutoBackup: boolean;
   aiCaptions: boolean;
@@ -132,6 +134,8 @@ export const defaultPrefs: Prefs = {
   splashAccent: false,
   notificationAccent: true,
   appLock: false,
+  secureViewer: true,
+  autoLockTimeoutSec: 0,
   trashAutoPurgeDays: 30,
   dbAutoBackup: true,
   aiCaptions: false,

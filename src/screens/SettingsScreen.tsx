@@ -979,6 +979,32 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           {prefs.appLock ? (
             <>
               <View style={styles.divider} />
+              <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+                Lock after backgrounding
+              </Text>
+              <ChipRow
+                options={[
+                  { key: 0, label: "Immediately" },
+                  { key: 30, label: "30 s" },
+                  { key: 60, label: "1 min" },
+                  { key: 300, label: "5 min" },
+                ]}
+                value={prefs.autoLockTimeoutSec}
+                onSelect={(v) => void update({ autoLockTimeoutSec: Number(v) })}
+                theme={theme}
+              />
+              <ToggleRow
+                title="Block screenshots in viewer & lock"
+                subtitle="FLAG_SECURE: screenshots and recent-apps thumbnails are blocked"
+                value={prefs.secureViewer}
+                onChange={(v) => void update({ secureViewer: v })}
+                theme={theme}
+              />
+            </>
+          ) : null}
+          {prefs.appLock ? (
+            <>
+              <View style={styles.divider} />
               <View style={styles.buttonGrid}>
                 <Button
                   title={pinExists ? "Change PIN" : "Set PIN"}
