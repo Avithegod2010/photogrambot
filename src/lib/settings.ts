@@ -63,6 +63,7 @@ export interface Prefs {
   widgetShowDate: boolean;
   widgetCompact: boolean;
   fontScale: number;
+  fontFamily: "system" | "serif" | "sans-serif-condensed" | "monospace";
   dateFormat: DateFormat;
   captionFields: string[];
   appIconVariant: AppIconVariant;
@@ -141,6 +142,7 @@ export const defaultPrefs: Prefs = {
   widgetShowDate: true,
   widgetCompact: false,
   fontScale: 1,
+  fontFamily: "system",
   dateFormat: "locale",
   captionFields: [...DEFAULT_CAPTION_FIELDS],
   appIconVariant: "default",

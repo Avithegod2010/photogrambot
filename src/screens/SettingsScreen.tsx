@@ -875,6 +875,20 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             theme={theme}
           />
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Font family
+          </Text>
+          <ChipRow
+            options={[
+              { key: "system", label: "System" },
+              { key: "serif", label: "Serif" },
+              { key: "sans-serif-condensed", label: "Condensed" },
+              { key: "monospace", label: "Mono" },
+            ]}
+            value={prefs.fontFamily}
+            onSelect={(v) => void update({ fontFamily: v as any })}
+            theme={theme}
+          />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
             Date format
           </Text>
           <ChipRow
