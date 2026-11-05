@@ -81,6 +81,7 @@ import {
   shareLocalBackup,
   localBackupPath,
   importFromLocalFile,
+  rotateBackupPassphrase,
 } from "../lib/backup";
 import type { ThemeMode } from "../lib/settings";
 import { passwordStrength } from "../lib/passwordStrength";
@@ -109,6 +110,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [recoveryInput, setRecoveryInput] = useState("");
   const [recoveryExists, setRecoveryExists] = useState(false);
   const [recoveryCreatedAt, setRecoveryCreatedAt] = useState<number | null>(null);
+  const [rotateDialog, setRotateDialog] = useState(false);
+  const [rotateOld, setRotateOld] = useState("");
+  const [rotateNew, setRotateNew] = useState("");
   const [bgSync, setBgSync] = useState<{ available: boolean; registered: boolean } | null>(null);
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [aiModelDraft, setAiModelDraft] = useState(prefs.aiModel);
@@ -1560,6 +1564,17 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                   ? `A recovery key${recoveryCreatedAt ? ` created ${new Date(recoveryCreatedAt).toLocaleDateString()}` : ""} can unlock this passphrase. Store it offline — anyone with it can read your backup.`
                   : "Create a one-time recovery key so a forgotten passphrase does not lock you out of the index backup."}
               </Text>
+              <Button
+                title="Rotate passphrase"
+                variant="outlined"
+                theme={theme}
+                style={{ marginTop: 10 }}
+                onPress={() => setRotateDialog(true)}
+              />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+                Re-encrypts the pinned index backup with a new passphrase. Photos and videos
+                are not re-uploaded. A recovery key must be regenerated afterwards.
+              </Text>
             </>
           ) : null}
           <View style={styles.buttonGrid}>
@@ -1968,6 +1983,67 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                   );
                 } catch (e: any) {
                   Alert.alert("Recovery key", e?.message ?? "Could not unlock the passphrase.");
+                }
+              })();
+            }}
+          />
+        </View>
+      </Dialog>
+
+      <Dialog
+        visible={rotateDialog}
+        theme={theme}
+        title="Rotate backup passphrase"
+        message="The current passphrase is checked against the pinned backup, then the index is re-encrypted with the new one and pinned again. Media is untouched."
+      >
+        <TextField
+          value={rotateOld}
+          onChangeText={setRotateOld}
+          placeholder="Current passphrase"
+          secureTextEntry
+          theme={theme}
+        />
+        <View style={{ height: 8 }} />
+        <TextField
+          value={rotateNew}
+          onChangeText={setRotateNew}
+          placeholder="New passphrase (8+ characters)"
+          secureTextEntry
+          theme={theme}
+        />
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Button
+            title="Cancel"
+            variant="text"
+            theme={theme}
+            onPress={() => {
+              setRotateDialog(false);
+              setRotateOld("");
+              setRotateNew("");
+            }}
+          />
+          <Button
+            title="Rotate"
+            theme={theme}
+            onPress={() => {
+              void (async () => {
+                setBusyLabel("Re-encrypting the index backup.");
+                try {
+                  await rotateBackupPassphrase(rotateOld, rotateNew);
+                  setPassDraft(rotateNew);
+                  setRecoveryExists(false);
+                  setRecoveryCreatedAt(null);
+                  setRotateDialog(false);
+                  setRotateOld("");
+                  setRotateNew("");
+                  Alert.alert(
+                    "Passphrase rotated",
+                    "The pinned backup now uses the new passphrase. Create a new recovery key if you were relying on one."
+                  );
+                } catch (e: any) {
+                  Alert.alert("Rotation failed", e?.message ?? "Could not rotate the passphrase.");
+                } finally {
+                  setBusyLabel(null);
                 }
               })();
             }}
