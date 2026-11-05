@@ -8,7 +8,6 @@ import {
   Linking,
   Modal,
   Pressable,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +16,7 @@ import {
 } from "../rn";
 import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../store/useLibraryStore";
@@ -340,7 +340,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }, [localAssets, decoy, dateFormat]);
 
   // Scrubber support: measured section offsets, refreshed on every layout.
-  const localListRef = useRef<FlatList<any>>(null);
+  const localListRef = useRef<FlashListRef<any>>(null);
   const localSectionYs = useRef<number[]>([]);
   const [localScrollY, setLocalScrollY] = useState(0);
 
@@ -1121,7 +1121,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             paintState.current = null;
           }}
         >
-        <FlatList
+        <FlashList
           data={sections}
           style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
           // Size-sorted results interleave dates, so the same label can head
@@ -1135,9 +1135,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           onScroll={(e) => {
             paintScrollY.current = e.nativeEvent.contentOffset.y;
           }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
-          }
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           contentContainerStyle={{ paddingBottom: 120 }}
           ListHeaderComponent={
             !searchResults && !decoy ? (
@@ -1240,7 +1239,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : viewMode !== "days" ? (
         <PeriodJumpList mode={viewMode} navigation={navigation} theme={theme} />
       ) : (
-        <FlatList
+        <FlashList
           ref={localListRef}
           data={localSections}
           style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
@@ -1251,9 +1250,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           scrollEventThrottle={32}
           onEndReached={loadMoreLocal}
           onEndReachedThreshold={0.6}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
-          }
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           contentContainerStyle={{ paddingBottom: 120 }}
           ListHeaderComponent={
             !decoy ? (
