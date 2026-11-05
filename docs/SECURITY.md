@@ -30,3 +30,21 @@ routine leaf renewal under the same intermediate/root does not break the app.
 Pinning is intentionally static; there is no runtime toggle. A wrong pin fails
 closed for the pinned hosts only (release downloads on
 `objects.githubusercontent.com` are not pinned).
+
+## Local database encryption (SQLCipher)
+
+`expo-sqlite` is compiled with `useSQLCipher` (config plugin + committed
+`android/gradle.properties`). The app-level `android/app/build.gradle` also
+declares `io.github.ronickg:openssl:3.3.2-1`, because expo-sqlite marks that
+dependency `compileOnly`; the app must package `libcrypto` at runtime.
+
+The key is 32 random bytes stored in Android Keystore via SecureStore
+(`pb_db_encryption_key`). `getDb()` applies `PRAGMA key` before any other
+statement when the `dbEncryption` preference is on. Enabling encryption from
+Settings uses SQLCipher's `sqlcipher_export` into a new file, swaps it into
+place, then reopens and verifies the key. The key is deliberately excluded
+from channel backups: a restored index starts plaintext until the user opts in
+again.
+
+Debug builds use a debug-only network-security-config that permits cleartext
+for Metro; release builds keep cleartext disabled.
