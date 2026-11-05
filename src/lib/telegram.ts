@@ -86,6 +86,7 @@ export interface TgVideo {
 export interface TgMessage {
   message_id: number;
   date: number;
+  from?: TgUser;
   chat: { id: number; type: string; title?: string; username?: string };
   photo?: TgPhotoSize[];
   document?: TgDocument;
@@ -154,9 +155,12 @@ export async function getChat(chatId: string | number, tokenOverride?: string): 
   return call<any>("getChat", { chat_id: chatId }, tokenOverride);
 }
 
-export async function getChatPinnedMessage(chatId: string | number): Promise<TgMessage | null> {
+export async function getChatPinnedMessage(
+  chatId: string | number,
+  tokenOverride?: string
+): Promise<TgMessage | null> {
   try {
-    const chat = await getChat(chatId);
+    const chat = await getChat(chatId, tokenOverride);
     return chat.pinned_message ?? null;
   } catch {
     return null;
@@ -250,6 +254,92 @@ export async function getChatAdministrators(
     { chat_id: String(chatId) },
     tokenOverride
   );
+}
+
+/**
+ * Copies a message into another chat without re-uploading the file. Works
+ * across any chats the bot can see; returns the new message id.
+ */
+export async function copyMessage(
+  destChatId: string | number,
+  fromChatId: string | number,
+  messageId: number,
+  tokenOverride?: string
+): Promise<number | null> {
+  try {
+    const res = await call<{ message_id: number }>(
+      "copyMessage",
+      {
+        chat_id: String(destChatId),
+        from_chat_id: String(fromChatId),
+        message_id: messageId,
+      },
+      tokenOverride
+    );
+    return res?.message_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function createChatInviteLink(
+  chatId: string | number,
+  name?: string,
+  tokenOverride?: string
+): Promise<string | null> {
+  try {
+    const res = await call<{ invite_link: string }>(
+      "createChatInviteLink",
+      {
+        chat_id: String(chatId),
+        ...(name ? { name: name.slice(0, 32) } : {}),
+      },
+      tokenOverride
+    );
+    return res?.invite_link ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setWebhook(
+  url: string,
+  secretToken?: string,
+  tokenOverride?: string
+): Promise<boolean> {
+  try {
+    await call(
+      "setWebhook",
+      {
+        url,
+        ...(secretToken ? { secret_token: secretToken.slice(0, 64) } : {}),
+        allowed_updates: ["channel_post", "message", "callback_query"],
+      },
+      tokenOverride
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteWebhook(tokenOverride?: string): Promise<boolean> {
+  try {
+    await call("deleteWebhook", { drop_pending_updates: false }, tokenOverride);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getWebhookInfo(
+  tokenOverride?: string
+): Promise<{ url?: string; pending_update_count?: number; last_error_message?: string } | null> {
+  try {
+    return await call("getWebhookInfo", undefined, tokenOverride);
+  } catch {
+    return null;
+  }
 }
 
 export interface FileSendOptions {

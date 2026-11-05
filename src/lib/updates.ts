@@ -5,10 +5,12 @@ import {
   kvGet,
   kvSet,
 } from "./db";
-import { getUpdates, type TgUpdate } from "./telegram";
+import { type TgUpdate } from "./telegram";
+import { fetchUpdates } from "./webhook";
 import { parseCaption } from "./caption";
-import { getChannelId } from "./settings";
-import { handleCallbackQuery, handleRemoteCommand } from "./remote";
+import { getChannelId, loadPrefs } from "./settings";
+import { handleCallbackQuery, handleRemoteCommand, isChannelAdmin } from "./remote";
+import { findAdmin, parseRemoteAdmins, type RemoteRole } from "./remoteAuth";
 import { logDiag } from "./diaglog";
 
 export interface UpdatesResult {
@@ -32,35 +34,46 @@ const NOTHING: IngestResult = { newPhotos: 0, backups: 0, commands: 0 };
 // photo inserts are guarded by message-id/hash lookups and remote commands are
 // idempotent or explicitly armed.
 async function ingestUpdate(u: TgUpdate, channelId: string): Promise<IngestResult> {
-  // Inline-keyboard presses arrive as callback_query updates (no channel_post).
-  // Only callbacks attached to the configured channel are considered, and the
-  // handler verifies the presser is a channel admin before acting.
+  const prefs = await loadPrefs();
+  const admins = parseRemoteAdmins(prefs.remoteAdmins);
+
+  // Inline-keyboard presses arrive as callback_query updates. Channel
+  // callbacks require a channel admin; private-chat callbacks require the
+  // presser to be on the allowlist (with their role).
   if (u.callback_query) {
-    const cbChatId = String(u.callback_query.message?.chat?.id ?? "");
-    if (cbChatId !== channelId) return NOTHING;
-    const handled = await handleCallbackQuery(u.callback_query, channelId);
+    const chat = u.callback_query.message?.chat;
+    const fromId = u.callback_query.from?.id;
+    if (!chat || !fromId) return NOTHING;
+    const cbChatId = String(chat.id);
+    let role: RemoteRole | null = null;
+    if (cbChatId === channelId) {
+      role = (await isChannelAdmin(channelId, fromId)) ? "admin" : null;
+    } else if (chat.type === "private") {
+      role = findAdmin(admins, fromId)?.role ?? null;
+    }
+    if (!role) return NOTHING;
+    const handled = await handleCallbackQuery(u.callback_query, channelId, role, cbChatId);
     return handled ? { ...NOTHING, commands: 1 } : NOTHING;
   }
+
   const msg = u.channel_post ?? u.message;
   if (!msg) return NOTHING;
-  // getUpdates returns messages from every chat the bot can see; only ingest
-  // the configured channel so foreign chats can't collide with our message_id
-  // namespace. Callers only poll after setup, so channelId is a real id here.
-  if (String(msg.chat.id) !== channelId) return NOTHING;
-  // Bot commands (/status /sync /pause /resume /delete) — channel posts ONLY.
-  // Channel-post restriction is the authorization model: in a private channel
-  // only admins can post, so every command sender is an admin. If the
-  // configured chat were a group, member messages arrive as u.message and
-  // commands stay dead (security audit: chat-membership alone would let any
-  // member drive the device). Private chats can't match a -100 channel id, so
-  // they're excluded by the filter above anyway.
-  if (
-    u.channel_post &&
-    u.channel_post.text &&
-    (await handleRemoteCommand(u.channel_post, String(u.channel_post.chat.id)))
-  ) {
+  const chatId = String(msg.chat.id);
+  const isChannel = chatId === channelId;
+  let actorRole: RemoteRole | null = null;
+  if (isChannel) {
+    // Channel posts are the owner/admin path (only channel admins can post in
+    // the usual private-channel setup).
+    actorRole = "admin";
+  } else if (!u.channel_post && msg.chat.type === "private") {
+    actorRole = findAdmin(admins, msg.from?.id)?.role ?? null;
+  }
+  if (!actorRole) return NOTHING;
+  if (msg.text && (await handleRemoteCommand(msg, isChannel ? channelId : chatId, actorRole))) {
     return { ...NOTHING, commands: 1 };
   }
+  // Direct messages are command-only; photo ingestion stays channel-scoped.
+  if (!isChannel) return NOTHING;
   const parsed = parseCaption(msg.caption);
   if (parsed.isDbBackup) return { ...NOTHING, backups: 1 };
   const existing = await getPhotoByMessageId(msg.message_id);
@@ -164,7 +177,7 @@ export async function pollUpdates(): Promise<UpdatesResult> {
   if (!Number.isFinite(offset) || offset < 0) offset = 0;
   let updates: TgUpdate[] = [];
   try {
-    updates = await getUpdates(offset > 0 ? offset : -1, 0);
+    updates = await fetchUpdates(offset);
   } catch {
     return { processed: 0, newPhotos: 0, backups: 0, commands: 0 };
   }

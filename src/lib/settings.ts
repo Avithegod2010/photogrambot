@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { isDecoyActive } from "./applock";
 import { DEFAULT_CAPTION_FIELDS } from "./captionFields";
 import type { VideoCompressionTarget } from "./videoCompress";
+import type { RemoteAdmin } from "./remoteAuth";
 
 export { DEFAULT_CAPTION_FIELDS, CAPTION_FIELD_LABELS } from "./captionFields";
 
@@ -109,6 +110,14 @@ export interface Prefs {
   mirrorEnabled: boolean;
   mirrorProfileId: string;
   widgetFavoritesOnly: boolean;
+  remoteAdmins: RemoteAdmin[];
+  webhookMode: boolean;
+  webhookRelayUrl: string;
+  webhookSecret: string;
+  publicReadOnly: boolean;
+  crashReporting: boolean;
+  crashEndpoint: string;
+  devicePaused: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -194,6 +203,14 @@ export const defaultPrefs: Prefs = {
   mirrorEnabled: false,
   mirrorProfileId: "",
   widgetFavoritesOnly: false,
+  remoteAdmins: [],
+  webhookMode: false,
+  webhookRelayUrl: "",
+  webhookSecret: "",
+  publicReadOnly: false,
+  crashReporting: false,
+  crashEndpoint: "",
+  devicePaused: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",

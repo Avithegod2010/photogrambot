@@ -525,6 +525,20 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
+        <Card theme={theme} onPress={() => navigation.navigate("Remote")}>
+          <View style={styles.folderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                Remote & sharing
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                Admin allowlist, devices, webhook relay, public link, channel merge
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+          </View>
+        </Card>
+
         <SectionLabel text={t("settings.backup", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Button

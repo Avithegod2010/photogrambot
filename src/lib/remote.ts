@@ -47,15 +47,19 @@ import {
   addToAlbum,
   searchPhotos,
   setFavorite,
+  getPhoto,
+  getAlbums,
 } from "./db";
 import {
   sendMessage,
   deleteMessage,
   answerCallbackQuery,
   getChatAdministrators,
+  type InlineKeyboardButton,
   type TgCallbackQuery,
   type TgMessage,
 } from "./telegram";
+import { requiredRoleForCommand, roleAtLeast, type RemoteRole } from "./remoteAuth";
 import { tokenForPhoto } from "./destinations";
 import { formatBytes, formatDate } from "./format";
 
@@ -117,15 +121,19 @@ const HELP_TEXT = [
   "/album <name> — reply to a photo to add it to an album",
   "/delete — reply to a photo to trash + delete it",
   "/restore — reply to a photo to save the original here",
-  "/wipe — arm/confirm a local-copy wipe (two-step)",
-  "/ping — check the bot is alive",
+  "/wipe - arm/confirm a local-copy wipe (two-step)",
+  "/queue - pending/failed/backed-up counts",
+  "/devices - devices seen in the archive",
+  "/revoke <deviceId>, /unrevoke <deviceId> - block/resume this device",
+  "/pause <deviceId>, /resume <deviceId> - target one device",
+  "/ping - check the bot is alive",
 ].join("\n");
 
 // getChatAdministrators is one network call; cache for five minutes so a burst
 // of button presses doesn't hammer Telegram.
 let adminCache: { at: number; ids: Set<number> } | null = null;
 
-async function isChannelAdmin(chatId: string, userId: number): Promise<boolean> {
+export async function isChannelAdmin(chatId: string, userId: number): Promise<boolean> {
   try {
     if (!adminCache || Date.now() - adminCache.at > 5 * 60 * 1000) {
       const admins = await getChatAdministrators(chatId);
@@ -147,40 +155,151 @@ async function isChannelAdmin(chatId: string, userId: number): Promise<boolean> 
 // by updates.ts.
 export async function handleCallbackQuery(
   cb: TgCallbackQuery,
-  chatId: string
+  chatId: string,
+  actorRole: RemoteRole = "admin",
+  replyChatId: string = chatId
 ): Promise<boolean> {
   const data = cb.data ?? "";
-  if (!data.startsWith("act:")) return false;
-  const fromId = cb.from?.id;
-  if (!fromId || !(await isChannelAdmin(chatId, fromId))) {
-    await answerCallbackQuery(cb.id, "Not authorized (channel admin only)", true);
+  if (!/^(act|del|wipe|alb|find):/.test(data)) return false;
+  const replyTo = cb.message?.message_id ?? 0;
+  const required: RemoteRole =
+    data === "del:yes" || data === "wipe:yes"
+      ? "admin"
+      : data === "act:sync" ||
+          data === "act:pause" ||
+          data === "act:resume" ||
+          data.startsWith("alb:") ||
+          data.startsWith("find:")
+        ? "write"
+        : "read";
+  if (!roleAtLeast(actorRole, required)) {
+    await answerCallbackQuery(cb.id, `Not authorized (needs ${required})`, true);
     return true;
   }
   try {
+    if (data.startsWith("find:")) {
+      const offset = parseInt(data.slice(5), 10) || 0;
+      const query = (await kvGet("find_query")) ?? "";
+      if (!query) {
+        await answerCallbackQuery(cb.id, "Search expired - run /find again", true);
+        return true;
+      }
+      const rows = await searchPhotos(query, undefined, offset + 5);
+      const page = rows.slice(offset, offset + 5);
+      if (page.length === 0) {
+        await answerCallbackQuery(cb.id, "No more matches");
+        return true;
+      }
+      const lines = page.map((p) => `• ${p.filename} - ${formatDate(p.taken_at)}`);
+      const buttons: InlineKeyboardButton[][] = [];
+      if (rows.length >= offset + 5) {
+        buttons.push([{ text: "More results", callback_data: `find:${offset + 5}` }]);
+      }
+      await sendMessage(replyChatId, `Matches ${offset + 1}-${offset + page.length}:\n${lines.join("\n")}`, {
+        replyToMessageId: replyTo || undefined,
+        ...(buttons.length ? { inlineKeyboard: buttons } : {}),
+      });
+      await answerCallbackQuery(cb.id, "Done");
+      return true;
+    }
+
+    if (data.startsWith("alb:")) {
+      const albumId = parseInt(data.slice(4), 10);
+      const photoId = await kvGet("pending_album_photo");
+      if (!albumId || !photoId) {
+        await answerCallbackQuery(cb.id, "Album selection expired", true);
+        return true;
+      }
+      const album = (await getAlbums()).find((a) => a.id === albumId);
+      if (!album) {
+        await answerCallbackQuery(cb.id, "Unknown album", true);
+        return true;
+      }
+      await addToAlbum(albumId, [photoId]);
+      await kvSet("pending_album_photo", "");
+      await sendMessage(replyChatId, `Added to album "${album.name}".`, {
+        replyToMessageId: replyTo || undefined,
+      });
+      await answerCallbackQuery(cb.id, "Added");
+      return true;
+    }
+
+    if (data === "del:yes" || data === "del:no") {
+      const photoId = await kvGet("pending_delete_id");
+      await kvSet("pending_delete_id", "");
+      if (data === "del:no") {
+        await sendMessage(replyChatId, "Delete cancelled.", {
+          replyToMessageId: replyTo || undefined,
+        });
+        await answerCallbackQuery(cb.id, "Cancelled");
+        return true;
+      }
+      if (!photoId) {
+        await answerCallbackQuery(cb.id, "Nothing to delete (expired)", true);
+        return true;
+      }
+      const photo = await getPhoto(photoId);
+      if (!photo) {
+        await answerCallbackQuery(cb.id, "Photo no longer in the index", true);
+        return true;
+      }
+      const token = await tokenForPhoto(photo);
+      const ids = new Set<number>();
+      if (photo.message_id) ids.add(photo.message_id);
+      if (photo.preview_message_id) ids.add(photo.preview_message_id);
+      for (const id of ids) await deleteMessage(chatId, id, token ?? undefined);
+      await addToTrash(photo.id);
+      await markTrashRemoteDeleted(photo.id);
+      await sendMessage(replyChatId, `Deleted "${photo.filename}" (moved to app trash).`, {
+        replyToMessageId: replyTo || undefined,
+      });
+      await answerCallbackQuery(cb.id, "Deleted");
+      return true;
+    }
+
+    if (data === "wipe:yes" || data === "wipe:no") {
+      if (data === "wipe:no") {
+        await kvSet(WIPE_ARM_KEY, "0");
+        await sendMessage(replyChatId, "Wipe cancelled.", {
+          replyToMessageId: replyTo || undefined,
+        });
+        await answerCallbackQuery(cb.id, "Cancelled");
+        return true;
+      }
+      const armedAt = parseInt((await kvGet(WIPE_ARM_KEY)) ?? "0", 10) || 0;
+      if (Date.now() - armedAt > WIPE_ARM_WINDOW_MS) {
+        await answerCallbackQuery(cb.id, "Wipe expired - send /wipe again", true);
+        return true;
+      }
+      await performWipe(replyChatId, replyTo);
+      await answerCallbackQuery(cb.id, "Wiping");
+      return true;
+    }
+
     switch (data) {
       case "act:status":
-        await replyStatus(chatId, cb.message?.message_id ?? 0);
+        await replyStatus(replyChatId, replyTo);
         break;
       case "act:stats": {
         const { buildDigestText } = await import("./digest");
         const { text } = await buildDigestText("PhotogramBot report");
-        await sendMessage(chatId, text, { replyToMessageId: cb.message?.message_id || undefined });
+        await sendMessage(replyChatId, text, { replyToMessageId: replyTo || undefined });
         break;
       }
       case "act:sync": {
         const { runSyncNow } = await import("./sync");
         const r = await runSyncNow();
         await sendMessage(
-          chatId,
+          replyChatId,
           `Sync complete: ${r.scanned} photos scanned, ${r.enqueued} new queued.`,
-          { replyToMessageId: cb.message?.message_id || undefined }
+          { replyToMessageId: replyTo || undefined }
         );
         break;
       }
       case "act:pause":
         await kvSet(PAUSE_KEY, "1");
-        await sendMessage(chatId, "Auto-sync paused. Press Resume or send /resume.", {
-          replyToMessageId: cb.message?.message_id || undefined,
+        await sendMessage(replyChatId, "Auto-sync paused. Press Resume or send /resume.", {
+          replyToMessageId: replyTo || undefined,
         });
         break;
       case "act:resume": {
@@ -188,19 +307,25 @@ export async function handleCallbackQuery(
         const { runSyncNow } = await import("./sync");
         const r = await runSyncNow();
         await sendMessage(
-          chatId,
+          replyChatId,
           `Resumed. Scanned ${r.scanned} photos, ${r.enqueued} new queued.`,
-          { replyToMessageId: cb.message?.message_id || undefined }
+          { replyToMessageId: replyTo || undefined }
         );
         break;
       }
       case "act:queue": {
         const s = await getStats();
         await sendMessage(
-          chatId,
+          replyChatId,
           `Queue: ${s.pending} pending, ${s.failed} failed, ${s.uploaded} backed up.`,
-          { replyToMessageId: cb.message?.message_id || undefined }
+          { replyToMessageId: replyTo || undefined }
         );
+        break;
+      }
+      case "act:devices": {
+        const { getDeviceSummaries } = await import("./devices");
+        const { text } = await getDeviceSummaries();
+        await sendMessage(replyChatId, text, { replyToMessageId: replyTo || undefined });
         break;
       }
       default:
@@ -214,34 +339,47 @@ export async function handleCallbackQuery(
   return true;
 }
 
+async function performWipe(chatId: string, replyTo: number): Promise<void> {
+  await kvSet(WIPE_ARM_KEY, "0");
+  await sendMessage(chatId, "Wiping local copies of backed-up photos.", {
+    replyToMessageId: replyTo || undefined,
+  });
+  try {
+    const { wipeLocalCopies } = await import("./maintenance");
+    const r = await wipeLocalCopies();
+    await sendMessage(
+      chatId,
+      `Wipe complete: ${r.deleted} local copies deleted` +
+        (r.freedBytes > 0 ? ` (${formatBytes(r.freedBytes)} freed)` : "") +
+        (r.kept > 0 ? `, ${r.kept} kept (cloud copy failed verification or delete was declined)` : "") +
+        ".",
+      { replyToMessageId: replyTo || undefined }
+    );
+  } catch (e: any) {
+    await sendMessage(chatId, `Wipe failed: ${e?.message ?? "unknown error"}.`, {
+      replyToMessageId: replyTo || undefined,
+    });
+  }
+}
+
 // Returns true if the message was a command (caller should skip ingestion).
 export async function handleRemoteCommand(
   msg: TgMessage,
-  chatId: string
+  chatId: string,
+  actorRole: RemoteRole = "admin"
 ): Promise<boolean> {
   const text = (msg.text ?? "").trim();
   if (!text.startsWith("/")) return false;
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
-  if (
-    ![
-      "/status",
-      "/stats",
-      "/sync",
-      "/pause",
-      "/resume",
-      "/delete",
-      "/find",
-      "/search",
-      "/last",
-      "/favorite",
-      "/album",
-      "/help",
-      "/ping",
-      "/restore",
-      "/wipe",
-    ].includes(cmd)
-  ) {
-    return false; // unknown slash command — not ours; let ingestion proceed
+  const required = requiredRoleForCommand(cmd);
+  if (!required) return false; // unknown slash command - let ingestion proceed
+  if (!roleAtLeast(actorRole, required)) {
+    await sendMessage(
+      chatId,
+      `Not authorized: ${cmd} requires the "${required}" role (you have "${actorRole}").`,
+      { replyToMessageId: msg.message_id }
+    );
+    return true;
   }
 
   if (cmd === "/status") {
@@ -312,9 +450,28 @@ export async function handleRemoteCommand(
     } else {
       const name = text.split(/\s+/).slice(1).join(" ").trim().slice(0, 100);
       if (!name) {
-        await sendMessage(chatId, "Usage: reply /album <name> to a backed-up photo.", {
-          replyToMessageId: msg.message_id,
-        });
+        // No name supplied: offer the existing albums as tappable buttons,
+        // remembering which photo this picker belongs to.
+        try {
+          const albums = (await getAlbums()).slice(0, 24);
+          if (albums.length > 0) {
+            await kvSet("pending_album_photo", photo.id);
+            await sendMessage(chatId, `Pick an album for "${photo.filename}":`, {
+              replyToMessageId: msg.message_id,
+              inlineKeyboard: albums.map((a) => [
+                { text: a.name.slice(0, 30), callback_data: `alb:${a.id}` },
+              ]),
+            });
+          } else {
+            await sendMessage(chatId, "No albums yet. Usage: reply /album <name> to a photo.", {
+              replyToMessageId: msg.message_id,
+            });
+          }
+        } catch (e: any) {
+          await sendMessage(chatId, `Album list failed: ${e?.message ?? "unknown error"}`, {
+            replyToMessageId: msg.message_id,
+          });
+        }
         return true;
       }
       try {
@@ -340,11 +497,21 @@ export async function handleRemoteCommand(
       });
     }
   } else if (cmd === "/pause") {
+    const targetId = text.split(/\s+/)[1]?.trim();
+    if (targetId) {
+      const { isThisDevice } = await import("./devices");
+      if (!(await isThisDevice(targetId))) return true; // another phone's command
+    }
     await kvSet(PAUSE_KEY, "1");
     await sendMessage(chatId, "Auto-sync paused. Send /resume to continue.", {
       replyToMessageId: msg.message_id,
     });
   } else if (cmd === "/resume") {
+    const targetId = text.split(/\s+/)[1]?.trim();
+    if (targetId) {
+      const { isThisDevice } = await import("./devices");
+      if (!(await isThisDevice(targetId))) return true;
+    }
     await kvSet(PAUSE_KEY, "0");
     // Release + immediate top-up scan so the effect is observable. Like the
     // in-app "Sync full gallery now", this skips the Wi-Fi/charging gates —
@@ -383,8 +550,10 @@ export async function handleRemoteCommand(
       }
       const lines = results.map((p) => `• ${p.filename} — ${formatDate(p.taken_at)}`);
       lines.push("Reply /restore to a photo's backup message to save the original to this phone.");
+      await kvSet("find_query", query);
       await sendMessage(chatId, `Top ${results.length} matches:\n${lines.join("\n")}`, {
         replyToMessageId: msg.message_id,
+        inlineKeyboard: [[{ text: "More results", callback_data: "find:5" }]],
       });
     } catch (e: any) {
       await sendMessage(chatId, `Search failed: ${e?.message ?? "unknown error"}`, {
@@ -431,8 +600,16 @@ export async function handleRemoteCommand(
         chatId,
         "This erases the LOCAL copies of ALL backed-up photos from this device. " +
           "The originals stay in this channel and the app index keeps working. " +
-          "To confirm, send /wipe confirm within 5 minutes.",
-        { replyToMessageId: msg.message_id }
+          "Press the button below (or send /wipe confirm) within 5 minutes.",
+        {
+          replyToMessageId: msg.message_id,
+          inlineKeyboard: [
+            [
+              { text: "Confirm wipe", callback_data: "wipe:yes" },
+              { text: "Cancel", callback_data: "wipe:no" },
+            ],
+          ],
+        }
       );
       return true;
     }
@@ -445,28 +622,7 @@ export async function handleRemoteCommand(
       );
       return true;
     }
-    await kvSet(WIPE_ARM_KEY, "0");
-    await sendMessage(chatId, "Wiping local copies of backed-up photos…", {
-      replyToMessageId: msg.message_id,
-    });
-    try {
-      const { wipeLocalCopies } = await import("./maintenance");
-      const r = await wipeLocalCopies();
-      await sendMessage(
-        chatId,
-        `Wipe complete: ${r.deleted} local copies deleted` +
-          (r.freedBytes > 0 ? ` (${formatBytes(r.freedBytes)} freed)` : "") +
-          (r.kept > 0 ? `, ${r.kept} kept (cloud copy failed verification or delete was declined)` : "") +
-          ".",
-        { replyToMessageId: msg.message_id }
-      );
-    } catch (e: any) {
-      // A failed wipe is reported, not retried automatically — the owner can
-      // send /wipe again. Photos whose verification failed stay on device.
-      await sendMessage(chatId, `Wipe failed: ${e?.message ?? "unknown error"}.`, {
-        replyToMessageId: msg.message_id,
-      });
-    }
+    await performWipe(chatId, msg.message_id);
   } else if (cmd === "/delete") {
     const target = msg.reply_to_message;
     if (!target) {
@@ -486,23 +642,71 @@ export async function handleRemoteCommand(
       );
       return true;
     }
-    const token = await tokenForPhoto(photo);
-    // The reply may point at the original OR the preview post — delete every
-    // known message id, deduped. deleteMessage fails silently on
-    // already-gone messages, so replays stay idempotent.
-    const ids = new Set<number>([target.message_id]);
-    if (photo.message_id) ids.add(photo.message_id);
-    if (photo.preview_message_id) ids.add(photo.preview_message_id);
-    for (const id of ids) {
-      await deleteMessage(chatId, id, token ?? undefined);
-    }
-    await addToTrash(photo.id);
-    await markTrashRemoteDeleted(photo.id);
+    // Two-step destructive action: the inline keyboard is the confirmation.
+    await kvSet("pending_delete_id", photo.id);
     await sendMessage(
       chatId,
-      `Deleted "${photo.filename}" (moved to app trash).`,
+      `Delete "${photo.filename}"?\nThis trashes it locally and permanently removes the channel message.`,
+      {
+        replyToMessageId: msg.message_id,
+        inlineKeyboard: [
+          [
+            { text: "Delete forever", callback_data: "del:yes" },
+            { text: "Cancel", callback_data: "del:no" },
+          ],
+        ],
+      }
+    );
+  } else if (cmd === "/queue") {
+    const s = await getStats();
+    await sendMessage(
+      chatId,
+      `Queue: ${s.pending} pending, ${s.failed} failed, ${s.uploaded} backed up, ${s.trashed} trashed.`,
       { replyToMessageId: msg.message_id }
     );
+  } else if (cmd === "/devices") {
+    try {
+      const { getDeviceSummaries } = await import("./devices");
+      const { text } = await getDeviceSummaries();
+      await sendMessage(chatId, text, { replyToMessageId: msg.message_id });
+    } catch (e: any) {
+      await sendMessage(chatId, `Devices failed: ${e?.message ?? "unknown error"}`, {
+        replyToMessageId: msg.message_id,
+      });
+    }
+  } else if (cmd === "/revoke" || cmd === "/unrevoke") {
+    const targetId = text.split(/\s+/).slice(1)[0]?.trim();
+    if (!targetId) {
+      await sendMessage(chatId, `Usage: ${cmd} <deviceId>`, {
+        replyToMessageId: msg.message_id,
+      });
+      return true;
+    }
+    try {
+      const { setDeviceRevoked } = await import("./devices");
+      const { isThisDevice } = await import("./devices");
+      const mine = await isThisDevice(targetId);
+      if (!mine) {
+        await sendMessage(
+          chatId,
+          `Device ${targetId} isn't this phone. Only the target device can apply the flag; it will act when it sees this command.`,
+          { replyToMessageId: msg.message_id }
+        );
+        return true;
+      }
+      await setDeviceRevoked(cmd === "/revoke");
+      await sendMessage(
+        chatId,
+        cmd === "/revoke"
+          ? "This device is now revoked: auto-sync and manual uploads are blocked. Send /unrevoke to restore."
+          : "This device is unrevoked; uploads can resume.",
+        { replyToMessageId: msg.message_id }
+      );
+    } catch (e: any) {
+      await sendMessage(chatId, `Device update failed: ${e?.message ?? "unknown error"}`, {
+        replyToMessageId: msg.message_id,
+      });
+    }
   }
   return true;
 }

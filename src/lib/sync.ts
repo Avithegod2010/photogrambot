@@ -39,6 +39,11 @@ export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
   // /pause from the channel (remote.ts) is the cheapest gate — check it first
   // so a paused device never even touches the network/battery probes.
   if (await isRemotePaused()) return false;
+  // Per-device stop: /revoke or /pause <thisDeviceId>.
+  try {
+    const { thisDeviceBlocked } = await import("./devices");
+    if (await thisDeviceBlocked()) return false;
+  } catch {}
   // Low-storage guard (storage.ts): automatic work stops below the critical
   // threshold — a full disk turns uploads/preview writes into silent failures.
   // Manual syncs never hit this path.
