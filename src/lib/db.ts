@@ -2777,7 +2777,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
     }
     for (const a of data.albums ?? []) {
       await d.runAsync(
-        "INSERT OR IGNORE INTO albums (id, name, created_at, locked, query, cover_photo_id) VALUES (?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO albums (id, name, created_at, locked, query, cover_photo_id, sort_order) VALUES (?,?,?,?,?,?,?)",
         [
           a.id,
           a.name,
@@ -2785,6 +2785,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
           a.locked ?? null,
           typeof a.query === "string" ? a.query.slice(0, 100_000) : null,
           typeof a.cover_photo_id === "string" ? a.cover_photo_id : null,
+          Number.isFinite(a.sort_order) ? a.sort_order : 0,
         ]
       );
     }

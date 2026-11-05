@@ -38,10 +38,20 @@ export async function panicWipe(): Promise<void> {
   } catch {
     // Continue: secrets are more important than a stale file.
   }
-  // 2. Cached media / thumbnails.
+  // 2. Cached media / thumbnails / staged share and restore files.
   try {
     const cache = new Directory(Paths.cache, "photogram");
     if (cache.exists) cache.delete();
+  } catch {}
+  try {
+    // Anything else in the cache may be a staged copy of a private original
+    // (share import, restore download, ZIP export). Clear it all.
+    const cache = new Directory(Paths.cache);
+    for (const entry of cache.list()) {
+      try {
+        entry.delete();
+      } catch {}
+    }
   } catch {}
   try {
     const backups = new Directory(Paths.document, "backups");
