@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
+import { ActivityIndicator, Animated, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -186,6 +186,25 @@ function Splash() {
       </Text>
     </View>
   );
+}
+
+function ThemeFade({ children }: { children: React.ReactNode }) {
+  const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
+  const accentColor = useSettingsStore((s) => s.prefs.accentColor);
+  const opacity = useRef(new Animated.Value(1)).current;
+  const keyRef = useRef(`${resolvedTheme}:${accentColor}`);
+  useEffect(() => {
+    const next = `${resolvedTheme}:${accentColor}`;
+    if (next === keyRef.current) return;
+    keyRef.current = next;
+    opacity.setValue(0.35);
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [resolvedTheme, accentColor, opacity]);
+  return <Animated.View style={{ flex: 1, opacity }}>{children}</Animated.View>;
 }
 
 function Root({ locked, initialized }: { locked: boolean; initialized: boolean }) {
@@ -403,7 +422,9 @@ export default function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <Root locked={locked} initialized={initialized} />
+        <ThemeFade>
+          <Root locked={locked} initialized={initialized} />
+        </ThemeFade>
         {sharedUris.length > 0 ? (
           <ShareTargetSheet uris={sharedUris} onClose={() => setSharedUris([])} />
         ) : null}
