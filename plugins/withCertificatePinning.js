@@ -60,6 +60,20 @@ function withPinning(config) {
       const dir = path.join(cfg.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml");
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "network_security_config.xml"), networkSecurityXml());
+      // Debug builds keep cleartext for Metro/dev-client connections.
+      const debugDir = path.join(
+        cfg.modRequest.platformProjectRoot,
+        "app",
+        "src",
+        "debug",
+        "res",
+        "xml"
+      );
+      fs.mkdirSync(debugDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(debugDir, "network_security_config.xml"),
+        '<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n  <base-config cleartextTrafficPermitted="true" />\n</network-security-config>\n'
+      );
       return cfg;
     },
   ]);
