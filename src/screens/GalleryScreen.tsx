@@ -293,6 +293,19 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   // Scrubber support: measured section offsets, refreshed on every layout.
   const localListRef = useRef<FlatList<any>>(null);
   const localSectionYs = useRef<number[]>([]);
+  const [localScrollY, setLocalScrollY] = useState(0);
+
+  // Sticky date header: pick the last section whose measured top has passed
+  // the current scroll offset. The section Ys are captured below as each
+  // section lays out (the same map powers the date scrubber).
+  const stickyIndex = useMemo(() => {
+    let idx = 0;
+    for (let i = 0; i < localSections.length; i++) {
+      const y = localSectionYs.current[i];
+      if (typeof y === "number" && localScrollY + 6 >= y) idx = i;
+    }
+    return idx;
+  }, [localScrollY, localSections]);
 
   // Floor + margin: all columns must fit the wrap container even after the
   // framework rounds fractional DP to whole pixels (2-per-row rounding bug).
@@ -1085,6 +1098,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           // Offset shifts from media added/deleted mid-scroll can leave two
           // sections with the same date label; the index keeps keys unique.
           keyExtractor={(s, i) => `${i}:${s.label}`}
+          onScroll={(e) => setLocalScrollY(e.nativeEvent.contentOffset.y)}
+          scrollEventThrottle={32}
           onEndReached={loadMoreLocal}
           onEndReachedThreshold={0.6}
           refreshControl={
@@ -1167,6 +1182,42 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           top={insets.top + 150}
           bottom={insets.bottom + 150}
         />
+      ) : null}
+
+      {viewMode === "days" && !searchResults && !decoy && localSections.length > 0 ? (
+        <Pressable
+          onPress={() => localListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+          style={[
+            styles.stickyDateHeader,
+            {
+              top: insets.top + (progress.running ? 218 : 160),
+              backgroundColor: theme.colors.background,
+              borderBottomColor: theme.colors.outlineVariant,
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Jump to top; showing ${localSections[stickyIndex]?.label ?? ""}`}
+        >
+          <Text
+            style={[styles.dateHeader, { color: theme.colors.onSurface, paddingVertical: 0 }]}
+            numberOfLines={1}
+          >
+            {localSections[stickyIndex]?.label ?? ""}
+          </Text>
+          {showDateCounts ? (
+            <Text
+              style={{
+                color: theme.colors.onSurfaceVariant,
+                fontSize: 11,
+                marginLeft: 8,
+                opacity: 0.75,
+              }}
+            >
+              {localSections[stickyIndex]?.data.length ?? 0} photo
+              {(localSections[stickyIndex]?.data.length ?? 0) === 1 ? "" : "s"}
+            </Text>
+          ) : null}
+        </Pressable>
       ) : null}
 
       {selectionMode ? (
@@ -2053,6 +2104,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
+  },
+  stickyDateHeader: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "baseline",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    zIndex: 12,
   },
   grid: {
     flexDirection: "row",
