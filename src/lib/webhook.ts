@@ -80,10 +80,12 @@ export async function fetchUpdates(offset: number): Promise<TgUpdate[]> {
   const prefs = await loadPrefs();
   if (prefs.webhookMode && prefs.webhookRelayUrl) {
     try {
-      const updates = await fetchRelayUpdates(offset);
-      return updates;
+      return await fetchRelayUpdates(offset);
     } catch {
-      // Relay down: direct polling keeps remote control working.
+      // Telegram rejects getUpdates while a webhook is registered (409), so
+      // there is no safe direct-polling fallback here. Return empty and let
+      // the next poll retry; Settings -> Remote can switch back to polling.
+      return [];
     }
   }
   return getUpdates(offset > 0 ? offset : -1, 0);

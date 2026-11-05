@@ -8,8 +8,10 @@ so PhotogramBot's optional webhook mode uses a tiny relay that:
 3. serves `GET /updates?offset=N` to the app.
 
 The app still polls the relay, but with a short HTTPS request instead of a
-long-polling connection, which is cheaper on battery and mobile radio. If the
-relay is unreachable the app falls back to direct polling.
+long-polling connection, which is cheaper on battery and mobile radio. While a
+webhook is registered Telegram rejects `getUpdates`, so if the relay is
+unreachable the app returns no updates and retries next poll; switch **Back to
+polling** in Settings to restore direct polling.
 
 ## Cloudflare Worker
 

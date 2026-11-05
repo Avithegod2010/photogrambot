@@ -16,7 +16,7 @@ All notable changes to PhotogramBot. Versions follow `android/version.properties
 - **Device management** - device list with counts/last upload, rename,
   pause/revoke this phone; revocation is cooperative and documented.
 - **Webhook mode** - optional self-hosted HTTPS relay (Cloudflare Worker
-  example in `docs/WEBHOOK_RELAY.md`) with automatic fallback to polling.
+  example in `docs/WEBHOOK_RELAY.md`); switch back to polling removes it.
 - **Public read-only sharing** - create channel invite links and export a
   standalone HTML index of the archive.
 - **Channel merge** - copy a source channel's pinned index via Telegram
