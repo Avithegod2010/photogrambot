@@ -10,6 +10,9 @@ import {
   View,
 } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Sharing from "expo-sharing";
+import { File, Paths } from "expo-file-system";
+import { getDiagLog } from "../lib/diaglog";
 import { useTheme } from "../useTheme";
 import { useSetupStore } from "../store/useSetupStore";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -145,6 +148,31 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void allModelStatuses().then(setModelStatuses);
     void getTaggingApiKey().then((k) => setTaggingKeyDraft(k ?? ""));
   }, []);
+
+  async function shareDiagnostics() {
+    try {
+      const [diag, breakIn] = await Promise.all([getDiagLog(), getBreakInLog()]);
+      const payload = {
+        app: "PhotogramBot",
+        version: CURRENT_VERSION,
+        generatedAt: new Date().toISOString(),
+        diagnostics: diag,
+        breakIn,
+      };
+      const file = new File(Paths.cache, `photogrambot-diagnostics-${Date.now()}.json`);
+      file.write(JSON.stringify(payload, null, 2));
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert("Share unavailable", "Sharing is not available on this device.");
+        return;
+      }
+      await Sharing.shareAsync(file.uri, {
+        mimeType: "application/json",
+        dialogTitle: "Share PhotogramBot diagnostics",
+      });
+    } catch (e: any) {
+      Alert.alert("Export failed", e?.message ?? "Could not export diagnostics.");
+    }
+  }
 
   async function refreshModelStatuses() {
     setModelStatuses(await allModelStatuses());
@@ -1290,6 +1318,21 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             />
           </View>
         </Dialog>
+
+        <SectionLabel text="Diagnostics" theme={theme} />
+        <Card theme={theme}>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+            Share the break-in log and the recent failure log as a JSON file. It contains no
+            photos, tokens or channel ids.
+          </Text>
+          <Button
+            title="Share diagnostics"
+            variant="outlined"
+            theme={theme}
+            style={{ marginTop: 12 }}
+            onPress={() => void shareDiagnostics()}
+          />
+        </Card>
 
         <SectionLabel text="Maintenance" theme={theme} />
         <Card theme={theme}>
