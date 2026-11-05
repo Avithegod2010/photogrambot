@@ -44,6 +44,7 @@ import { embedIndexBackfill } from "../lib/semsearch";
 import { getDiagLog, clearDiagLog, type DiagEvent } from "../lib/diaglog";
 import { tagScenesOnDevice, tagScenesWithGemini } from "../lib/sceneTag";
 import { buildPeopleIndex } from "../lib/faceEngine";
+import { sortByBest } from "../lib/bestOf";
 import { getEmbeddingCoverage } from "../lib/db";
 import type { EmbedBackfillProgress } from "../lib/semsearch";
 
@@ -129,7 +130,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   async function scanDuplicates() {
     setScanningDupes(true);
     try {
-      setDupes(await findDuplicateGroups());
+      setDupes(
+        (await findDuplicateGroups()).map((g) => ({ ...g, photos: sortByBest(g.photos) }))
+      );
     } finally {
       setScanningDupes(false);
     }
@@ -229,7 +232,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     setNearProgress({ decoded: 0, cached: 0, total: 0, skipped: 0, currentFile: null, done: false });
     try {
       const result = await scanNearDuplicates(setNearProgress);
-      setNearDups(result.groups);
+      // Keep the BEST copy at index 0 (favorite → resolution → size), so the
+      // existing "keep first" cleanup action keeps the best shot, not just the
+      // first row the scan happened to return.
+      setNearDups(result.groups.map((g) => ({ ...g, photos: sortByBest(g.photos) })));
       const bits: string[] = [`${result.groups.length} near-duplicate group${result.groups.length === 1 ? "" : "s"}`];
       if (result.skipped > 0) bits.push(`${result.skipped} skipped (no local copy or > 25 MB)`);
       if (result.decodeFailed > 0) bits.push(`${result.decodeFailed} undecodable (non-baseline JPEG)`);
@@ -1063,7 +1069,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               ))}
               <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 8 }}>
                 <Button
-                  title="Keep newest, trash rest"
+                  title="Keep best, trash rest"
                   variant="danger"
                   theme={theme}
                   onPress={() => keepOldest(item.exact)}
@@ -1096,7 +1102,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               ))}
               <View style={{ flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                 <Button
-                  title="Keep newest, trash rest"
+                  title="Keep best, trash rest"
                   variant="danger"
                   theme={theme}
                   onPress={() => removeNearGroupExceptFirst(item.near, false)}

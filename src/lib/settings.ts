@@ -148,6 +148,7 @@ export const defaultPrefs: Prefs = {
   aiPrompt: DEFAULT_AI_PROMPT,
   mlModelUrls: {},
   searchHistory: [],
+  albumRules: {},
   includeVideos: false,
   videoCompression: "off",
   dbBackupEncrypt: false,

@@ -306,6 +306,21 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           )}
 
+          <SectionLabel text="Best of" theme={theme} />
+          <Card theme={theme} onPress={() => navigation.navigate("BestOf")}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                  Best of the last year
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                  Favorites, sharpness and size — up to 60 shots
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+            </View>
+          </Card>
+
           <SectionLabel text="Ask your photos" theme={theme} />
           <Card theme={theme} onPress={() => navigation.navigate("Ask")}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
