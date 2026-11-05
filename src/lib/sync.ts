@@ -236,6 +236,13 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
 export async function runSyncNow(
   onProgress?: (scanned: number, enqueued: number) => void
 ): Promise<ScanResult> {
+  // /revoke is a hard stop for this device, including manual scans.
+  try {
+    const { isDeviceRevoked } = await import("./devices");
+    if (await isDeviceRevoked()) {
+      return { scanned: 0, enqueued: 0 };
+    }
+  } catch {}
   const result = await scanAndEnqueueAll(onProgress);
   void processQueue();
   // Auto-add album rules run after a scan; idempotent, best-effort.

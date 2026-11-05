@@ -290,6 +290,11 @@ export async function enqueueVersionUpload(
 }
 
 export async function processQueue(): Promise<void> {
+  // A revoked/paused device must not upload even if a manual sync is pressed.
+  try {
+    const { thisDeviceBlocked } = await import("./devices");
+    if (await thisDeviceBlocked()) return;
+  } catch {}
   if (processing) return;
   processing = true;
   cancelRequested = false;
