@@ -104,6 +104,8 @@ const config: ExpoConfig = {
     // TFLite runtime for the downloadable on-device models. Models are NOT
     // bundled in the APK; they are downloaded from Settings.
     "react-native-fast-tflite",
+    // Android certificate pinning for api.telegram.org + api.github.com.
+    "./plugins/withCertificatePinning",
   ],
 };
 
