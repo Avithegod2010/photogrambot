@@ -57,7 +57,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
     "release:manifest": "node scripts/make-latest-json.mjs",
-    "release:publish": "node scripts/publish-release.mjs"
+    "release:publish": "node scripts/publish-release.mjs",
+    "release:resign": "node scripts/resign-apk.mjs"
   },
   "overrides": {
     "shell-quote": "^1.12.0",

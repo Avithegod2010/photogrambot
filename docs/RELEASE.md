@@ -10,8 +10,8 @@ for the in-app updater, and upload to Google Play.
 `android/version.properties` is the **only** place a release version is set:
 
 ```
-versionCode=1
-versionName=1.0.0
+versionCode=3
+versionName=1.1.0
 ```
 
 - `android/app/build.gradle` reads it for the Android `versionCode`/`versionName`.
@@ -23,26 +23,54 @@ versionName=1.0.0
 
 ---
 
-## 2. Keystore decision — **EAS-managed** (decided)
+## 2. Keystore decision — **self-managed `pb-release.keystore`** (target)
 
-The app is signed by an **EAS-managed keystore**, not a locally generated one.
+The goal is a **single signing identity** across debug installs, preview APKs
+and production AABs. The local release keystore is
+`android/app/pb-release.keystore` with
+`android/pb-release-signing.properties` (both gitignored). EAS currently signs
+cloud builds with an **EAS-managed** key, which is why an EAS APK cannot update
+a locally signed build.
 
-Why: a local release build on the dev machine fails on a JVM-specific TLS
-handshake to `dl.google.com` (Gradle cannot fetch its artifacts), and EAS cloud
-builds are unaffected. Adopting the EAS keystore keeps a single signing
-identity across preview APKs and production AABs.
+**One-time migration to the local key:**
 
-Consequences (important):
+1. Back up `pb-release.keystore` + `pb-release-signing.properties` offline
+   (password manager / encrypted archive). Losing this key means you can never
+   update an installed app under the same identity.
+2. Upload it to EAS:
 
-- **The local `android/pb-release.keystore` is NOT the distribution key.** Local
-  `./gradlew assembleRelease` falls back to the debug keystore — fine for
-  testing, never for distribution.
-- **Back the EAS credentials up.** Losing the EAS keystore means you can never
-  ship an update to an app already on the Play Store under that identity.
-  - Download it once: `eas credentials -p android` → *Android Keystore* →
-    *Download*. Store it offline (password manager / encrypted archive).
-- If you ever want a self-managed key instead, run
-  `eas credentials -p android` and upload `pb-release.keystore`, then rebuild.
+   ```bash
+   eas credentials -p android
+   # → Android Keystore → Upload existing keystore
+   # → select android/app/pb-release.keystore
+   # → paste the alias/passwords from android/pb-release-signing.properties
+   ```
+
+3. The next `eas build` will use that keystore. Verify the APK signer with
+   `apksigner verify --print-certs <apk>` and compare the SHA-256 with the local
+   keystore.
+4. Keep the EAS credentials backup in the same offline place.
+
+Until that upload happens, a locally debug-signed install cannot be updated by
+an EAS APK. Use the re-sign fallback below for a one-off device update.
+
+### Re-signing an APK for an existing install
+
+`scripts/resign-apk.mjs` re-signs an APK with the local keystore, so
+`adb install -r` updates in place (preserving the SQLite index and
+SecureStore). It does **not** make the APK Play-Store valid.
+
+```bash
+# debug installs (the project's android/app/debug.keystore)
+npm run release:resign -- --apk photogrambot-1.1.0-preview.1.apk
+
+# release key (reads storeFile/alias/passwords from the properties file)
+npm run release:resign -- --apk <apk> \
+  --properties android/pb-release-signing.properties
+```
+
+The script prints the resulting signer SHA-256; compare it with the installed
+app's signer before installing.
 
 ---
 
@@ -93,8 +121,8 @@ against the installed version (exactly, via `latest.json`). To publish:
    `android/version.properties`, creates the release and uploads both files:
 
    ```bash
-   npm run release:publish -- --apk photogrambot-1.0.1.apk --tag v1.0.1 \
-     --title "PhotogramBot 1.0.1" --notes-file CHANGELOG.md
+   npm run release:publish -- --apk photogrambot-1.1.0.apk --tag v1.1.0 \
+     --title "PhotogramBot 1.1.0" --notes-file CHANGELOG.md
    # add --prerelease for a preview APK; --dry-run validates without publishing
    ```
 
@@ -177,7 +205,8 @@ create`).
 - [ ] Bump `versionCode` (+ `versionName` for a notable release) in
       `android/version.properties`.
 - [ ] `npx tsc --noEmit` clean.
-- [ ] `npx expo install --check` — dependencies aligned with SDK 57.
+- [ ] `npx expo install --check` — review any advisory patch drift (CI treats
+      it as a warning; the locked versions are the ones the last APK used).
 - [ ] `eas build -p android --profile production`.
 - [ ] `eas build -p android --profile preview` → attach APK + `latest.json` to a
       new GitHub Release.
