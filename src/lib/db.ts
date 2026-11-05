@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import { sanitizeQueueBackupRows } from "./backupQueue";
 
 export type PhotoStatus =
   | "local"
@@ -2246,9 +2247,17 @@ export async function exportAllData(): Promise<string> {
   const savedSearches = await d.getAllAsync<any>("SELECT * FROM saved_searches");
   const photoVersions = await d.getAllAsync<any>("SELECT * FROM photo_versions");
   const kv = await d.getAllAsync<any>("SELECT * FROM kv");
+  // Active/failed queue rows let a reinstall on the same device resume where
+  // it stopped instead of re-scanning blindly. Terminal rows (done/skipped/
+  // duplicate) are transient and only bloat the snapshot.
+  const uploadQueue = await d.getAllAsync<any>(
+    `SELECT * FROM upload_queue
+     WHERE state IN ('pending','running','failed')
+     ORDER BY id DESC LIMIT 5000`
+  );
   return JSON.stringify({
     format: "photogrambot-backup",
-    version: 1,
+    version: 2,
     exported_at: Date.now(),
     photos,
     albums,
@@ -2256,6 +2265,7 @@ export async function exportAllData(): Promise<string> {
     trash,
     saved_searches: savedSearches,
     photo_versions: photoVersions,
+    upload_queue: uploadQueue,
     kv,
   });
 }
@@ -2274,12 +2284,10 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       await d.runAsync("DELETE FROM photo_versions");
       await d.runAsync("DELETE FROM photos_fts");
       await d.runAsync("DELETE FROM photos");
-      // The queue and the embedding index describe the OLD index. Left behind,
-      // pending rows would upload local files that the restored index knows
-      // nothing about (untracked channel posts), and the embeddings would rank
-      // photo ids that no longer exist. Both are cheap to rebuild: a scan
-      // re-enqueues whatever the restored rows still need, and Maintenance can
-      // rebuild the search index.
+      // Drop the OLD queue and embedding index first. The backup's own active/
+      // failed queue rows are imported below (sanitized), and the embeddings
+      // are a rebuildable cache that would rank photo ids which no longer
+      // exist — Maintenance can rebuild them.
       await d.runAsync("DELETE FROM upload_queue");
       await d.runAsync("DELETE FROM photo_embeddings");
     }
@@ -2318,6 +2326,43 @@ export async function importAllData(json: string, replace: boolean): Promise<num
         ]
       );
       count += res.changes > 0 ? 1 : 0;
+    }
+    // Restore active/failed queue rows last. A reinstall on the same device
+    // keeps MediaStore ids/URIs, so these rows resume real work; on a new
+    // device they fail honestly (file missing) rather than silently
+    // re-uploading untracked media. Running rows come back as pending.
+    const queueRows = sanitizeQueueBackupRows(data.upload_queue);
+    for (const q of queueRows) {
+      const existing = await d.getFirstAsync<{ x: number }>(
+        "SELECT 1 AS x FROM upload_queue WHERE local_id = ? LIMIT 1",
+        [q.local_id]
+      );
+      if (existing) continue;
+      await d.runAsync(
+        `INSERT INTO upload_queue
+          (local_id, local_uri, filename, folder, size, taken_at, added_at,
+           content_hash, upload_type, priority, state, retries, error, created_at,
+           profile_id, reply_to_message_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          q.local_id,
+          q.local_uri,
+          q.filename,
+          q.folder,
+          q.size,
+          q.taken_at,
+          q.added_at,
+          q.content_hash,
+          q.upload_type,
+          q.priority,
+          q.state,
+          q.retries,
+          q.error,
+          q.created_at,
+          q.profile_id,
+          q.reply_to_message_id,
+        ]
+      );
     }
     for (const a of data.albums ?? []) {
       await d.runAsync(

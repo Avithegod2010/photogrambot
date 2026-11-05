@@ -16,9 +16,10 @@ import {
 } from "./db";
 import { File, FileMode } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
-import { getFile, sendDocument } from "./telegram";
+import { deleteMessage, getFile, sendDocument } from "./telegram";
 import { getCachedTelegramFile } from "./media";
 import { tokenForPhoto, resolveDestination } from "./destinations";
+import { getChannelId } from "./settings";
 import { extractMotionVideo } from "./motion";
 import {
   dcGridFromJpeg,
@@ -412,13 +413,28 @@ export async function repairBrokenUploads(
         skipped++;
         continue;
       }
-      // Split videos are NOT repairable this way: their part chain was
-      // already persisted at upload time, and re-entering the splitter with
-      // those resumeParts would replay the old (broken) upload as a no-op.
-      // They can only be re-saved via the Telegram app or a fresh re-upload.
+      // Split videos: a persisted `parts` chain makes the splitter RESUME the
+      // old (broken) chain. Clear it so the splitter starts from part 1, and
+      // best-effort delete any old part messages that recorded a message id
+      // (newer chains do; older ones degrade to leaving them orphaned).
       if (row.parts) {
-        skipped++;
-        continue;
+        try {
+          const parts = JSON.parse(row.parts) as { message_id?: number }[];
+          if (Array.isArray(parts) && parts.length > 0) {
+            const channelId = await getChannelId();
+            if (channelId) {
+              const token = await tokenForPhoto(row);
+              for (const part of parts) {
+                if (typeof part?.message_id === "number") {
+                  try {
+                    await deleteMessage(channelId, part.message_id, token ?? undefined);
+                  } catch {}
+                }
+              }
+            }
+          }
+        } catch {}
+        await updatePhoto(row.id, { parts: null });
       }
       if (!new File(row.local_uri).exists) {
         skipped++;
