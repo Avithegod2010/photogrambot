@@ -3,7 +3,7 @@
 
 import { kvGet, kvSet } from "./db";
 
-const START = Date.now();
+const START = (globalThis as any).__pbStart ?? Date.now();
 const marks: Record<string, number> = {};
 
 export function markStartup(name: string): void {
