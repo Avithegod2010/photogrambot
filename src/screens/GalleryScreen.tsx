@@ -25,10 +25,11 @@ import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
 import { useT } from "../useT";
-import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
+import { groupPhotosByDate, formatBytes, formatDate, formatDuration, isVideoMime } from "../lib/format";
 import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, saveSearch, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
+import { useResponsive } from "../lib/responsive";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { GearIcon, HeartIcon, TrashIcon, SparkleIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
@@ -74,6 +75,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const { channelId, channelTitle } = useSetupStore();
   const { progress, start, cancel, subscribe } = useUploadStore();
 
+  // Wide layouts (tablets/foldables/DeX) show a master-detail pane: tapping a
+  // tile previews it on the right instead of opening the full-screen viewer.
+  const { width: windowWidth, isWide } = useResponsive();
+  const paneWidth = Math.min(440, Math.round(windowWidth * 0.4));
+  const [widePreview, setWidePreview] = useState<
+    { kind: "photo"; photo: PhotoRow } | { kind: "local"; item: LocalItem } | null
+  >(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   // Range-select anchor: the last tile added while in selection mode.
@@ -355,13 +363,17 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         // long-press range further down the grid.
         setRangeAnchorId(next.has(photo.id) ? photo.id : null);
         if (next.size === 0) setSelectionMode(false);
+      } else if (isWide) {
+        // Master-detail: preview on the right; "Open" in the pane launches the
+        // full viewer.
+        setWidePreview({ kind: "photo", photo });
       } else {
         const flat = searchResults ?? photos;
         const idx = flat.findIndex((p) => p.id === photo.id);
         navigation.navigate("Viewer", { photos: flat, index: idx });
       }
     },
-    [selectionMode, selection, photos, searchResults, navigation]
+    [selectionMode, selection, photos, searchResults, navigation, isWide]
   );
 
   // Range select: in selection mode, long-pressing another tile selects the
@@ -779,7 +791,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     );
   }
 
-  async function onLocalPress(item: LocalItem) {
+  async function onLocalPress(item: LocalItem, forceOpen = false) {
+    if (isWide && !selectionMode && !forceOpen) {
+      setWidePreview({ kind: "local", item });
+      return;
+    }
     // Backed-up assets open their real DB row; local-only ones open a
     // lightweight viewer entry straight from the device file.
     const dbPhoto = uploadedIds.has(item.id) ? await getPhotoByLocalId(item.id) : null;
@@ -1094,6 +1110,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         >
         <FlatList
           data={sections}
+          style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
           // Size-sorted results interleave dates, so the same label can head
           // multiple sections — key by index+label like the local roll below.
           keyExtractor={(s, i) => `${i}:${s.label}`}
@@ -1213,6 +1230,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         <FlatList
           ref={localListRef}
           data={localSections}
+          style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
           // Offset shifts from media added/deleted mid-scroll can leave two
           // sections with the same date label; the index keeps keys unique.
           keyExtractor={(s, i) => `${i}:${s.label}`}
@@ -1475,9 +1493,109 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
+
+      {isWide && widePreview ? (
+        <View
+          style={{
+            position: "absolute",
+            top: insets.top,
+            right: 0,
+            bottom: 0,
+            width: paneWidth,
+            backgroundColor: theme.colors.surface,
+            borderLeftWidth: 1,
+            borderLeftColor: theme.colors.outlineVariant,
+            paddingTop: 8,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 14,
+              gap: 10,
+            }}
+          >
+            <Text
+              style={{ color: theme.colors.onSurface, fontWeight: "600", flex: 1 }}
+              numberOfLines={1}
+            >
+              {widePreview.kind === "photo"
+                ? widePreview.photo.filename
+                : widePreview.item.asset.filename ?? "Photo"}
+            </Text>
+            <Pressable onPress={() => setWidePreview(null)} hitSlop={10}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
+            </Pressable>
+          </View>
+          <View
+            style={{
+              flex: 1,
+              margin: 12,
+              borderRadius: 14,
+              overflow: "hidden",
+              backgroundColor: theme.colors.surfaceContainer,
+            }}
+          >
+            {widePreview.kind === "photo" ? (
+              <TelegramImage
+                fileId={widePreview.photo.remote_file_id ?? widePreview.photo.preview_file_id}
+                localUri={widePreview.photo.local_uri}
+                style={{ flex: 1 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <WideLocalImage assetId={widePreview.item.id} />
+            )}
+          </View>
+          <View style={{ paddingHorizontal: 14, paddingBottom: 16, gap: 8 }}>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+              {formatDate(
+                widePreview.kind === "photo"
+                  ? widePreview.photo.taken_at
+                  : widePreview.item.taken_at
+              )}
+            </Text>
+            <Button
+              title="Open"
+              theme={theme}
+              onPress={() => {
+                if (widePreview.kind === "photo") {
+                  const flat = searchResults ?? photos;
+                  const idx = flat.findIndex((p) => p.id === widePreview.photo.id);
+                  navigation.navigate("Viewer", {
+                    photos: flat,
+                    index: idx < 0 ? 0 : idx,
+                  });
+                } else {
+                  void onLocalPress(widePreview.item, true);
+                }
+              }}
+            />
+          </View>
+        </View>
+      ) : null}
       </View>
     </GestureDetector>
   );
+}
+
+function WideLocalImage({ assetId }: { assetId: string }) {
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void new MediaLibrary.Asset(assetId)
+      .getUri()
+      .then((u) => {
+        if (alive) setUri(u);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [assetId]);
+  if (!uri) return <ActivityIndicator style={{ marginTop: 40 }} />;
+  return <Image source={{ uri }} style={{ flex: 1 }} resizeMode="contain" />;
 }
 
 function OverviewCard({
