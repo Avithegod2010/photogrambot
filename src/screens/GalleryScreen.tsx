@@ -1320,6 +1320,17 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           >
             <Text style={{ color: theme.colors.primary }}>All</Text>
           </Pressable>
+          <Pressable
+            onPress={() => {
+              const src = searchResults ?? photos;
+              const next = new Set<string>();
+              for (const p of src) if (!selection.has(p.id)) next.add(p.id);
+              setSelection(next);
+            }}
+            style={styles.selAction}
+          >
+            <Text style={{ color: theme.colors.primary }}>Invert</Text>
+          </Pressable>
           <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Share</Text>
           </Pressable>

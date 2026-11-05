@@ -1227,6 +1227,16 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           >
             <Text style={{ color: theme.colors.primary }}>All</Text>
           </Pressable>
+          <Pressable
+            onPress={() => {
+              const next = new Set<string>();
+              for (const p of photos) if (!selection.has(p.id)) next.add(p.id);
+              setSelection(next);
+            }}
+            style={styles.selAction}
+          >
+            <Text style={{ color: theme.colors.primary }}>Invert</Text>
+          </Pressable>
           <Pressable onPress={() => void favoriteSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>{allFav ? "Unfavorite" : "Favorite"}</Text>
           </Pressable>
