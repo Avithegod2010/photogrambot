@@ -214,3 +214,24 @@ create`).
 - [ ] Verify the in-app updater: on an older build, Settings → About → Check for
       updates → downloads and installs the new APK.
 - [ ] Confirm the EAS keystore is backed up offline.
+
+---
+
+## 7. Stable release keystore (one signer for every APK)
+
+By default EAS generates its own keystore per project, which does not match
+the local `android/app/pb-release.keystore`. Upload the local keystore once so
+every APK installs over the last without uninstalling (which would wipe the
+local SQLite index).
+
+```bash
+npm run release:check-signing   # verifies the files exist
+eas credentials --platform android
+# → Keystore: Upload an existing keystore
+# → android/app/pb-release.keystore + alias/passwords from
+#   android/app/pb-release-signing.properties
+```
+
+The upload is interactive and must be done by the owner; the token/keystore
+are never committed. Until then, `npm run release:resign` re-signs an EAS APK
+with the debug/local key for in-place installs.

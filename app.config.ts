@@ -128,6 +128,17 @@ const config: ExpoConfig = {
   web: {
     favicon: "./assets/favicon.png",
   },
+  runtimeVersion: {
+    // appVersion ties each JS update to the installed versionName. Bump the
+    // version when a native change ships.
+    policy: "appVersion",
+  },
+  updates: {
+    url: "https://u.expo.dev/421f1e6b-cda7-4f20-a6f1-dc972c76c0f4",
+    enabled: true,
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+  },
   extra: {
     eas: {
       projectId: "421f1e6b-cda7-4f20-a6f1-dc972c76c0f4",
@@ -145,6 +156,7 @@ const config: ExpoConfig = {
     "react-native-fast-tflite",
     // Android certificate pinning for api.telegram.org + api.github.com.
     "./plugins/withCertificatePinning",
+    "expo-updates",
     [
       "expo-image-picker",
       {

@@ -9,6 +9,30 @@ appId: com.photogrambot.app
 ---
 - launchApp
 - assertVisible: "Gallery"
+
+# Local roll -> viewer -> back (skipped on an empty library).
+- runFlow:
+    when:
+      visible:
+        id: "local-tile"
+    commands:
+      - tapOn:
+          id: "local-tile"
+          index: 0
+      - assertVisible: "Back"
+      - back
+- runFlow:
+    when:
+      visible:
+        id: "photo-tile"
+    commands:
+      - tapOn:
+          id: "photo-tile"
+          index: 0
+      - assertVisible: "Back"
+      - back
+
+# Settings -> appearance -> back.
 - tapOn: "Settings"
 - assertVisible: "Reconfigure bot"
 - scrollUntilVisible:
@@ -17,7 +41,22 @@ appId: com.photogrambot.app
     direction: DOWN
 - assertVisible: "Accent color"
 - back
+
+# Collections round-trip.
 - tapOn: "Collections"
 - assertVisible: "Collections"
 - tapOn: "Gallery"
+- assertVisible: "Gallery"
+
+# Settings -> Remote & sharing (admin allowlist, devices, sync).
+- tapOn: "Settings"
+- scrollUntilVisible:
+    element:
+      text: "Remote & sharing"
+    direction: DOWN
+- tapOn: "Remote & sharing"
+- assertVisible: "Remote admins"
+- assertVisible: "Devices"
+- back
+- back
 - assertVisible: "Gallery"

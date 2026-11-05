@@ -2980,6 +2980,10 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       // exist — Maintenance can rebuild them.
       await d.runAsync("DELETE FROM upload_queue");
       await d.runAsync("DELETE FROM photo_embeddings");
+      // The restored index has different photo ids; old sync ops/conflicts
+      // would point at rows that no longer exist.
+      await d.runAsync("DELETE FROM sync_ops");
+      await d.runAsync("DELETE FROM sync_conflicts");
     }
     for (const p of data.photos ?? []) {
       const res = await d.runAsync(

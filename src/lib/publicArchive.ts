@@ -34,7 +34,9 @@ export async function buildPublicIndexHtml(): Promise<string> {
     const chat = await getChat(channelId);
     username = chat?.username ?? "";
   } catch {}
-  const photos = await getPhotosByUploadStatus("uploaded");
+  // Cap the HTML so a 50k-photo library doesn't build a multi-megabyte string
+  // on the JS heap; the channel itself remains the full archive.
+  const photos = (await getPhotosByUploadStatus("uploaded")).slice(0, 5000);
   const internal = channelId.startsWith("-100") ? channelId.slice(4) : channelId.replace(/^-/, "");
   const linkFor = (messageId: number | null): string | null => {
     if (!messageId) return null;

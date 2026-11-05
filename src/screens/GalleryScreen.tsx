@@ -30,6 +30,7 @@ import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctD
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
 import { useResponsive } from "../lib/responsive";
+import { prefetchThumbs } from "../lib/prefetch";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { GearIcon, HeartIcon, TrashIcon, SparkleIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
@@ -173,6 +174,15 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     void loadLocal();
     return subscribe();
   }, []);
+
+  // Warm the first screenful of Telegram previews so scrolling starts with
+  // cached images instead of a wall of placeholders.
+  useEffect(() => {
+    void prefetchThumbs(photos.slice(0, 24));
+  }, [photos.length]);
+  useEffect(() => {
+    if (searchResults) void prefetchThumbs(searchResults.slice(0, 24));
+  }, [searchResults]);
 
   useEffect(() => {
     if (decoy) {
@@ -708,6 +718,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     return (
       <Pressable
         accessibilityRole="button"
+        testID="photo-tile"
         accessibilityLabel={`Photo ${photo.filename}${photo.favorite ? ", favorite" : ""}${photo.status === "uploaded" ? ", backed up" : ""}`}
         onPress={() => {
           paintState.current = null;
@@ -860,6 +871,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       <Pressable
         onPress={() => void onLocalPress(item)}
         accessibilityRole="button"
+        testID="local-tile"
         accessibilityLabel={`Photo${backedUp ? ", backed up" : ""}`}
         style={{ width: w, height: h }}
       >
@@ -912,6 +924,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             style={styles.gear}
             accessibilityLabel="Settings"
             accessibilityRole="button"
+            testID="settings-gear"
           >
             <GearIcon
               color={typeof theme.colors.onSurface === "string" ? theme.colors.onSurface : "#E4E2EA"}

@@ -28,6 +28,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
     "expo-task-manager": "~57.0.22",
+    "expo-updates": "~57.0.27",
     "expo-video": "~57.0.5",
     "jpeg-js": "^0.4.4",
     "jszip": "^3.10.2",
@@ -62,7 +63,10 @@
     "test:e2e": "maestro test .maestro/smoke.yaml",
     "release:manifest": "node scripts/make-latest-json.mjs",
     "release:publish": "node scripts/publish-release.mjs",
-    "release:resign": "node scripts/resign-apk.mjs"
+    "release:resign": "node scripts/resign-apk.mjs",
+    "release:check-signing": "node scripts/check-release-signing.mjs",
+    "update:preview": "eas update --branch preview",
+    "update:production": "eas update --branch production"
   },
   "overrides": {
     "shell-quote": "^1.12.0",
