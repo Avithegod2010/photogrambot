@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -295,6 +296,29 @@ export function PhotoInfoSheet({
                 <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13.5, lineHeight: 19 }}>
                   {p.ai_caption}
                 </Text>
+              </View>
+            ) : null}
+
+            {p.ocr_text ? (
+              <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
+                  Text in this image
+                </Text>
+                <Text
+                  selectable
+                  style={{ color: theme.colors.onSurface, fontSize: 13.5, lineHeight: 20 }}
+                >
+                  {p.ocr_text}
+                </Text>
+                <Button
+                  title="Share text"
+                  variant="outlined"
+                  theme={theme}
+                  style={{ marginTop: 12 }}
+                  onPress={() => {
+                    void Share.share({ message: p.ocr_text ?? "" });
+                  }}
+                />
               </View>
             ) : null}
 

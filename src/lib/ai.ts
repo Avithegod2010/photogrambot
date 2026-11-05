@@ -77,7 +77,8 @@ export async function ocrImageWithGemini(opts: {
               {
                 text:
                   "Extract ALL visible text from this screenshot exactly as written, " +
-                  "line by line. Keep URLs, codes, numbers and names verbatim. " +
+                  "in ANY language and original script, line by line. Keep URLs, codes, " +
+                  "numbers and names verbatim. Do not translate. " +
                   "If there is no text, respond with exactly: NO_TEXT",
               },
               { inline_data: { mime_type: "image/jpeg", data } },
