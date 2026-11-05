@@ -2,6 +2,7 @@ import * as SQLite from "expo-sqlite";
 import { File } from "expo-file-system";
 import { sanitizeQueueBackupRows } from "./backupQueue";
 import { applyDbKey, sqlCipherAvailable } from "./dbCrypto";
+import { lwwWins } from "./syncMath";
 
 export type PhotoStatus =
   | "local"
@@ -303,6 +304,38 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption, ocr_text
     );
   `);
+  // Multi-device index sync: a compact op log with Lamport clocks. Only
+  // favorites, tags, album membership/name and covers are synced; photos
+  // themselves are immutable channel records.
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS sync_ops (
+      op_id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      value TEXT,
+      lamport INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      sent INTEGER NOT NULL DEFAULT 0,
+      applied INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_ops_field
+      ON sync_ops(entity, entity_id, field, lamport DESC);
+    CREATE INDEX IF NOT EXISTS idx_sync_ops_sent ON sync_ops(sent);
+    CREATE TABLE IF NOT EXISTS sync_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      local_value TEXT,
+      remote_value TEXT,
+      remote_device TEXT,
+      created_at INTEGER NOT NULL,
+      resolved INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved, created_at DESC);
+  `);
   await addColumnsIfMissing(db, "photos", [
     ["latitude", "REAL"],
     ["longitude", "REAL"],
@@ -510,6 +543,236 @@ export async function kvSet(key: string, value: string): Promise<void> {
     "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
     [key, value]
   );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-device sync (LWW registers with Lamport clocks)
+// ---------------------------------------------------------------------------
+
+export type SyncEntity = "photo" | "album";
+export type SyncField = "favorite" | "tags" | "membership" | "album_name" | "cover";
+
+export interface SyncOp {
+  op_id: string;
+  device_id: string;
+  entity: SyncEntity;
+  entity_id: string;
+  field: SyncField;
+  value: string | null;
+  lamport: number;
+  created_at: number;
+  sent: number;
+  applied: number;
+}
+
+export interface SyncConflict {
+  id: number;
+  entity: SyncEntity;
+  entity_id: string;
+  field: SyncField;
+  local_value: string | null;
+  remote_value: string | null;
+  remote_device: string | null;
+  created_at: number;
+}
+
+const SYNC_FIELDS: SyncField[] = ["favorite", "tags", "membership", "album_name", "cover"];
+
+/** Records a local change and bumps the Lamport clock. */
+export async function recordSyncOp(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField,
+  value: string | null
+): Promise<void> {
+  try {
+    const d = await getDb();
+    const raw = await kvGet("sync_lamport");
+    const lamport = (parseInt(raw ?? "0", 10) || 0) + 1;
+    await kvSet("sync_lamport", String(lamport));
+    const { getDeviceId } = await import("./settings");
+    const device = await getDeviceId();
+    const opId = `${device}:${lamport}:${Math.random().toString(36).slice(2, 8)}`;
+    await d.runAsync(
+      `INSERT OR IGNORE INTO sync_ops
+        (op_id, device_id, entity, entity_id, field, value, lamport, created_at, sent, applied)
+       VALUES (?,?,?,?,?,?,?,?,0,1)`,
+      [opId, device, entity, entityId, field, value, lamport, Date.now()]
+    );
+  } catch {
+    // Sync bookkeeping must never break the primary mutation.
+  }
+}
+
+export async function pendingSyncOpCount(): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM sync_ops WHERE sent = 0"
+  );
+  return row?.n ?? 0;
+}
+
+export async function exportSyncOps(limit = 500): Promise<SyncOp[]> {
+  const d = await getDb();
+  return d.getAllAsync<SyncOp>(
+    "SELECT * FROM sync_ops WHERE sent = 0 ORDER BY lamport ASC LIMIT ?",
+    [limit]
+  );
+}
+
+export async function markSyncOpsSent(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  const ph = ids.map(() => "?").join(",");
+  await d.runAsync(`UPDATE sync_ops SET sent = 1 WHERE op_id IN (${ph})`, ids);
+}
+
+async function latestOp(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField
+): Promise<SyncOp | null> {
+  const d = await getDb();
+  return d.getFirstAsync<SyncOp>(
+    `SELECT * FROM sync_ops
+      WHERE entity = ? AND entity_id = ? AND field = ?
+      ORDER BY lamport DESC, device_id DESC LIMIT 1`,
+    [entity, entityId, field]
+  );
+}
+
+async function applySyncValue(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField,
+  value: string | null
+): Promise<void> {
+  const d = await getDb();
+  if (entity === "photo") {
+    if (field === "favorite") {
+      await d.runAsync("UPDATE photos SET favorite = ? WHERE id = ?", [
+        value === "1" ? 1 : 0,
+        entityId,
+      ]);
+    } else if (field === "tags") {
+      await d.runAsync("UPDATE photos SET tags = ? WHERE id = ?", [value, entityId]);
+      try {
+        const row = await getPhoto(entityId);
+        if (row) await ftsIndexPhoto({ ...row, tags: value });
+      } catch {}
+    }
+    return;
+  }
+  if (field === "album_name") {
+    await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [value ?? "", Number(entityId)]);
+  } else if (field === "cover") {
+    await d.runAsync("UPDATE albums SET cover_photo_id = ? WHERE id = ?", [
+      value || null,
+      Number(entityId),
+    ]);
+  } else if (field === "membership") {
+    try {
+      const parsed = JSON.parse(value ?? "{}") as { albumId?: number; member?: boolean };
+      const albumId = Number(parsed.albumId);
+      if (!Number.isFinite(albumId)) return;
+      if (parsed.member) {
+        await d.runAsync(
+          "INSERT OR IGNORE INTO album_photos (album_id, photo_id, added_at) VALUES (?,?,?)",
+          [albumId, entityId, Date.now()]
+        );
+      } else {
+        await d.runAsync("DELETE FROM album_photos WHERE album_id = ? AND photo_id = ?", [
+          albumId,
+          entityId,
+        ]);
+      }
+    } catch {}
+  }
+}
+
+/** Merges remote ops with last-write-wins; records disagreements for review. */
+export async function applyRemoteOps(
+  ops: SyncOp[]
+): Promise<{ applied: number; conflicts: number }> {
+  let applied = 0;
+  let conflicts = 0;
+  const d = await getDb();
+  for (const op of ops) {
+    if (!op || !SYNC_FIELDS.includes(op.field)) continue;
+    if (op.entity !== "photo" && op.entity !== "album") continue;
+    const lamport = Number(op.lamport);
+    if (!Number.isFinite(lamport) || lamport <= 0) continue;
+    if (typeof op.entity_id !== "string" || !op.entity_id) continue;
+    const local = await latestOp(op.entity, op.entity_id, op.field);
+    const remoteWins = lwwWins(
+      lamport,
+      String(op.device_id ?? ""),
+      local ? local.lamport : null,
+      local ? local.device_id : null
+    );
+    if (local && local.value !== op.value) {
+      conflicts++;
+      await d.runAsync(
+        `INSERT INTO sync_conflicts
+          (entity, entity_id, field, local_value, remote_value, remote_device, created_at, resolved)
+         VALUES (?,?,?,?,?,?,?,0)`,
+        [
+          op.entity,
+          op.entity_id,
+          op.field,
+          local.value,
+          op.value,
+          op.device_id,
+          Date.now(),
+        ]
+      );
+    }
+    if (remoteWins) {
+      await applySyncValue(op.entity, op.entity_id, op.field, op.value);
+      applied++;
+    }
+    await d.runAsync(
+      `INSERT OR IGNORE INTO sync_ops
+        (op_id, device_id, entity, entity_id, field, value, lamport, created_at, sent, applied)
+       VALUES (?,?,?,?,?,?,?,?,1,?)`,
+      [
+        String(op.op_id ?? `${op.device_id}:${lamport}:${Math.random().toString(36).slice(2, 8)}`),
+        String(op.device_id ?? "unknown"),
+        op.entity,
+        op.entity_id,
+        op.field,
+        op.value ?? null,
+        lamport,
+        Number(op.created_at) || Date.now(),
+        remoteWins ? 1 : 0,
+      ]
+    );
+  }
+  return { applied, conflicts };
+}
+
+export async function getSyncConflicts(limit = 50): Promise<SyncConflict[]> {
+  const d = await getDb();
+  return d.getAllAsync<SyncConflict>(
+    "SELECT * FROM sync_conflicts WHERE resolved = 0 ORDER BY created_at DESC LIMIT ?",
+    [limit]
+  );
+}
+
+export async function resolveSyncConflict(
+  id: number,
+  keep: "local" | "remote"
+): Promise<void> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<SyncConflict>("SELECT * FROM sync_conflicts WHERE id = ?", [id]);
+  if (!row) return;
+  const value = keep === "local" ? row.local_value : row.remote_value;
+  if (keep === "remote") {
+    await applySyncValue(row.entity, row.entity_id, row.field, row.remote_value);
+  }
+  // Recording the choice as a fresh local op propagates it to other devices.
+  await recordSyncOp(row.entity, row.entity_id, row.field, value);
+  await d.runAsync("UPDATE sync_conflicts SET resolved = 1 WHERE id = ?", [id]);
 }
 
 function rowToPhoto(r: any): PhotoRow {
@@ -1191,6 +1454,7 @@ export async function deletePhoto(id: string): Promise<void> {
 
 export async function setFavorite(id: string, fav: boolean): Promise<void> {
   await updatePhoto(id, { favorite: fav ? 1 : 0 });
+  await recordSyncOp("photo", id, "favorite", fav ? "1" : "0");
 }
 
 export async function getFavorites(): Promise<PhotoRow[]> {
@@ -1376,6 +1640,7 @@ export async function addPhotoTags(photoId: string, newTags: string[]): Promise<
   const tags = [...set].join(" ");
   await updatePhoto(photoId, { tags });
   await ftsIndexPhoto({ ...row, tags });
+  await recordSyncOp("photo", photoId, "tags", tags);
 }
 
 export async function getPhotosMissingSceneTags(limit = 50): Promise<PhotoRow[]> {
@@ -1493,6 +1758,7 @@ export async function savePeopleClusters(
 export async function renameAlbum(id: number, name: string): Promise<void> {
   const d = await getDb();
   await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [name, id]);
+  await recordSyncOp("album", String(id), "album_name", name);
 }
 
 export interface AlbumWithCover extends AlbumRow {
@@ -1592,6 +1858,7 @@ export async function reorderAlbums(ids: number[]): Promise<void> {
 export async function setAlbumCover(albumId: number, photoId: string | null): Promise<void> {
   const d = await getDb();
   await d.runAsync("UPDATE albums SET cover_photo_id = ? WHERE id = ?", [photoId, albumId]);
+  await recordSyncOp("album", String(albumId), "cover", photoId);
 }
 
 export async function getAlbumPhotos(albumId: number): Promise<PhotoRow[]> {
@@ -1757,6 +2024,12 @@ export async function addToAlbum(albumId: number, photoIds: string[]): Promise<v
       "INSERT OR IGNORE INTO album_photos (album_id, photo_id, added_at) VALUES (?,?,?)",
       [albumId, pid, Date.now()]
     );
+    await recordSyncOp(
+      "photo",
+      pid,
+      "membership",
+      JSON.stringify({ albumId, member: true })
+    );
   }
 }
 
@@ -1764,6 +2037,12 @@ export async function removeFromAlbum(albumId: number, photoIds: string[]): Prom
   const d = await getDb();
   for (const pid of photoIds) {
     await d.runAsync("DELETE FROM album_photos WHERE album_id = ? AND photo_id = ?", [albumId, pid]);
+    await recordSyncOp(
+      "photo",
+      pid,
+      "membership",
+      JSON.stringify({ albumId, member: false })
+    );
   }
 }
 

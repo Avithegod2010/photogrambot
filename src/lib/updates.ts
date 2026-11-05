@@ -74,6 +74,12 @@ async function ingestUpdate(u: TgUpdate, channelId: string): Promise<IngestResul
   }
   // Direct messages are command-only; photo ingestion stays channel-scoped.
   if (!isChannel) return NOTHING;
+  // Multi-device index ops are JSON documents, not photos.
+  if ((msg.caption ?? "").includes("#sync_ops")) {
+    const { ingestSyncDocument } = await import("./deviceSync");
+    await ingestSyncDocument(msg);
+    return { ...NOTHING, backups: 1 };
+  }
   const parsed = parseCaption(msg.caption);
   if (parsed.isDbBackup) return { ...NOTHING, backups: 1 };
   const existing = await getPhotoByMessageId(msg.message_id);
@@ -200,5 +206,10 @@ export async function pollUpdates(): Promise<UpdatesResult> {
     }
   }
   if (offset > 0) await kvSet("updates_offset", String(offset));
+  // Publish any local index changes so other devices can merge them. Failures
+  // are silent; the next poll retries (ops stay unsent).
+  void import("./deviceSync")
+    .then(({ publishSyncOps }) => publishSyncOps())
+    .catch(() => {});
   return { processed, newPhotos, backups, commands };
 }

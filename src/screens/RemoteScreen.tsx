@@ -15,6 +15,7 @@ import {
 import { configureWebhook, disableWebhookMode, webhookStatus } from "../lib/webhook";
 import { createReadOnlyInvite, sharePublicIndex } from "../lib/publicArchive";
 import { mergeChannelArchive } from "../lib/channelMerge";
+import { pendingSyncOpCount, getSyncConflicts } from "../lib/db";
 import { formatDate } from "../lib/format";
 
 const ROLE_OPTIONS: RemoteRole[] = ["read", "write", "admin"];
@@ -41,11 +42,15 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
   const [mergePass, setMergePass] = useState("");
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeNote, setMergeNote] = useState<string | null>(null);
+  const [pendingOps, setPendingOps] = useState(0);
+  const [conflictCount, setConflictCount] = useState(0);
 
   async function refresh() {
     const summary = await getDeviceSummaries();
     setDevices(summary.rows);
     setRevoked(await isDeviceRevoked());
+    setPendingOps(await pendingSyncOpCount());
+    setConflictCount((await getSyncConflicts(100)).length);
   }
 
   useEffect(() => {
@@ -191,6 +196,21 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
             Revocation is cooperative — all devices share the bot token. Send
             "/revoke &lt;deviceId&gt;" in the channel and the target phone applies it.
           </Text>
+        </Card>
+
+        <SectionLabel text="Multi-device index sync" theme={theme} />
+        <Card theme={theme} onPress={() => navigation.navigate("Sync")}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                Favorites, tags, albums & covers
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                {pendingOps} pending · {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+          </View>
         </Card>
 
         <SectionLabel text="Webhook relay (optional)" theme={theme} />
