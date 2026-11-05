@@ -3,6 +3,37 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [unreleased] — customization/security continuation
+
+### Models & people
+- **Models mirrored** to the project's `models-v1` GitHub release (stable
+  URLs): BlazeFace 230 KB, MobileFaceNet 5.0 MB, MobileNetV3-Small 9.7 MB,
+  ImageNet labels 10 KB. Still downloaded on demand, never bundled.
+- **People rename** — long-press a person card, name the cluster; the name is
+  stored in the `people` table and travels with backups.
+- **Automatic or manual ML** — new `autoMlIndex` switch (Settings → On-device
+  AI) runs a small scene/face batch after scans when models are present;
+  Maintenance keeps the manual controls.
+
+### Security
+- **Locked-album leak fix** — photos in a locked album are now excluded from
+  search, memories, map, period views (counts + covers), person albums and the
+  widget. Previously only the album grid itself was gated.
+- **Passphrase strength meter** — length/variety score with concrete tips under
+  the encrypted-backup passphrase field.
+- **Diagnostics export** — Settings → Diagnostics shares a JSON file with the
+  diagnostics ring buffer and break-in log (no photos/tokens/channel ids).
+
+### UI
+- **Notification controls** — per-type toggles (progress, complete, failed) and
+  an optional quiet window (default 22:00–07:00).
+- **Invert selection** in the gallery and album selection bars.
+- **Tile accessibility labels** — TalkBack announces filename/favorite/backed-up
+  state for gallery, local-roll and album tiles.
+- **Theme cross-fade** — 220 ms fade when the theme or accent changes.
+- **System font family** — System / Serif / Condensed / Mono via the ScaledText
+  wrapper (explicit per-style families are preserved).
+
 ## [unreleased] — search, AI & organization wave
 
 ### On-device models (download on demand, not in the APK)
