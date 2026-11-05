@@ -104,6 +104,60 @@ export async function ocrImageWithGemini(opts: {
   return text.slice(0, 2000);
 }
 
+// Scene/object labels from Gemini vision. Returns a short list of lowercase
+// labels; transport/API failures throw so the caller can retry later.
+export async function sceneTagsWithGemini(opts: {
+  apiKey: string;
+  model: string;
+  imageUri: string;
+}): Promise<string[]> {
+  const file = new File(opts.imageUri);
+  if (!file.exists) throw new Error("Tagging source image missing");
+  const data = await file.base64();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text:
+                  "List up to 6 short object/scene labels visible in this image. " +
+                  "Respond as a comma-separated list only, lowercase, no explanations. " +
+                  "Prefer concrete nouns (beach, dog, receipt, whiteboard, food).",
+              },
+              { inline_data: { mime_type: "image/jpeg", data } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0, maxOutputTokens: 60 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = json?.error?.message ?? `Gemini request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  const parts = json?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text ?? "").join(" ")
+    : "";
+  return text
+    .split(/[,;\n]/)
+    .map((s: string) => s.trim().toLowerCase())
+    .filter((s: string) => s.length >= 2 && s.length <= 40)
+    .slice(0, 6);
+}
+
 export interface EmbedTextOptions {
   apiKey: string;
   text: string;

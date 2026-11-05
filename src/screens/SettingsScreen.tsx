@@ -35,7 +35,17 @@ import {
   DEFAULT_AI_PROMPT,
   DEFAULT_CAPTION_FIELDS,
   CAPTION_FIELD_LABELS,
+  getTaggingApiKey,
+  setTaggingApiKey,
 } from "../lib/settings";
+import {
+  MODELS,
+  allModelStatuses,
+  downloadModel,
+  deleteModel,
+  type ModelId,
+  type ModelStatus,
+} from "../lib/mlModels";
 import {
   ACCENT_PRESETS,
   APP_ICON_VARIANTS,
@@ -113,6 +123,10 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [captionEnabled, setCaptionEnabled] = useState<Set<string>>(
     new Set(prefs.captionFields)
   );
+  const [modelStatuses, setModelStatuses] = useState<ModelStatus[] | null>(null);
+  const [modelBusy, setModelBusy] = useState<ModelId | null>(null);
+  const [modelNote, setModelNote] = useState<string | null>(null);
+  const [taggingKeyDraft, setTaggingKeyDraft] = useState("");
 
   useEffect(() => {
     if (prefs.multiDestination) {
@@ -128,7 +142,43 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
   useEffect(() => {
     void getBackupPassphrase().then((p) => setPassDraft(p ?? ""));
+    void allModelStatuses().then(setModelStatuses);
+    void getTaggingApiKey().then((k) => setTaggingKeyDraft(k ?? ""));
   }, []);
+
+  async function refreshModelStatuses() {
+    setModelStatuses(await allModelStatuses());
+  }
+
+  async function downloadModelRow(id: ModelId) {
+    if (modelBusy) return;
+    setModelBusy(id);
+    const name = MODELS.find((m) => m.id === id)?.name ?? "Model";
+    setModelNote(`Downloading ${name}…`);
+    try {
+      await downloadModel(id, (written, total) => {
+        if (total > 0) setModelNote(`Downloading ${name}… ${Math.floor((written / total) * 100)}%`);
+      });
+      setModelNote(`${name} downloaded.`);
+      await refreshModelStatuses();
+    } catch (e: any) {
+      setModelNote(e?.message ?? "Download failed");
+    } finally {
+      setModelBusy(null);
+    }
+  }
+
+  async function deleteModelRow(id: ModelId) {
+    if (modelBusy) return;
+    setModelBusy(id);
+    try {
+      await deleteModel(id);
+      await refreshModelStatuses();
+      setModelNote("Model deleted.");
+    } finally {
+      setModelBusy(null);
+    }
+  }
 
   useEffect(() => {
     setAccentDraft(prefs.accentColor === "default" ? "" : prefs.accentColor);
@@ -986,6 +1036,87 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             style={{ marginTop: 12 }}
             onPress={() => setCaptionDialog(true)}
           />
+        </Card>
+
+        <SectionLabel text="On-device AI" theme={theme} />
+        <Card theme={theme}>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+            Models are downloaded on demand and are <Text style={{ fontWeight: "700" }}>not</Text>{" "}
+            included in the APK. Total is roughly 17 MB. Scene tagging and face clusters
+            run locally; nothing leaves the device.
+          </Text>
+          {MODELS.map((m) => {
+            const status = modelStatuses?.find((s) => s.id === m.id);
+            return (
+              <View
+                key={m.id}
+                style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
+                    {m.name}
+                  </Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 1 }}>
+                    {m.note}
+                  </Text>
+                  <Text
+                    style={{
+                      color: status?.downloaded ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                      fontSize: 11.5,
+                      marginTop: 2,
+                    }}
+                  >
+                    {status?.downloaded
+                      ? `Downloaded · ${formatBytes(status.bytes)}`
+                      : `Not downloaded · ~${formatBytes(m.approxBytes)}`}
+                  </Text>
+                </View>
+                <Button
+                  title={status?.downloaded ? "Delete" : "Download"}
+                  variant="outlined"
+                  theme={theme}
+                  busy={modelBusy === m.id}
+                  disabled={!!modelBusy && modelBusy !== m.id}
+                  onPress={() =>
+                    status?.downloaded ? void deleteModelRow(m.id) : void downloadModelRow(m.id)
+                  }
+                />
+              </View>
+            );
+          })}
+          {modelNote ? (
+            <Text style={{ color: theme.colors.primary, fontSize: 12, marginTop: 6, fontWeight: "600" }}>
+              {modelNote}
+            </Text>
+          ) : null}
+          <View style={styles.divider} />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Tagging API key (optional)
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, lineHeight: 18 }}>
+            Used only for opt-in Gemini scene tags. Falls back to the AI captioning key.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10, alignItems: "center" }}>
+            <TextField
+              value={taggingKeyDraft}
+              onChangeText={setTaggingKeyDraft}
+              placeholder="Gemini API key"
+              theme={theme}
+              secureTextEntry
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Save"
+              variant="outlined"
+              theme={theme}
+              onPress={() =>
+                void setTaggingApiKey(taggingKeyDraft).then(() => {
+                  setTaggingKeyDraft("");
+                  setModelNote("Tagging key saved.");
+                })
+              }
+            />
+          </View>
         </Card>
 
         <SectionLabel text="Privacy & security" theme={theme} />

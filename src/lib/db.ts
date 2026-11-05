@@ -1224,6 +1224,141 @@ export async function getFaceEmbeddingCount(): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** Appends new auto-tags and refreshes the FTS row. */
+export async function addPhotoTags(photoId: string, newTags: string[]): Promise<void> {
+  const row = await getPhoto(photoId);
+  if (!row) return;
+  const set = new Set(
+    (row.tags ?? "")
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+  );
+  for (const raw of newTags) {
+    const clean = raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_:-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    if (clean) set.add(clean);
+  }
+  const tags = [...set].join(" ");
+  await updatePhoto(photoId, { tags });
+  await ftsIndexPhoto({ ...row, tags });
+}
+
+export async function getPhotosMissingSceneTags(limit = 50): Promise<PhotoRow[]> {
+  const d = await getDb();
+  return d.getAllAsync<PhotoRow>(
+    `SELECT * FROM photos
+      WHERE status IN ('uploaded','local')
+        AND id NOT IN (SELECT photo_id FROM trash)
+        AND (tags IS NULL OR tags NOT LIKE '%scene:%')
+        AND (preview_file_id IS NOT NULL OR thumb_file_id IS NOT NULL OR local_uri IS NOT NULL)
+      ORDER BY taken_at DESC
+      LIMIT ?`,
+    [limit]
+  );
+}
+
+export async function getPhotosMissingFaceIndex(limit = 25): Promise<PhotoRow[]> {
+  const d = await getDb();
+  return d.getAllAsync<PhotoRow>(
+    `SELECT p.* FROM photos p
+      WHERE p.status IN ('uploaded','local')
+        AND p.id NOT IN (SELECT photo_id FROM trash)
+        AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.photo_id = p.id)
+        AND (p.preview_file_id IS NOT NULL OR p.thumb_file_id IS NOT NULL OR p.local_uri IS NOT NULL)
+      ORDER BY p.taken_at DESC
+      LIMIT ?`,
+    [limit]
+  );
+}
+
+export interface FaceWrite {
+  box: [number, number, number, number]; // x, y, w, h in source pixels
+  embedding: number[];
+}
+
+export async function replaceFacesForPhoto(
+  photoId: string,
+  faces: FaceWrite[],
+  model = "mobilefacenet"
+): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    await d.runAsync("DELETE FROM face_embeddings WHERE photo_id = ?", [photoId]);
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      const vec = new Uint8Array(new Float32Array(f.embedding).buffer);
+      await d.runAsync(
+        `INSERT INTO face_embeddings
+          (photo_id, face_index, person_id, dim, vec, model, created_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [photoId, i, null, f.embedding.length, vec, model, Date.now()]
+      );
+    }
+  });
+}
+
+export interface StoredFace {
+  photoId: string;
+  faceIndex: number;
+  embedding: number[];
+}
+
+export async function getAllFaceSamples(): Promise<StoredFace[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    "SELECT photo_id, face_index, vec FROM face_embeddings"
+  );
+  const out: StoredFace[] = [];
+  for (const r of rows) {
+    try {
+      const bytes: Uint8Array =
+        r.vec instanceof Uint8Array ? r.vec : new Uint8Array(r.vec);
+      const copy = bytes.slice();
+      const floats = new Float32Array(copy.buffer, 0, Math.floor(copy.byteLength / 4));
+      out.push({
+        photoId: String(r.photo_id),
+        faceIndex: Number(r.face_index),
+        embedding: Array.from(floats),
+      });
+    } catch {}
+  }
+  return out;
+}
+
+/** Replaces all people rows and assigns each face to its cluster. */
+export async function savePeopleClusters(
+  clusters: {
+    faceKeys: string[]; // "photoId|faceIndex"
+    coverPhotoId: string | null;
+    name?: string | null;
+  }[]
+): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    await d.runAsync("DELETE FROM people");
+    await d.runAsync("UPDATE face_embeddings SET person_id = NULL");
+    for (const c of clusters) {
+      const res = await d.runAsync(
+        "INSERT INTO people (name, cover_photo_id, created_at) VALUES (?,?,?)",
+        [c.name ?? null, c.coverPhotoId, Date.now()]
+      );
+      const personId = res.lastInsertRowId ?? 0;
+      for (const key of c.faceKeys) {
+        const [photoId, idx] = key.split("|");
+        await d.runAsync(
+          "UPDATE face_embeddings SET person_id = ? WHERE photo_id = ? AND face_index = ?",
+          [personId, photoId, Number(idx)]
+        );
+      }
+    }
+  });
+}
+
 export async function renameAlbum(id: number, name: string): Promise<void> {
   const d = await getDb();
   await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [name, id]);

@@ -101,6 +101,9 @@ const config: ExpoConfig = {
     "expo-secure-store",
     "expo-media-library",
     ["react-native-android-widget", widgetConfig],
+    // TFLite runtime for the downloadable on-device models. Models are NOT
+    // bundled in the APK; they are downloaded from Settings.
+    "react-native-fast-tflite",
   ],
 };
 

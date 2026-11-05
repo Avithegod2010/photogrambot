@@ -9,6 +9,7 @@ const TOKEN_KEY = "pb_bot_token";
 const CHANNEL_KEY = "pb_channel_id";
 const DEVICE_KEY = "pb_device_id";
 const AI_KEY = "pb_ai_api_key";
+const TAGGING_KEY = "pb_tag_api_key";
 const BACKUP_PASS_KEY = "pb_backup_pass";
 
 export type UploadQuality = "document" | "photo";
@@ -75,6 +76,7 @@ export interface Prefs {
   aiCaptions: boolean;
   aiModel: string;
   aiPrompt: string;
+  mlModelUrls: Record<string, string>;
   includeVideos: boolean;
   videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;
@@ -143,6 +145,7 @@ export const defaultPrefs: Prefs = {
   aiCaptions: false,
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
+  mlModelUrls: {},
   includeVideos: false,
   videoCompression: "off",
   dbBackupEncrypt: false,
@@ -221,6 +224,27 @@ export async function setAiApiKey(key: string | null): Promise<void> {
   } else {
     await SecureStore.setItemAsync(AI_KEY, key.trim());
   }
+}
+
+export async function getTaggingApiKey(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(TAGGING_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setTaggingApiKey(key: string | null): Promise<void> {
+  if (key === null || key.trim() === "") {
+    await SecureStore.deleteItemAsync(TAGGING_KEY);
+  } else {
+    await SecureStore.setItemAsync(TAGGING_KEY, key.trim());
+  }
+}
+
+/** Tagging uses its own key when set, otherwise the captioning key. */
+export async function getEffectiveTaggingKey(): Promise<string | null> {
+  return (await getTaggingApiKey()) ?? (await getAiApiKey());
 }
 
 export async function getBackupPassphrase(): Promise<string | null> {

@@ -42,6 +42,8 @@ import { deleteMessage } from "../lib/telegram";
 import { tokenForPhoto } from "../lib/destinations";
 import { embedIndexBackfill } from "../lib/semsearch";
 import { getDiagLog, clearDiagLog, type DiagEvent } from "../lib/diaglog";
+import { tagScenesOnDevice, tagScenesWithGemini } from "../lib/sceneTag";
+import { buildPeopleIndex } from "../lib/faceEngine";
 import { getEmbeddingCoverage } from "../lib/db";
 import type { EmbedBackfillProgress } from "../lib/semsearch";
 
@@ -68,6 +70,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [mlBusy, setMlBusy] = useState<"scene-device" | "scene-gemini" | "people" | null>(null);
+  const [mlNote, setMlNote] = useState<string | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
   const [motionBusy, setMotionBusy] = useState(false);
   const [motionProgress, setMotionProgress] = useState<{ done: number; total: number } | null>(null);
   const [motionNote, setMotionNote] = useState<string | null>(null);
@@ -368,6 +373,61 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   async function openDiagLog() {
     setDiagEvents(await getDiagLog());
     setDiagVisible(true);
+  }
+
+  async function runSceneOnDevice() {
+    if (mlBusy) return;
+    setMlBusy("scene-device");
+    setMlError(null);
+    setMlNote("Tagging scenes on-device…");
+    try {
+      const r = await tagScenesOnDevice(50, (p) =>
+        setMlNote(`Tagging ${p.done}/${p.total} — ${p.tagged} tagged`)
+      );
+      setMlNote(`Scene tags: ${r.tagged} tagged, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(
+        `${e?.message ?? "Scene tagging failed"}. Download the models in Settings → On-device AI first.`
+      );
+    } finally {
+      setMlBusy(null);
+    }
+  }
+
+  async function runSceneGemini() {
+    if (mlBusy) return;
+    setMlBusy("scene-gemini");
+    setMlError(null);
+    setMlNote("Tagging scenes with Gemini…");
+    try {
+      const r = await tagScenesWithGemini(50, (p) =>
+        setMlNote(`Tagging ${p.done}/${p.total} — ${p.tagged} tagged`)
+      );
+      setMlNote(`Gemini tags: ${r.tagged} tagged, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(e?.message ?? "Gemini tagging failed");
+    } finally {
+      setMlBusy(null);
+    }
+  }
+
+  async function runPeopleIndex() {
+    if (mlBusy) return;
+    setMlBusy("people");
+    setMlError(null);
+    setMlNote("Indexing faces…");
+    try {
+      const r = await buildPeopleIndex(25, (p) =>
+        setMlNote(`Faces ${p.done}/${p.total} — ${p.faces} found`)
+      );
+      setMlNote(`People index: ${r.faces} faces, ${r.people} clusters, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(
+        `${e?.message ?? "People indexing failed"}. Download the face models in Settings → On-device AI first.`
+      );
+    } finally {
+      setMlBusy(null);
+    }
   }
 
   async function runOcrBackfill() {
@@ -700,6 +760,51 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {ocrError ? (
                 <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {ocrError}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="On-device AI" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Scene tags (MobileNetV3) and people clusters (BlazeFace + MobileFaceNet) run
+                locally. Models are downloaded in Settings → On-device AI (~17 MB total) and are
+                never bundled in the APK. Gemini tagging is opt-in and uses your own key.
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                <Button
+                  title="Tag scenes (on-device)"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "scene-device"}
+                  disabled={!!mlBusy && mlBusy !== "scene-device"}
+                  onPress={() => void runSceneOnDevice()}
+                />
+                <Button
+                  title="Tag scenes (Gemini)"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "scene-gemini"}
+                  disabled={!!mlBusy && mlBusy !== "scene-gemini"}
+                  onPress={() => void runSceneGemini()}
+                />
+                <Button
+                  title="Build people index"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "people"}
+                  disabled={!!mlBusy && mlBusy !== "people"}
+                  onPress={() => void runPeopleIndex()}
+                />
+              </View>
+              {mlNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {mlNote}
+                </Text>
+              ) : null}
+              {mlError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {mlError}
                 </Text>
               ) : null}
             </Card>
