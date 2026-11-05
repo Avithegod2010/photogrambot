@@ -77,6 +77,7 @@ export interface Prefs {
   aiModel: string;
   aiPrompt: string;
   mlModelUrls: Record<string, string>;
+  autoMlIndex: boolean;
   searchHistory: string[];
   albumRules: Record<string, { folder?: string; tag?: string; favorite?: boolean }>;
   includeVideos: boolean;
@@ -148,6 +149,7 @@ export const defaultPrefs: Prefs = {
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
   mlModelUrls: {},
+  autoMlIndex: false,
   searchHistory: [],
   albumRules: {},
   includeVideos: false,

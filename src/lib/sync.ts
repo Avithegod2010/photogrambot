@@ -235,6 +235,14 @@ export async function runSyncNow(
   void processQueue();
   // Auto-add album rules run after a scan; idempotent, best-effort.
   void import("./albumRulesApply").then(({ applyAlbumRules }) => applyAlbumRules());
+  // Optional automatic ML pass (only when the user enabled it and models exist).
+  void import("./settings").then(async ({ loadPrefs }) => {
+    const prefs = await loadPrefs();
+    if (prefs.autoMlIndex) {
+      const { runAutoMlIndex } = await import("./mlAuto");
+      void runAutoMlIndex(10);
+    }
+  });
   return result;
 }
 

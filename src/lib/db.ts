@@ -1231,6 +1231,12 @@ export async function getPeopleClusters(): Promise<PersonClusterSummary[]> {
   }));
 }
 
+export async function setPersonName(personId: number, name: string | null): Promise<void> {
+  const d = await getDb();
+  const clean = name?.trim().slice(0, 60) || null;
+  await d.runAsync("UPDATE people SET name = ? WHERE id = ?", [clean, personId]);
+}
+
 export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
   const d = await getDb();
   return d.getAllAsync<PhotoRow>(

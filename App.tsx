@@ -450,6 +450,9 @@ async function bootstrapBackgroundTasks(): Promise<void> {
         // Resume whatever is already pending too — a cold start with a large
         // backlog must not sit idle just because nothing new was scanned.
         void processQueue();
+        if (prefs.autoMlIndex) {
+          void import("./src/lib/mlAuto").then(({ runAutoMlIndex }) => runAutoMlIndex(10));
+        }
       }
       void startCameraWatch();
       void registerBackgroundSync();

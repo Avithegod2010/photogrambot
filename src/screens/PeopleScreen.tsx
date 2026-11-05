@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Dimensions, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
-import { getPeopleClusters, getPersonPhotos, type PersonClusterSummary, type PhotoRow } from "../lib/db";
+import { getPeopleClusters, getPersonPhotos, setPersonName, type PersonClusterSummary, type PhotoRow } from "../lib/db";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { EmptyAlbumArt } from "../components/illustrations";
 import { isDecoyActive } from "../lib/applock";
+import { Button, Dialog, TextField } from "../components/ui";
 
 // People tab. Clusters are produced by the pluggable face-embedding provider
 // (schema + clustering engine are in this build; the model is the remaining
@@ -17,6 +18,8 @@ export function PeopleScreen({ navigation }: { navigation: any }) {
   const [clusters, setClusters] = useState<PersonClusterSummary[] | null>(null);
   const [selected, setSelected] = useState<PersonClusterSummary | null>(null);
   const [photos, setPhotos] = useState<PhotoRow[] | null>(null);
+  const [renameTarget, setRenameTarget] = useState<PersonClusterSummary | null>(null);
+  const [renameName, setRenameName] = useState("");
 
   useEffect(() => {
     if (isDecoyActive()) {
@@ -61,9 +64,16 @@ export function PeopleScreen({ navigation }: { navigation: any }) {
         >
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
-          {selected ? selected.name ?? `Person ${selected.id}` : "People"}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
+            {selected ? selected.name ?? `Person ${selected.id}` : "People"}
+          </Text>
+          {!selected ? (
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>
+              Long-press a person to rename
+            </Text>
+          ) : null}
+        </View>
         {selected ? (
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>
             {selected.count}
@@ -135,6 +145,10 @@ export function PeopleScreen({ navigation }: { navigation: any }) {
             <Pressable
               style={[styles.card, { width: tile, backgroundColor: theme.colors.surface }]}
               onPress={() => setSelected(item)}
+              onLongPress={() => {
+                setRenameTarget(item);
+                setRenameName(item.name ?? "");
+              }}
             >
               <TelegramImage
                 fileId={item.cover_file_id}
@@ -150,6 +164,40 @@ export function PeopleScreen({ navigation }: { navigation: any }) {
           )}
         />
       )}
+
+      <Dialog
+        visible={!!renameTarget}
+        theme={theme}
+        title="Name this person"
+        message="The name is stored only in your local index and travels with your backups."
+      >
+        <TextField
+          value={renameName}
+          onChangeText={setRenameName}
+          placeholder="Name"
+          theme={theme}
+          autoCapitalize="words"
+        />
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <Button title="Cancel" variant="text" theme={theme} onPress={() => setRenameTarget(null)} />
+          <Button
+            title="Save"
+            theme={theme}
+            onPress={() => {
+              if (!renameTarget) return;
+              const target = renameTarget;
+              const name = renameName.trim() || null;
+              void setPersonName(target.id, name).then(() => {
+                setClusters((prev) =>
+                  prev ? prev.map((c) => (c.id === target.id ? { ...c, name } : c)) : prev
+                );
+                setSelected((prev) => (prev && prev.id === target.id ? { ...prev, name } : prev));
+                setRenameTarget(null);
+              });
+            }}
+          />
+        </View>
+      </Dialog>
     </View>
   );
 }
