@@ -91,6 +91,7 @@ export interface Prefs {
   videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;
   dbBackupIncludeToken: boolean;
+  dbEncryption: boolean;
   nearDupGuard: boolean;
   multiDestination: boolean;
   weeklyDigest: boolean;
@@ -170,6 +171,7 @@ export const defaultPrefs: Prefs = {
   videoCompression: "off",
   dbBackupEncrypt: false,
   dbBackupIncludeToken: false,
+  dbEncryption: false,
   nearDupGuard: true,
   multiDestination: false,
   weeklyDigest: false,

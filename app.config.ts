@@ -97,7 +97,9 @@ const config: ExpoConfig = {
     },
   },
   plugins: [
-    "expo-sqlite",
+    // SQLCipher is compiled in so Settings can encrypt the local index on
+    // demand. Existing databases stay plaintext until the user opts in.
+    ["expo-sqlite", { useSQLCipher: true }],
     "expo-secure-store",
     "expo-media-library",
     ["react-native-android-widget", widgetConfig],

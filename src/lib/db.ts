@@ -1,5 +1,7 @@
 import * as SQLite from "expo-sqlite";
+import { File } from "expo-file-system";
 import { sanitizeQueueBackupRows } from "./backupQueue";
+import { applyDbKey, sqlCipherAvailable } from "./dbCrypto";
 
 export type PhotoStatus =
   | "local"
@@ -100,12 +102,28 @@ export interface QueueRow {
   reply_to_message_id: number | null;
 }
 
+const DB_NAME = "photogrambot.db";
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
-      const d = await SQLite.openDatabaseAsync("photogrambot.db");
+      const d = await SQLite.openDatabaseAsync(DB_NAME);
+      // SQLCipher: the key must be applied before ANY other statement.
+      try {
+        const { loadPrefs } = await import("./settings");
+        const prefs = await loadPrefs();
+        if (prefs.dbEncryption) await applyDbKey(d);
+      } catch (e: any) {
+        // A wrong/missing key means the file cannot be read. Surface a clear
+        // message instead of the raw "file is not a database".
+        if (String(e?.message ?? "").includes("not a database")) {
+          throw new Error(
+            "The local database is encrypted but its key is unavailable. Restore the index from the channel backup."
+          );
+        }
+        throw e;
+      }
       await d.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
       await migrate(d);
       return d;
@@ -115,6 +133,53 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     });
   }
   return dbPromise;
+}
+
+/**
+ * Re-encrypt the current plaintext database in place with SQLCipher, using a
+ * key held in SecureStore. Requires a native build with `useSQLCipher`.
+ * The caller should restart the app afterwards (the swap closes the handle).
+ */
+export async function enableDatabaseEncryption(): Promise<void> {
+  const d = await getDb();
+  if (!(await sqlCipherAvailable(d))) {
+    throw new Error(
+      "This build does not include SQLCipher. Install the next native build, then try again."
+    );
+  }
+  const { loadPrefs, savePrefs } = await import("./settings");
+  if ((await loadPrefs()).dbEncryption) return;
+  const { getOrCreateDbKey } = await import("./dbCrypto");
+  const key = await getOrCreateDbKey();
+
+  const dir = SQLite.defaultDatabaseDirectory;
+  const src = new File(dir, DB_NAME);
+  const enc = new File(dir, `${DB_NAME}.enc`);
+  for (const f of [enc, new File(dir, `${DB_NAME}.enc-wal`), new File(dir, `${DB_NAME}.enc-shm`)]) {
+    if (f.exists) f.delete();
+  }
+  await d.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
+  // The URI may contain single quotes; the key is hex-only by construction.
+  const uri = enc.uri.replace(/'/g, "''");
+  await d.execAsync(`ATTACH DATABASE '${uri}' AS encrypted KEY "x'${key}'";`);
+  try {
+    await d.execAsync("SELECT sqlcipher_export('encrypted');");
+  } finally {
+    await d.execAsync("DETACH DATABASE encrypted;").catch(() => {});
+  }
+  await d.closeAsync();
+  dbPromise = null;
+
+  // Swap the encrypted file into place and drop the plaintext WAL/SHM.
+  for (const f of [src, new File(dir, `${DB_NAME}-wal`), new File(dir, `${DB_NAME}-shm`)]) {
+    if (f.exists) f.delete();
+  }
+  await enc.move(src, { overwrite: true });
+  await savePrefs({ dbEncryption: true });
+
+  // Reopen once to prove the key works before the UI says "restart".
+  const check = await getDb();
+  await check.getFirstAsync("SELECT COUNT(*) AS n FROM photos");
 }
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {

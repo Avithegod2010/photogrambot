@@ -1525,6 +1525,53 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             <Button title="Export to file" variant="outlined" theme={theme} onPress={onExportLocal} />
             <Button title="Import local backup" variant="outlined" theme={theme} onPress={() => setImportDialog(true)} />
           </View>
+          <View style={styles.divider} />
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 14 }}>
+            {prefs.dbEncryption ? "Local database: encrypted" : "Local database: plaintext"}
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}>
+            {prefs.dbEncryption
+              ? "SQLCipher is active. The key lives in Android Keystore and is not part of channel backups."
+              : "Encrypt the local index with SQLCipher. The key stays in Android Keystore; a new phone starts plaintext until you enable this again."}
+          </Text>
+          {!prefs.dbEncryption ? (
+            <Button
+              title="Encrypt local database"
+              variant="outlined"
+              theme={theme}
+              style={{ marginTop: 10 }}
+              onPress={() => {
+                Alert.alert(
+                  "Encrypt local database?",
+                  "The index is re-written with SQLCipher in place. This can take a moment on a large library. Restart the app afterwards. The channel archive is not affected.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Encrypt",
+                      onPress: () => {
+                        void (async () => {
+                          setBusyLabel("Encrypting local database.");
+                          try {
+                            const { enableDatabaseEncryption } = await import("../lib/db");
+                            await enableDatabaseEncryption();
+                            await update({ dbEncryption: true });
+                            Alert.alert(
+                              "Encrypted",
+                              "The local index is now encrypted. Restart the app so every screen reopens the database with the key."
+                            );
+                          } catch (e: any) {
+                            Alert.alert("Could not encrypt", e?.message ?? "Encryption failed.");
+                          } finally {
+                            setBusyLabel(null);
+                          }
+                        })();
+                      },
+                    },
+                  ]
+                );
+              }}
+            />
+          ) : null}
           <Button
             title="Export index (CSV)"
             variant="outlined"
