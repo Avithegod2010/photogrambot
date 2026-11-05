@@ -64,6 +64,15 @@ const widgetConfig: WithAndroidWidgetsParams = {
       resizeMode: "horizontal|vertical",
       updatePeriodMillis: 24 * 60 * 60 * 1000,
     },
+    {
+      name: "Slideshow",
+      label: "Slideshow",
+      description: "Open PhotogramBot's full-screen slideshow",
+      minWidth: "180dp",
+      minHeight: "180dp",
+      resizeMode: "horizontal|vertical",
+      updatePeriodMillis: 6 * 60 * 60 * 1000,
+    },
   ],
 };
 

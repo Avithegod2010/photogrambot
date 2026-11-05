@@ -132,6 +132,72 @@ export function MosaicWidget({
   );
 }
 
+export function SlideshowWidget({
+  imageDataUri,
+  imageWidth,
+  imageHeight,
+  photoId,
+  width,
+  height,
+}: {
+  imageDataUri: `data:image${string}` | null;
+  imageWidth: number;
+  imageHeight: number;
+  photoId: string | null;
+  width: number;
+  height: number;
+}) {
+  const imageHeightPx = Math.max(1, Math.floor(height * 0.74));
+  const footerHeight = Math.max(28, height - imageHeightPx);
+  return (
+    <FlexWidget
+      style={{
+        height: "match_parent",
+        width: "match_parent",
+        borderRadius: 20,
+        backgroundColor: "#101014",
+        overflow: "hidden",
+      }}
+      clickAction="photogrambot://slideshow"
+    >
+      <FlexWidget
+        style={{
+          width: "match_parent",
+          height: imageHeightPx,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        {imageDataUri ? (
+          <ImageWidget
+            image={imageDataUri}
+            imageWidth={imageWidth}
+            imageHeight={imageHeight}
+            resizeMode="cover"
+            style={{ height: "match_parent", width: "match_parent" }}
+          />
+        ) : (
+          <TextWidget text="▶" style={{ color: "#D6E3FF", fontSize: 28 }} />
+        )}
+      </FlexWidget>
+      <FlexWidget
+        style={{
+          width: "match_parent",
+          height: footerHeight,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "#1B1B1F",
+        }}
+      >
+        <TextWidget
+          text={photoId ? "▶  Slideshow" : "No photos yet"}
+          style={{ fontSize: 11, color: "#FFFFFF", fontWeight: "600" }}
+        />
+      </FlexWidget>
+    </FlexWidget>
+  );
+}
+
 export function QuickCaptureWidget({ accent }: { accent: string }) {
   return (
     <FlexWidget

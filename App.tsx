@@ -71,6 +71,12 @@ async function openPhotoFromUrl(url: string | null): Promise<void> {
     if (!isDecoyActive()) void captureFromWidget();
     return;
   }
+  if (url.startsWith("photogrambot://slideshow")) {
+    if (!isDecoyActive() && navigationRef.isReady()) {
+      navigationRef.navigate("Slideshow", { title: "Slideshow" });
+    }
+    return;
+  }
   if (!url.startsWith("photogrambot://photo/")) return;
   if (isDecoyActive()) return;
   const id = url.replace("photogrambot://photo/", "").split("?")[0];

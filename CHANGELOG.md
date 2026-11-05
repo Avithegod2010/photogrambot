@@ -46,8 +46,8 @@ All notable changes to PhotogramBot. Versions follow `android/version.properties
 - **Localization / RTL** - English, Hindi, Malayalam, German, Spanish and
   Arabic for tabs, settings sections, gallery chrome, collections and common
   actions; Arabic switches the layout to RTL after a restart.
-- **Extra widgets** - On this day, 2x2 Photo mosaic and Quick capture (camera
-  to upload queue).
+- **Extra widgets** - On this day, 2x2 Photo mosaic, Quick capture (camera to
+  upload queue) and a Slideshow launcher widget.
 - **Share/quick-capture staging fix** - `enqueueUploads` now honours a staged
   `local_uri`; share-target and camera captures are not MediaLibrary ids.
 

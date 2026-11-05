@@ -2,7 +2,12 @@ import React from "react";
 import { Linking } from "react-native";
 import type { WidgetTaskHandlerProps } from "react-native-android-widget";
 import { RandomPhotoWidget } from "./RandomPhotoWidget";
-import { OnThisDayWidget, MosaicWidget, QuickCaptureWidget } from "./ExtraWidgets";
+import {
+  OnThisDayWidget,
+  MosaicWidget,
+  QuickCaptureWidget,
+  SlideshowWidget,
+} from "./ExtraWidgets";
 import {
   getMosaicForWidget,
   getOnThisDayForWidget,
@@ -72,6 +77,21 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps) {
 
       if (widgetName === "QuickCapture") {
         props.renderWidget(<QuickCaptureWidget accent={accent} />);
+        break;
+      }
+
+      if (widgetName === "Slideshow") {
+        const data = await getRandomPhotoForWidget();
+        props.renderWidget(
+          <SlideshowWidget
+            imageDataUri={data?.imageDataUri ?? null}
+            imageWidth={data?.imageWidth ?? 200}
+            imageHeight={data?.imageHeight ?? 200}
+            photoId={data?.photoId ?? null}
+            width={width}
+            height={height}
+          />
+        );
         break;
       }
 
