@@ -5,4 +5,10 @@
   <color name="activityBackground">#101014</color>
   <color name="app_icon_accent">#2563EB</color>
   <color name="app_icon_mono">#000000</color>
+  <color name="app_icon_blue">#2563EB</color>
+  <color name="app_icon_teal">#0D9488</color>
+  <color name="app_icon_orange">#EA580C</color>
+  <color name="app_icon_green">#15803D</color>
+  <color name="app_icon_violet">#7C3AED</color>
+  <color name="app_icon_rose">#E11D48</color>
 </resources>

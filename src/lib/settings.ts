@@ -17,7 +17,7 @@ export type ThemeMode = "dark" | "amoled" | "light" | "system";
 export type DateFormat = "locale" | "dmy" | "mdy" | "iso";
 export type TileAspect = "square" | "original";
 export type MapStyle = "standard" | "satellite" | "hybrid" | "terrain";
-export type AppIconVariant = "default" | "accent" | "mono";
+export type AppIconVariant = string;
 export type InfoDensity = "compact" | "detailed";
 
 export const DEFAULT_AI_PROMPT =

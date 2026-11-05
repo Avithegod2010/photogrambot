@@ -103,11 +103,21 @@ class ShareIntentModule : Module() {
     Function("setAppIcon") { variant: String ->
       val context = appContext.reactContext ?: return@Function false
       val pkg = context.packageName
-      val names = mapOf(
+      // Colour × shape variants generated into the manifest (see
+      // scripts + app.config notes). Legacy "accent"/"mono" keys stay valid.
+      val names = mutableMapOf(
         "default" to "$pkg.IconDefault",
         "accent" to "$pkg.IconAccent",
         "mono" to "$pkg.IconMono"
       )
+      val colors = listOf("default", "blue", "teal", "orange", "green", "violet", "rose")
+      val shapes = listOf("default", "round", "squircle", "circle")
+      for (color in colors) {
+        for (shape in shapes) {
+          if (color == "default" && (shape == "default" || shape == "round")) continue
+          names["$color-$shape"] = "$pkg.Icon_${color}_${shape}"
+        }
+      }
       // Normalise unknown values to "default": skipping a key that is not in
       // the map would otherwise disable every alias and remove the launcher
       // icon entirely.

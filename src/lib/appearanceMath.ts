@@ -6,7 +6,9 @@ import type { DateFormat, ThemeMode } from "./settings";
 export type ResolvedThemeMode = "dark" | "amoled" | "light";
 export type TileAspect = "square" | "original";
 export type MapStyle = "standard" | "satellite" | "hybrid" | "terrain";
-export type AppIconVariant = "default" | "accent" | "mono";
+// Combined `<colour>-<shape>` keys (e.g. "teal-round") plus the legacy
+// "default"/"accent"/"mono" keys.
+export type AppIconVariant = string;
 export type InfoDensity = "compact" | "detailed";
 
 export const ACCENT_PRESETS: { key: string; label: string; color: string | null }[] = [
@@ -43,11 +45,40 @@ export const FONT_SCALES: { key: number; label: string }[] = [
   { key: 1.25, label: "Extra large" },
 ];
 
-export const APP_ICON_VARIANTS: { key: AppIconVariant; label: string }[] = [
+export const APP_ICON_COLORS = [
   { key: "default", label: "Default" },
-  { key: "accent", label: "Accent" },
+  { key: "blue", label: "Blue" },
+  { key: "teal", label: "Teal" },
+  { key: "orange", label: "Orange" },
+  { key: "green", label: "Green" },
+  { key: "violet", label: "Violet" },
+  { key: "rose", label: "Rose" },
   { key: "mono", label: "Monochrome" },
-];
+] as const;
+
+export const APP_ICON_SHAPES = [
+  { key: "default", label: "Default" },
+  { key: "round", label: "Rounded" },
+  { key: "squircle", label: "Squircle" },
+  { key: "circle", label: "Circle" },
+] as const;
+
+export function appIconVariant(color: string, shape: string): string {
+  if (color === "mono") return "mono";
+  if (color === "default" && shape === "default") return "default";
+  return `${color}-${shape}`;
+}
+
+export function parseAppIconVariant(variant: string | null | undefined): {
+  color: string;
+  shape: string;
+} {
+  if (!variant || variant === "default") return { color: "default", shape: "default" };
+  if (variant === "mono") return { color: "mono", shape: "default" };
+  if (variant === "accent") return { color: "blue", shape: "default" };
+  const [color, shape] = variant.split("-");
+  return { color: color || "default", shape: shape || "default" };
+}
 
 /** True when `nowMinutes` falls inside [start, end), supporting a midnight wrap. */
 export function isWithinWindow(nowMinutes: number, start: number, end: number): boolean {

@@ -51,7 +51,10 @@ import {
 } from "../lib/mlModels";
 import {
   ACCENT_PRESETS,
-  APP_ICON_VARIANTS,
+  APP_ICON_COLORS,
+  APP_ICON_SHAPES,
+  appIconVariant,
+  parseAppIconVariant,
   DATE_FORMATS,
   FONT_SCALES,
   GRID_COLUMNS,
@@ -1019,24 +1022,43 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             theme={theme}
           />
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
-            App icon
+            App icon colour
           </Text>
-          <ChipRow
-            options={APP_ICON_VARIANTS}
-            value={prefs.appIconVariant}
-            onSelect={(v) => {
-              void update({ appIconVariant: v as any });
-              if (!setAppIcon(String(v))) {
+          {(() => {
+            const parsed = parseAppIconVariant(prefs.appIconVariant);
+            const applyIcon = (color: string, shape: string) => {
+              const variant = appIconVariant(color, shape);
+              void update({ appIconVariant: variant });
+              if (!setAppIcon(variant)) {
                 Alert.alert(
                   "Icon not applied",
                   "This build predates the icon variants. Install the next preview build to switch icons."
                 );
               }
-            }}
-            theme={theme}
-          />
+            };
+            return (
+              <>
+                <ChipRow
+                  options={APP_ICON_COLORS as any}
+                  value={parsed.color}
+                  onSelect={(v) => applyIcon(String(v), parsed.shape)}
+                  theme={theme}
+                />
+                <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+                  App icon shape
+                </Text>
+                <ChipRow
+                  options={APP_ICON_SHAPES as any}
+                  value={parsed.shape}
+                  onSelect={(v) => applyIcon(parsed.color, String(v))}
+                  theme={theme}
+                />
+              </>
+            );
+          })()}
           <Text style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
-            If the launcher keeps the old icon, close and reopen it (or reboot).
+            Shape controls the artwork inset inside the launcher's own mask. If the launcher
+            keeps the old icon, close and reopen it (or reboot).
           </Text>
 
           <View style={styles.divider} />
