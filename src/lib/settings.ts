@@ -61,6 +61,8 @@ export interface Prefs {
   mapStyle: MapStyle;
   viewerAutoHideChrome: boolean;
   viewerChromeDelaySec: number;
+  slideshowIntervalSec: number;
+  slideshowShuffle: boolean;
   infoSheetDensity: InfoDensity;
   skeletonLoading: boolean;
   widgetShowDate: boolean;
@@ -144,6 +146,8 @@ export const defaultPrefs: Prefs = {
   mapStyle: "standard",
   viewerAutoHideChrome: true,
   viewerChromeDelaySec: 3,
+  slideshowIntervalSec: 5,
+  slideshowShuffle: false,
   infoSheetDensity: "detailed",
   skeletonLoading: true,
   widgetShowDate: true,

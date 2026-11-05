@@ -340,6 +340,27 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           </Card>
 
+          <SectionLabel text="Slideshow" theme={theme} />
+          <Card
+            theme={theme}
+            onPress={() => {
+              if (decoy) return;
+              navigation.navigate("Slideshow", { title: "Slideshow" });
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 15 }}>
+                  Play a slideshow
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginTop: 2 }}>
+                  Full-screen auto-advance through backed-up photos
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>›</Text>
+            </View>
+          </Card>
+
           <SectionLabel text={tr("collections.ask")} theme={theme} />
           <Card theme={theme} onPress={() => navigation.navigate("Ask")}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -930,6 +951,17 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
             {!isDecoyActive() && restoreTargets.length > 0 ? (
               <Pressable onPress={restoreAll} hitSlop={6}>
                 <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Restore all</Text>
+              </Pressable>
+            ) : null}
+            {!isDecoyActive() && photos.length > 0 ? (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate("Slideshow", { photos, title: albumName })
+                }
+                hitSlop={6}
+                style={{ marginStart: 14 }}
+              >
+                <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Play</Text>
               </Pressable>
             ) : null}
             {isTrip && !isDecoyActive() && restoreTargets.length > 0 ? (

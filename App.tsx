@@ -33,6 +33,7 @@ import { SimilarScreen } from "./src/screens/SimilarScreen";
 import { PeopleScreen } from "./src/screens/PeopleScreen";
 import { AskScreen } from "./src/screens/AskScreen";
 import { BestOfScreen } from "./src/screens/BestOfScreen";
+import { SlideshowScreen } from "./src/screens/SlideshowScreen";
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
@@ -252,6 +253,11 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           <Stack.Screen name="People" component={PeopleScreen} />
           <Stack.Screen name="Ask" component={AskScreen} />
           <Stack.Screen name="BestOf" component={BestOfScreen} />
+          <Stack.Screen
+            name="Slideshow"
+            component={SlideshowScreen}
+            options={{ presentation: "fullScreenModal", animation: "fade" }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     );

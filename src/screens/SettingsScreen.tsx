@@ -1049,6 +1049,22 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             />
           ) : null}
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Slideshow interval
+          </Text>
+          <ChipRow
+            options={[3, 5, 10, 15].map((n) => ({ key: n, label: `${n}s` }))}
+            value={prefs.slideshowIntervalSec}
+            onSelect={(v) => void update({ slideshowIntervalSec: Number(v) })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Shuffle slideshow"
+            subtitle="Play backed-up photos in random order"
+            value={prefs.slideshowShuffle}
+            onChange={(v) => void update({ slideshowShuffle: v })}
+            theme={theme}
+          />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
             Photo info
           </Text>
           <ChipRow
