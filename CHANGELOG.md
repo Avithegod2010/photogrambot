@@ -3,6 +3,60 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [unreleased] — next release (top-10 wave)
+
+### Backup reliability
+- **Upload queue persistence** — database backups (format v2) now carry
+  pending/running/failed queue rows; a restore on the same device resumes the
+  queue instead of re-scanning blindly. A pure sanitizer caps at 5,000 rows,
+  keeps one row per local id, turns `running` back into `pending`, and drops
+  stale backoff.
+- **Split-video self-repair** — repair now clears a broken `parts` chain and
+  re-uploads from the local file (previously skipped as unrepairable). New part
+  records carry their `message_id`, so the repair can delete the old part
+  messages best-effort.
+
+### Security
+- **FLAG_SECURE in viewer/lock** (Settings → Privacy → Block screenshots) —
+  blocks screenshots and recents thumbnails while a private photo or the lock
+  screen is visible. Native change; takes effect in the next build.
+- **Auto-lock timeout** — Immediately / 30 s / 1 min / 5 min after
+  backgrounding, instead of always locking instantly.
+
+### Gallery & organization
+- **Sticky date headers** — a floating header follows the day-view scroll,
+  shows the photo count, and taps back to the top.
+- **Offline reverse geocoding** — a ~170-city gazetteer labels map clusters,
+  photo info and trip stories with "City, Country" (coordinates fallback).
+
+### Remote control
+- **Inline keyboards** — `/status` and `/help` carry Sync/Pause/Resume/Stats/
+  Queue buttons; callback presses are authorized via `getChatAdministrators`
+  (channel admins only, 5-minute cache).
+- **New commands** — `/help`, `/ping`, `/last`, `/search` (alias of `/find`),
+  `/favorite` (reply toggle) and `/album <name>` (reply add/create).
+
+### Diagnostics & testing
+- **Crash log** — uncaught JS errors are recorded in the on-device diagnostics
+  ring buffer (`[crash]`, message + first frames), with no network or
+  third-party SDK.
+- **Maestro smoke flow** — `.maestro/smoke.yaml` + `docs/TESTING.md` cover
+  launch → Settings/Appearance → Collections → Gallery.
+
+### Foundations (next build / model)
+- **People clustering** — pure cosine + union-find engine, `people` /
+  `face_embeddings` schema, People screen and Collections entry. The
+  face-embedding model is the remaining piece; the empty state says so.
+- **Video compression** — planner (target geometry/bitrate, 5% savings floor)
+  and Off/720p/1080p setting. The native transcoder is the next-build piece.
+- **Release keystore** — `docs/RELEASE.md` now targets uploading
+  `pb-release.keystore` to EAS; `npm run release:resign` re-signs an APK for
+  in-place updates (used to install 1.1.0 over the debug build without data
+  loss).
+- **SDK 57 patch refresh** — `expo` 57.0.32, `expo-notifications`/`expo-sharing`
+  57.0.25, etc. The SDK 58 major upgrade is planned in
+  `docs/SDK58_MIGRATION.md` and awaits a build window.
+
 ## [1.1.0] — customisation
 
 A look-and-feel release: 21 appearance and layout controls, most of them

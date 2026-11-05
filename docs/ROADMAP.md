@@ -17,16 +17,16 @@ intentionally deferred until the owner approves a release.
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Stable release keystore + APK re-sign tooling | in progress |
-| 2 | Persist the upload queue across reinstall + video self-repair | in progress |
-| 3 | People clustering (foundation + provider) | in progress |
-| 4 | Sticky date headers | in progress |
-| 5 | FLAG_SECURE + auto-lock timeout | in progress |
-| 6 | Crash log + Maestro smoke tests | in progress |
-| 7 | Bot inline keyboards + more commands | in progress |
-| 8 | On-device video compression | in progress |
-| 9 | Offline reverse geocoding | in progress |
-| 10 | Expo SDK 58 + dependency refresh | in progress |
+| 1 | Stable release keystore guidance + APK re-sign tooling | done (owner upload step remains) |
+| 2 | Persist the upload queue across reinstall + video self-repair | done |
+| 3 | People clustering engine + schema + People screen | foundation (embedding model pending) |
+| 4 | Sticky date headers | done |
+| 5 | FLAG_SECURE + auto-lock timeout | done (native build needed) |
+| 6 | Crash log + Maestro smoke tests | done |
+| 7 | Bot inline keyboards + more commands | done |
+| 8 | Video compression planner + settings | foundation (native transcoder pending) |
+| 9 | Offline reverse geocoding | done |
+| 10 | SDK 57 patch refresh + SDK 58 migration plan | partial (major upgrade planned) |
 
 ---
 
@@ -34,6 +34,7 @@ intentionally deferred until the owner approves a release.
 
 1. **Persist the upload queue across reinstall** — queue rows in the DB
    snapshot, restored with the index. *(S/M, high)*
+   — ****done****
 2. **Per-folder schedules** — "Camera anytime, Screenshots at night, WhatsApp
    only on Wi-Fi". *(M, high)*
 3. **Adaptive concurrency** — 1 worker on mobile data, 3 on Wi-Fi, 429-aware;
@@ -44,6 +45,7 @@ intentionally deferred until the owner approves a release.
    and surface/repair broken rows. *(M, high)*
 6. **Video self-repair** — discard a broken split `parts` chain and re-upload
    from the local file. *(M, high)*
+   — ****done****
 7. **Upload size/time estimator** — "~4.2 GB / ~38 min on this connection".
    *(S, medium)*
 8. **Battery-aware throttling** — pause below 15% when not required to charge.
@@ -57,6 +59,7 @@ intentionally deferred until the owner approves a release.
 
 11. **People clustering** — face embeddings (Gemini opt-in / on-device TFLite).
     *(L, very high)*
+   — ****foundation** — engine, schema and screen; model pending**
 12. **On-device object/scene tagging** — ML Kit/TFLite "dog", "receipt",
     "whiteboard". *(L, high)*
 13. **"Ask your photos" chat** — natural-language Q&A over captions/OCR/metadata
@@ -67,6 +70,7 @@ intentionally deferred until the owner approves a release.
     *(M, high)*
 17. **Reverse geocoding** — offline place names for map, trips, stories.
     *(M, high)*
+   — ****done** (offline gazetteer)**
 18. **Smart "best of" collections** — sharpest/most-favorited per trip/month.
     *(M, medium)*
 19. **OCR improvements** — multi-language, selectable text, copy button.
@@ -78,6 +82,7 @@ intentionally deferred until the owner approves a release.
 
 21. **Sticky date headers** — floating header that follows the scroll.
     *(M, high)*
+   — ****done****
 22. **Pinch-to-zoom grid density** — 2–6 columns with live reflow. *(M, medium)*
 23. **Custom fonts** — bundle 2–3 families, pick one in Settings. *(M, medium)*
 24. **Icon packs / masks** — rounded/squircle/circle + more color variants.
@@ -102,7 +107,9 @@ intentionally deferred until the owner approves a release.
 35. **SQLCipher** — encrypt the local index; key in Android Keystore. *(L, high)*
 36. **FLAG_SECURE in viewer/lock** — block screenshots and recents thumbnails.
     *(S, high)*
+   — ****done** (native build needed)**
 37. **Auto-lock timeout options** — immediate / 30 s / 1 min / 5 min. *(S, high)*
+   — ****done****
 38. **Duress/decoy refinements** — separate decoy bot/channel, fake albums,
     panic wipe. *(M, high)*
 39. **Passphrase strength meter + recovery key** — avoid a permanent lockout.
@@ -118,7 +125,9 @@ intentionally deferred until the owner approves a release.
 
 44. **More bot commands** — `/stats`, `/last`, `/search`, `/favorite`, `/album`,
     `/help`, `/ping`. *(M, high)*
+   — ****done****
 45. **Inline keyboards** — status/sync/pause/queue buttons. *(M, high)*
+   — ****done****
 46. **Webhook mode** — optional, lower battery/network than long polling.
     *(M, medium)*
 47. **Admin allowlist** — multiple admins, read-only vs destructive roles.
@@ -135,12 +144,16 @@ intentionally deferred until the owner approves a release.
 
 52. **Expo SDK 58 + dependency refresh** — clears advisories and patch drift.
     *(L, high)*
+   — ****partial** — SDK 57 patches refreshed; SDK 58 planned**
 53. **Stable release keystore** — upload `pb-release.keystore` to EAS; every APK
     shares one signer. *(S, very high)*
+   — ****tooling done** — owner upload step remains**
 54. **Crash/ANR reporting** — opt-in, privacy-first, attaches diagnostics.
     *(M, high)*
+   — ****partial** — local crash log; no remote reporting**
 55. **Detox/Maestro smoke tests** — launch → gallery → viewer → settings in CI.
     *(L, high)*
+   — ****partial** — Maestro flow written; CI emulator not wired**
 56. **DB migration tests + backup round-trip fuzzing** — automated. *(M, high)*
 57. **FlashList + image prefetch** — smoother 3k+ photo grids. *(M, medium)*
 58. **Startup profiling** — Hermes bytecode, lazy screens, cold-start budget.
@@ -152,6 +165,7 @@ intentionally deferred until the owner approves a release.
 
 61. **On-device video compression/transcoding** — shrink 4K before splitting.
     *(L, very high)*
+   — ****partial** — planner/settings; native transcoder pending**
 62. **Non-destructive photo editing** — crop/rotate/filters with version history.
     *(L, high)*
 63. **Import from Google Photos Takeout / Apple Photos** — hash-match + metadata.
