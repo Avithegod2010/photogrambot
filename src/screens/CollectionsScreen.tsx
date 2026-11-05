@@ -15,6 +15,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
+import { useT } from "../useT";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { ACCENT_PRESETS, albumAccent, isHexColor } from "../lib/appearance";
@@ -37,6 +38,7 @@ import { Dialog, Button, TextField, SectionLabel, Card } from "../components/ui"
 
 export function CollectionsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const { albums, favorites, trash, stats, newAlbum, removeAlbum } = useLibraryStore();
   const [tab, setTab] = useState<"albums" | "trash">("albums");
@@ -120,7 +122,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
       {tab === "albums" ? (
         <ScrollView contentContainerStyle={styles.scroll}>
-          <SectionLabel text="Smart collections" theme={theme} />
+          <SectionLabel text={tr("collections.smart")} theme={theme} />
           <View style={styles.albumGrid}>
             <Pressable
               style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
@@ -135,7 +137,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                   filled={true}
                 />
               </View>
-              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Favorites</Text>
+              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>{tr("common.favorites")}</Text>
               <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
                 {visibleFavorites.length} photos
               </Text>
@@ -201,7 +203,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
           {visibleTripAlbums.length > 0 ? (
             <>
-              <SectionLabel text="Trips & events" theme={theme} />
+              <SectionLabel text={tr("collections.trips")} theme={theme} />
               <View style={styles.albumGrid}>
                 {visibleTripAlbums.map((a) => (
                   <Pressable
@@ -247,7 +249,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </>
           ) : null}
 
-          <SectionLabel text="Your albums" theme={theme} />
+          <SectionLabel text={tr("collections.yourAlbums")} theme={theme} />
           {visibleManualAlbums.length === 0 ? (
             <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
               No albums yet. Tap ＋ to create one and organize your backed-up photos.
@@ -323,7 +325,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           )}
 
-          <SectionLabel text="Best of" theme={theme} />
+          <SectionLabel text={tr("collections.bestOf")} theme={theme} />
           <Card theme={theme} onPress={() => navigation.navigate("BestOf")}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <View style={{ flex: 1 }}>
@@ -338,7 +340,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </View>
           </Card>
 
-          <SectionLabel text="Ask your photos" theme={theme} />
+          <SectionLabel text={tr("collections.ask")} theme={theme} />
           <Card theme={theme} onPress={() => navigation.navigate("Ask")}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <View style={{ flex: 1 }}>

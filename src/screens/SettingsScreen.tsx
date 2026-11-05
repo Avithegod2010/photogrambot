@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  I18nManager,
   Platform,
   Pressable,
   ScrollView,
@@ -89,6 +90,7 @@ import {
 } from "../lib/backup";
 import type { ThemeMode } from "../lib/settings";
 import { passwordStrength } from "../lib/passwordStrength";
+import { LANGUAGES, isRTLLanguage, resolveLanguage, t } from "../lib/i18n";
 import {
   createRecoveryKey,
   recoverPassphrase,
@@ -491,7 +493,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        <SectionLabel text="Bot configuration" theme={theme} />
+        <SectionLabel text={t("settings.bot", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <View style={styles.configRow}>
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>Bot</Text>
@@ -523,7 +525,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text="Backup & sync" theme={theme} />
+        <SectionLabel text={t("settings.backup", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Button
             title="Sync full gallery now"
@@ -716,7 +718,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text="AI captioning (Gemini)" theme={theme} />
+        <SectionLabel text={t("settings.ai", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <ToggleRow
             title="AI captions"
@@ -761,7 +763,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text="Folder synchronisation" theme={theme} />
+        <SectionLabel text={t("settings.folders", prefs.language)} theme={theme} />
         <Card theme={theme} onPress={() => navigation.navigate("FolderSync")}>
           <View style={styles.folderRow}>
             <View style={{ flex: 1 }}>
@@ -778,7 +780,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text="Appearance" theme={theme} />
+        <SectionLabel text={t("settings.appearance", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>Theme</Text>
           <ChipRow
@@ -928,6 +930,31 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             onSelect={(v) => void update({ dateFormat: v as any })}
             theme={theme}
           />
+          <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Language
+          </Text>
+          <ChipRow
+            options={LANGUAGES.map((l) => ({ key: l.key, label: l.native }))}
+            value={prefs.language}
+            onSelect={(v) => {
+              const lang = String(v);
+              void update({ language: lang });
+              const rtl = isRTLLanguage(resolveLanguage(lang));
+              if (I18nManager.isRTL !== rtl) {
+                I18nManager.allowRTL(true);
+                I18nManager.forceRTL(rtl);
+                Alert.alert(
+                  "Restart required",
+                  "Android re-lays out the interface on the next launch. Close and reopen the app to apply the new direction."
+                );
+              }
+            }}
+            theme={theme}
+          />
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+            Chrome and common actions are translated; long explanatory text falls back to
+            English. Arabic switches the layout to RTL after a restart.
+          </Text>
 
           <View style={styles.divider} />
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>Grid</Text>
@@ -1116,7 +1143,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text="Channel captions" theme={theme} />
+        <SectionLabel text={t("settings.captions", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Choose which metadata lines appear under each upload and reorder them. The
@@ -1131,7 +1158,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text="On-device AI" theme={theme} />
+        <SectionLabel text={t("settings.onDeviceAi", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Models are downloaded on demand and are <Text style={{ fontWeight: "700" }}>not</Text>{" "}
@@ -1219,7 +1246,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text="Notifications" theme={theme} />
+        <SectionLabel text={t("settings.notifications", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <ToggleRow
             title="Upload progress"
@@ -1267,7 +1294,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text="Privacy & security" theme={theme} />
+        <SectionLabel text={t("settings.privacy", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <ToggleRow
             title="App lock"
@@ -1432,7 +1459,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Dialog>
 
-        <SectionLabel text="Diagnostics" theme={theme} />
+        <SectionLabel text={t("settings.diagnostics", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Share the break-in log and the recent failure log as a JSON file. It contains no
@@ -1447,7 +1474,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text="Maintenance" theme={theme} />
+        <SectionLabel text={t("settings.maintenance", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <ToggleRow
             title="Screenshot sunset"
@@ -1510,7 +1537,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text="Database" theme={theme} />
+        <SectionLabel text={t("settings.database", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <View style={styles.statsGrid}>
             <Stat label="Backed up" value={String(stats.uploaded)} theme={theme} />
@@ -1704,7 +1731,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text="Storage" theme={theme} />
+        <SectionLabel text={t("settings.storage", prefs.language)} theme={theme} />
         {storage ? <StorageCard storage={storage} theme={theme} /> : null}
         {freeBytes !== null ? (
           <Card theme={theme}>
@@ -1749,7 +1776,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </Card>
         ) : null}
 
-        <SectionLabel text="About" theme={theme} />
+        <SectionLabel text={t("settings.about", prefs.language)} theme={theme} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>
             {prefs.appDisplayName || "PhotogramBot"}

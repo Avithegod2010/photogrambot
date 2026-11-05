@@ -53,6 +53,8 @@ import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
 import { installCrashHandler } from "./src/lib/crashlog";
+import { t, isRTLLanguage, resolveLanguage } from "./src/lib/i18n";
+import { I18nManager } from "./src/rn";
 
 // Record uncaught JS errors in the on-device diagnostics log.
 installCrashHandler();
@@ -95,11 +97,12 @@ function navigateToNotificationScreen(screen: string): void {
 }
 
 function CloudTab(props: any) {
-  // Telephoto-style Cloud tab — reuses LibraryScreen's uploaded-photo grid.
+  // Telephoto-style Cloud tab - reuses LibraryScreen's uploaded-photo grid.
+  const language = useSettingsStore((s) => s.prefs.language);
   return (
     <LibraryScreen
       {...props}
-      route={{ ...props.route, params: { filter: "cloud", title: "Cloud", tab: true } }}
+      route={{ ...props.route, params: { filter: "cloud", title: t("tabs.cloud", language), tab: true } }}
     />
   );
 }
@@ -112,6 +115,7 @@ function SettingsTabPlaceholder() {
 
 function Tabs() {
   const theme = useTheme();
+  const language = useSettingsStore((s) => s.prefs.language);
   return (
     <Tab.Navigator
       screenOptions={{
@@ -134,23 +138,23 @@ function Tabs() {
       <Tab.Screen
         name="GalleryTab"
         component={GalleryScreen}
-        options={{ title: "Gallery", tabBarIcon: ({ color }) => <PhotoFrameIcon color={color} /> }}
+        options={{ title: t("tabs.gallery", language), tabBarIcon: ({ color }) => <PhotoFrameIcon color={color} /> }}
       />
       <Tab.Screen
         name="CloudTab"
         component={CloudTab}
-        options={{ title: "Cloud", tabBarIcon: ({ color }) => <CloudIcon color={color} /> }}
+        options={{ title: t("tabs.cloud", language), tabBarIcon: ({ color }) => <CloudIcon color={color} /> }}
       />
       <Tab.Screen
         name="CollectionsTab"
         component={CollectionsScreen}
-        options={{ title: "Collections", tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
+        options={{ title: t("tabs.collections", language), tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsTabPlaceholder}
         options={{
-          title: "Settings",
+          title: t("tabs.settings", language),
           tabBarIcon: ({ color }) => <GearIcon color={color} />,
           tabBarButton: (props) => (
             <Pressable
@@ -318,6 +322,12 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await loadSettings();
+      // Apply the persisted language direction. Android only re-lays out on
+      // the next launch, which is why Settings asks for a restart.
+      I18nManager.allowRTL(true);
+      const lang = useSettingsStore.getState().prefs.language;
+      const rtl = isRTLLanguage(resolveLanguage(lang));
+      if (I18nManager.isRTL !== rtl) I18nManager.forceRTL(rtl);
       await ensureDeviceId();
       await initialize();
       // Resolve the lock state from freshly loaded prefs BEFORE the first

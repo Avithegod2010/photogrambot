@@ -23,6 +23,7 @@ import { useSetupStore } from "../store/useSetupStore";
 import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
+import { useT } from "../useT";
 import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
 import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, saveSearch, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
@@ -65,6 +66,7 @@ const LOCAL_PAGE_SIZE = 600;
 
 export function GalleryScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const { photos, loading, loadingMore, hasMore, loadInitial, loadMore, refresh, refreshMeta, stats } =
     useLibraryStore();
@@ -899,7 +901,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                   textTransform: "capitalize",
                 }}
               >
-                {m}
+                {tr(m === "days" ? "gallery.days" : m === "months" ? "gallery.months" : "gallery.years")}
               </Text>
             </Pressable>
           ))}
@@ -909,7 +911,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       <View style={[styles.searchBar, { backgroundColor: theme.colors.surfaceContainer }]}>
         <Text style={{ color: theme.colors.onSurfaceVariant }}>⌕</Text>
         <TextInput
-          placeholder="Search photos"
+          placeholder={tr("common.search")}
           placeholderTextColor={theme.colors.onSurfaceVariant}
           value={search}
           onChangeText={runSearch}
@@ -1019,7 +1021,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           <ActivityIndicator size="small" color={theme.colors.onPrimaryContainer} />
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: "600", fontSize: 13 }}>
-              Backing up {progress.current}/{progress.total}
+              {tr("gallery.backingUp")} {progress.current}/{progress.total}
               {progress.percent !== null ? ` — ${progress.percent}%` : ""}
             </Text>
             <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 11 }} numberOfLines={1}>
@@ -1164,7 +1166,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                   size={120}
                 />
                 <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
-                  No photos yet
+                  {tr("gallery.noPhotos")}
                 </Text>
                 <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
                   Nothing backed up yet. New photos back up automatically when Auto sync is on in Settings, or share photos to {appDisplayName || "PhotogramBot"} from any app.
@@ -1243,7 +1245,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                   size={120}
                 />
                 <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
-                  Nothing here yet
+                  {tr("gallery.nothingHere")}
                 </Text>
                 <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
                   Photos from this device appear here. New photos back up automatically when Auto sync is on in Settings.
@@ -1325,7 +1327,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             onPress={() => setSelection(new Set((searchResults ?? photos).map((p) => p.id)))}
             style={styles.selAction}
           >
-            <Text style={{ color: theme.colors.primary }}>All</Text>
+            <Text style={{ color: theme.colors.primary }}>{tr("common.all")}</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -1336,7 +1338,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             }}
             style={styles.selAction}
           >
-            <Text style={{ color: theme.colors.primary }}>Invert</Text>
+            <Text style={{ color: theme.colors.primary }}>{tr("common.invert")}</Text>
           </Pressable>
           <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>Share</Text>
