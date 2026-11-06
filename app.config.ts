@@ -40,7 +40,7 @@ const widgetConfig: WithAndroidWidgetsParams = {
     {
       name: "OnThisDay",
       label: "On this day",
-      description: "A photo taken on today's date in an earlier year",
+      description: "A photo taken on this day in an earlier year",
       minWidth: "180dp",
       minHeight: "180dp",
       resizeMode: "horizontal|vertical",
@@ -67,7 +67,7 @@ const widgetConfig: WithAndroidWidgetsParams = {
     {
       name: "Slideshow",
       label: "Slideshow",
-      description: "Open PhotogramBot's full-screen slideshow",
+      description: "Open the PhotogramBot full-screen slideshow",
       minWidth: "180dp",
       minHeight: "180dp",
       resizeMode: "horizontal|vertical",

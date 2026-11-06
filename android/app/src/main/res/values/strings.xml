@@ -2,9 +2,9 @@
   <string name="app_name">PhotogramBot</string>
   <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
   <string name="widget_randomphoto_description" translatable="false">Shows a random photo from your PhotogramBot gallery</string>
-  <string name="widget_onthisday_description" translatable="false">A photo taken on today's date in an earlier year</string>
+  <string name="widget_onthisday_description" translatable="false">A photo taken on today&apos;s date in an earlier year</string>
   <string name="widget_mosaic_description" translatable="false">A 2x2 mosaic of photos from your archive</string>
   <string name="widget_quickcapture_description" translatable="false">Open the camera and back up a shot immediately</string>
-  <string name="widget_slideshow_description" translatable="false">Open PhotogramBot's full-screen slideshow</string>
+  <string name="widget_slideshow_description" translatable="false">Open PhotogramBot&apos;s full-screen slideshow</string>
   <string name="expo_runtime_version">1.2.0</string>
 </resources>
