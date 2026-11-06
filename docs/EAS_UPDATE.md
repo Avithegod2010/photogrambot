@@ -5,8 +5,10 @@ APK.
 
 ## Configuration
 
-- `app.config.ts` sets `runtimeVersion.policy = "appVersion"` and the EAS
-  Update URL for project `421f1e6b-cda7-4f20-a6f1-dc972c76c0f4`.
+- `app.config.ts` sets `runtimeVersion` to the literal `versionName` from
+  `android/version.properties` (bare workflow does not support the
+  `appVersion` policy) and the EAS Update URL for project
+  `421f1e6b-cda7-4f20-a6f1-dc972c76c0f4`.
 - `eas.json` build profiles carry channels: `development`, `preview`,
   `production`.
 - The committed `android/` manifest carries the matching

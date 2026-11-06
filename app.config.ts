@@ -128,11 +128,9 @@ const config: ExpoConfig = {
   web: {
     favicon: "./assets/favicon.png",
   },
-  runtimeVersion: {
-    // appVersion ties each JS update to the installed versionName. Bump the
-    // version when a native change ships.
-    policy: "appVersion",
-  },
+  // Bare workflow (committed android/): runtimeVersion must be a literal.
+  // Read it from version.properties so OTA updates stay tied to the APK.
+  runtimeVersion: releaseVersion.versionName,
   updates: {
     url: "https://u.expo.dev/421f1e6b-cda7-4f20-a6f1-dc972c76c0f4",
     enabled: true,

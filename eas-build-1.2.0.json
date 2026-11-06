@@ -1,0 +1,23 @@
+Γÿà eas-cli@27.5.0 is now available.
+To upgrade, run:
+npm install -g eas-cli
+Proceeding with outdated version.
+
+Resolved "preview" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "preview" environment on EAS.
+
+Specified value for "android.package" in app.config.ts is ignored because an android directory was detected in the project.
+EAS Build will use the value found in the native code.
+
+
+ΓêÜ Created update channel "preview" and branch "preview" on @avithegod-team/photogrambot project. Learn more: https://docs.expo.dev/eas-update/eas-cli/
+Γ£ö Using remote Android credentials (Expo server)
+Γ£ö Using Keystore from configuration: Build Credentials cZp1cUz_xw (default)
+
+Compressing project files and uploading to EAS Build. Learn more: https://expo.fyi/eas-build-archive
+- Compressing project files
+- Uploading to EAS Build (0 / 3.1 MB)
+Γ£ö Uploaded to EAS 3s
+CommandError: You're currently using the bare workflow, where runtime version policies are not supported. You must set your runtime version manually. For example, define your runtime version as "1.0.0", not {"policy": "appVersion"} in your app config. https://docs.expo.dev/eas-update/runtime-versions
+
+    Error: build command failed.
