@@ -74,3 +74,5 @@ latest.json
 # Release artifacts (attach to a GitHub Release, never commit)
 *.apk
 *.aab
+eas-build*.json
+eas-build*.log
