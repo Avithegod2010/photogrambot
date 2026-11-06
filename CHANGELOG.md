@@ -3,7 +3,7 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
-## [unreleased] - remote, multi-device & engineering wave
+## [1.2.0] - remote, multi-device & engineering wave
 
 ### Remote control & multi-device
 - **Admin roles** - channel posts stay owner/admin; allowlisted Telegram
