@@ -3,7 +3,7 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
-## [Unreleased] - Material You motion & haptics
+## [1.4.0] - Material You motion & haptics
 
 - **Material 3 navigation bar** - animated 32 dp active indicator pill behind the
   selected tab icon; bar reserves the gesture inset.

@@ -1,6 +1,6 @@
 {
   "name": "photogrambot",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Back up your phone's photos and videos to your own Telegram channel via the Bot API — Google Photos-style app built with Expo + React Native.",
   "license": "MIT",
   "main": "index.ts",
