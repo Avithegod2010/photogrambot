@@ -1,12 +1,12 @@
 import { markStartup, finishStartup } from "./src/lib/startup";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useSetupStore } from "./src/store/useSetupStore";
 import { useSettingsStore, useDeviceStore } from "./src/store/useSettingsStore";
@@ -78,10 +78,13 @@ import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
+import { fallback, motion } from "./src/theme";
+import { useReducedMotion } from "./src/useReducedMotion";
 import { installCrashHandler } from "./src/lib/crashlog";
 import { installCrashReporter, startStallWatchdog, flushCrashReports } from "./src/lib/crashReport";
 import { t, isRTLLanguage, resolveLanguage } from "./src/lib/i18n";
 import { I18nManager } from "./src/rn";
+import { ErrorBoundary } from "./src/components/ErrorBoundary";
 
 // Record uncaught JS errors in the on-device diagnostics log and queue them
 // for the opt-in crash reporter. The stall watchdog approximates ANR detection.
@@ -198,6 +201,7 @@ function SettingsTabPlaceholder() {
 
 function Tabs() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const language = useSettingsStore((s) => s.prefs.language);
   return (
     <Tab.Navigator
@@ -206,16 +210,29 @@ function Tabs() {
         tabBarActiveTintColor:
           typeof theme.colors.primary === "string"
             ? (theme.colors.primary as string)
-            : "#A8C7FA",
+            : fallback.primary,
         tabBarInactiveTintColor:
           typeof theme.colors.onSurfaceVariant === "string"
             ? (theme.colors.onSurfaceVariant as string)
-            : "#C4C6D0",
+            : fallback.onSurfaceVariant,
         tabBarStyle: {
           backgroundColor: theme.colors.surfaceContainer,
           borderTopColor: theme.colors.outlineVariant,
+          // The gesture bar sits inside the system inset; reserve it so the
+          // labels never collide with the home indicator.
+          height: 58 + insets.bottom,
+          paddingTop: 6,
+          paddingBottom: Math.max(insets.bottom, 6),
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarLabel: ({ color, children }) => (
+          <Text
+            maxFontSizeMultiplier={1.6}
+            numberOfLines={1}
+            style={{ fontSize: 11, fontWeight: "600", color }}
+          >
+            {children}
+          </Text>
+        ),
       }}
     >
       <Tab.Screen
@@ -267,7 +284,7 @@ function Splash() {
   return (
     <View style={[styles.splash, { backgroundColor: bg }]}>
       <Image source={require("./assets/icon.png")} style={styles.splashLogo} />
-      <ActivityIndicator color={useAccent ? fg : "#A8C7FA"} />
+      <ActivityIndicator color={useAccent ? fg : fallback.primary} />
       <Text style={[styles.splashText, { color: fg }]}>
         Starting {appDisplayName || "PhotogramBot"}…
       </Text>
@@ -278,19 +295,27 @@ function Splash() {
 function ThemeFade({ children }: { children: React.ReactNode }) {
   const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
   const accentColor = useSettingsStore((s) => s.prefs.accentColor);
+  const reduce = useReducedMotion();
   const opacity = useRef(new Animated.Value(1)).current;
   const keyRef = useRef(`${resolvedTheme}:${accentColor}`);
   useEffect(() => {
     const next = `${resolvedTheme}:${accentColor}`;
     if (next === keyRef.current) return;
     keyRef.current = next;
+    // Reduced motion: swap instantly. The colour change still explains
+    // itself; only the fade is movement.
+    if (reduce) {
+      opacity.setValue(1);
+      return;
+    }
     opacity.setValue(0.35);
     Animated.timing(opacity, {
       toValue: 1,
-      duration: 220,
+      duration: motion.slow,
+      easing: Easing.bezier(...motion.easing),
       useNativeDriver: true,
     }).start();
-  }, [resolvedTheme, accentColor, opacity]);
+  }, [resolvedTheme, accentColor, opacity, reduce]);
   return <Animated.View style={{ flex: 1, opacity }}>{children}</Animated.View>;
 }
 
@@ -536,7 +561,9 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         <ThemeFade>
-          <Root locked={locked} initialized={initialized} />
+          <ErrorBoundary>
+            <Root locked={locked} initialized={initialized} />
+          </ErrorBoundary>
         </ThemeFade>
         {sharedUris.length > 0 ? (
           <ShareTargetSheet uris={sharedUris} onClose={() => setSharedUris([])} />

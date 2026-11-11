@@ -207,6 +207,182 @@ export function InfoIcon({ color, size = 24 }: { color: ColorValue; size?: numbe
   );
 }
 
+export function ArrowLeftIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M19 12H5M11 6l-6 6 6 6"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function CloseIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 6l12 12M18 6L6 18"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function ChevronRightIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 5l7 7-7 7"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function CheckIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 12.5l4.5 4.5L19 7"
+        stroke={color}
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function PlayIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M8 5.5l10 6.5-10 6.5z" fill={color} />
+    </Svg>
+  );
+}
+
+export function PauseIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="7" y="5" width="3.4" height="14" rx="1.2" fill={color} />
+      <Rect x="13.6" y="5" width="3.4" height="14" rx="1.2" fill={color} />
+    </Svg>
+  );
+}
+
+export function MapPinIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 21s6.5-5.6 6.5-11a6.5 6.5 0 1 0-13 0C5.5 15.4 12 21 12 21z"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <Circle cx="12" cy="10" r="2.4" fill={color} />
+    </Svg>
+  );
+}
+
+export function FilterIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 7h16M7 12h10M10 17h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function MoreVerticalIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="5.5" r="1.7" fill={color} />
+      <Circle cx="12" cy="12" r="1.7" fill={color} />
+      <Circle cx="12" cy="18.5" r="1.7" fill={color} />
+    </Svg>
+  );
+}
+
+export function PersonIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="8" r="3.6" stroke={color} strokeWidth="2" />
+      <Path
+        d="M4.8 20c.6-3.4 3.5-5.6 7.2-5.6s6.6 2.2 7.2 5.6"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function LockIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="5" y="10" width="14" height="10.5" rx="3" stroke={color} strokeWidth="2" />
+      <Path
+        d="M8.4 10V7.6a3.6 3.6 0 0 1 7.2 0V10"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <Circle cx="12" cy="15.2" r="1.4" fill={color} />
+    </Svg>
+  );
+}
+
+export function WarningIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3.8l9 15.7H3z"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <Path d="M12 9.5v4.4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Circle cx="12" cy="16.8" r="1.1" fill={color} />
+    </Svg>
+  );
+}
+
+export function OfflineIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6.6 18.5a4.1 4.1 0 0 1-.5-8.17 5.9 5.9 0 0 1 11.5-1.16A4.35 4.35 0 0 1 16.9 18.5H6.6z"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <Path d="M4 4l16 16" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function StackIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="4" y="8" width="13" height="11" rx="2.5" stroke={color} strokeWidth="2" />
+      <Path
+        d="M7 8V6.5A2.5 2.5 0 0 1 9.5 4H18a2 2 0 0 1 2 2v8.5A2.5 2.5 0 0 1 17.5 17H17"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 // Four-point sparkle (AI search) — the smaller star rotated 45°, both
 // concave-diamond shaped via quadratic curves.
 export function SparkleIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {

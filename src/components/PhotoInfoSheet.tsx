@@ -1,7 +1,6 @@
 import React from "react";
 import {
   Alert,
-  Dimensions,
   Linking,
   Modal,
   Platform,
@@ -25,6 +24,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
 import { ActivityIndicator } from "../rn";
+import { overlay, spacing, typography } from "../theme";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -139,8 +139,16 @@ export function PhotoInfoSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetRoot}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: theme.colors.background }]}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close photo details"
+        />
+        <View
+          accessibilityViewIsModal
+          style={[styles.sheet, { backgroundColor: theme.colors.background }]}
+        >
           <View style={[styles.grabber, { backgroundColor: theme.colors.outline }]} />
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -161,7 +169,7 @@ export function PhotoInfoSheet({
                     {place}
                   </Text>
                 ) : null}
-                <Pressable onPress={openInMaps} style={styles.mapWrap}>
+                <Pressable onPress={openInMaps} style={styles.mapWrap} accessibilityRole="button" accessibilityLabel="Open location in Maps">
                   <MapView
                     style={styles.map}
                     liteMode={Platform.OS === "android"}
@@ -185,7 +193,7 @@ export function PhotoInfoSheet({
                     />
                   </MapView>
                 </Pressable>
-                <Pressable style={styles.mapLink} onPress={openInMaps}>
+                <Pressable style={styles.mapLink} onPress={openInMaps} accessibilityRole="button" accessibilityLabel="Open coordinates in Maps">
                   <Text style={[styles.coordText, { color: theme.colors.primary }]}>
                     {p.latitude!.toFixed(6)}, {p.longitude!.toFixed(6)} — open in Maps ↗
                   </Text>
@@ -255,6 +263,9 @@ export function PhotoInfoSheet({
                       onPress={() => void saveVersion(v)}
                       disabled={savingVersionId !== null}
                       hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Save version ${v.version}`}
+                      accessibilityState={{ busy: savingVersionId === v.id }}
                     >
                       <Text
                         style={{
@@ -367,9 +378,11 @@ export function PhotoInfoSheet({
           />
           <Pressable
             onPress={() => setMotionPlaying(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close motion clip"
             style={{ position: "absolute", top: 48, right: 20, padding: 10 }}
           >
-            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Close</Text>
+            <Text style={{ color: overlay.onMedia, fontSize: 16, fontWeight: "700" }}>Close</Text>
           </Pressable>
         </View>
       </Modal>
@@ -415,14 +428,14 @@ function MotionClipPlayer({
   if (failed) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: "#fff", fontSize: 13 }}>Could not download the motion clip.</Text>
+        <Text style={{ color: overlay.onMedia, fontSize: 13 }}>Could not download the motion clip.</Text>
       </View>
     );
   }
   if (!uri) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={overlay.onMedia} />
       </View>
     );
   }
@@ -456,8 +469,6 @@ function Row({
     </View>
   );
 }
-
-const { width } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   sheetRoot: {
@@ -509,7 +520,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   map: {
-    width: width - 72,
+    width: "100%",
     height: 180,
   },
   mapLink: {

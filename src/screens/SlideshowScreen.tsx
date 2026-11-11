@@ -9,6 +9,8 @@ import { getPhotosByUploadStatus, type PhotoRow } from "../lib/db";
 import { isVideoMime } from "../lib/format";
 import { isDecoyActive } from "../lib/applock";
 import { setSecureFlag } from "../../modules/share-intent";
+import { ChevronRightIcon, CloseIcon, PauseIcon, PlayIcon } from "../components/icons";
+import { overlay, touchTarget } from "../theme";
 
 /**
  * Full-screen slideshow / screensaver. Auto-advances through photos with a
@@ -106,12 +108,17 @@ export function SlideshowScreen({ route, navigation }: { route: any; navigation:
 
   if (!current) {
     return (
-      <View style={[styles.container, { backgroundColor: "#000" }]}>
-        <Text style={{ color: "#fff", textAlign: "center", marginTop: 80 }}>
+      <View style={[styles.container, { backgroundColor: overlay.mediaCanvas }]}>
+        <Text style={{ color: overlay.onMedia, textAlign: "center", marginTop: 80 }}>
           {isDecoyActive() ? "Nothing to show." : "No photos to play yet."}
         </Text>
-        <Pressable onPress={() => navigation.goBack()} style={styles.emptyClose}>
-          <Text style={{ color: "#fff" }}>{tr("common.close")}</Text>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={styles.emptyClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close slideshow"
+        >
+          <Text style={{ color: overlay.onMedia }}>{tr("common.close")}</Text>
         </Pressable>
       </View>
     );
@@ -142,31 +149,50 @@ export function SlideshowScreen({ route, navigation }: { route: any; navigation:
               hitSlop={12}
               accessibilityLabel="Close slideshow"
               accessibilityRole="button"
+              style={styles.control}
             >
-              <Text style={styles.chromeText}>✕</Text>
+              <CloseIcon color={overlay.onMedia} size={22} />
             </Pressable>
             <Text style={styles.title} numberOfLines={1}>
               {route.params?.title ?? "Slideshow"}
             </Text>
-            <Text style={styles.counter}>
+            <Text style={styles.counter} accessibilityLiveRegion="polite">
               {index + 1}/{ordered.length}
             </Text>
           </View>
 
           <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
-            <Pressable onPress={prev} hitSlop={10} accessibilityLabel="Previous photo">
-              <Text style={styles.chromeText}>‹</Text>
+            <Pressable
+              onPress={prev}
+              hitSlop={10}
+              accessibilityLabel="Previous photo"
+              accessibilityRole="button"
+              style={styles.control}
+            >
+              <ChevronRightIcon color={overlay.onMedia} size={24} />
             </Pressable>
             <Pressable
               onPress={() => setPlaying((p) => !p)}
               hitSlop={10}
               accessibilityLabel={playing ? "Pause slideshow" : "Play slideshow"}
+              accessibilityRole="button"
+              accessibilityState={{ selected: playing }}
               style={styles.playButton}
             >
-              <Text style={styles.playText}>{playing ? "❚❚" : "▶"}</Text>
+              {playing ? (
+                <PauseIcon color={overlay.onMedia} size={22} />
+              ) : (
+                <PlayIcon color={overlay.onMedia} size={22} />
+              )}
             </Pressable>
-            <Pressable onPress={next} hitSlop={10} accessibilityLabel="Next photo">
-              <Text style={styles.chromeText}>›</Text>
+            <Pressable
+              onPress={next}
+              hitSlop={10}
+              accessibilityLabel="Next photo"
+              accessibilityRole="button"
+              style={[styles.control, { transform: [{ scaleX: -1 }] }]}
+            >
+              <ChevronRightIcon color={overlay.onMedia} size={24} />
             </Pressable>
             <Text style={styles.hint}>
               {playing ? `${Math.max(2, intervalSec)}s · tap to pause` : "Paused"}
@@ -188,7 +214,7 @@ function shuffleRows(rows: PhotoRow[]): PhotoRow[] {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
+  container: { flex: 1, backgroundColor: overlay.mediaCanvas },
   topBar: {
     position: "absolute",
     top: 0,
@@ -198,12 +224,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 18,
     paddingBottom: 10,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: overlay.mediaScrimSoft,
     gap: 12,
   },
-  title: { color: "#fff", flex: 1, fontSize: 14, fontWeight: "600" },
-  counter: { color: "rgba(255,255,255,0.7)", fontSize: 12 },
-  chromeText: { color: "#fff", fontSize: 30, lineHeight: 34, paddingHorizontal: 8 },
+  title: { color: overlay.onMedia, flex: 1, fontSize: 14, fontWeight: "600" },
+  counter: { color: overlay.onMediaMuted, fontSize: 12 },
+  control: {
+    width: touchTarget,
+    height: touchTarget,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -214,17 +245,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 18,
     paddingTop: 12,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: overlay.mediaScrimSoft,
   },
   playButton: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: overlay.onMediaSubtle,
     alignItems: "center",
     justifyContent: "center",
   },
-  playText: { color: "#fff", fontSize: 17 },
-  hint: { color: "rgba(255,255,255,0.65)", fontSize: 11, marginLeft: 8 },
+  hint: { color: overlay.onMediaMuted, fontSize: 11, marginLeft: 8 },
   emptyClose: { alignSelf: "center", marginTop: 24, padding: 12 },
 });

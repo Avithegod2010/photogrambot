@@ -11,7 +11,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useSetupStore } from "../store/useSetupStore";
-import { Button, Card, SectionLabel, TextField } from "../components/ui";
+import { Button, Card, SectionLabel, TextField, AppBar } from "../components/ui";
 import {
   listProfiles,
   saveProfile,
@@ -101,12 +101,7 @@ export function DestinationsScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Destinations</Text>
-      </View>
+      <AppBar title="Destinations" onBack={() => navigation.goBack()} theme={theme} borderless />
 
       <FlatList
         data={profiles}
@@ -192,7 +187,7 @@ export function DestinationsScreen({ navigation }: { navigation: any }) {
                     <Text style={{ color: theme.colors.primary, fontSize: 12.5 }}>
                       → {profileName(pid)}
                     </Text>
-                    <Pressable hitSlop={8} onPress={() => void setRule(folder, null).then(reload)}>
+                    <Pressable hitSlop={8} onPress={() => void setRule(folder, null).then(reload)} accessibilityRole="button" accessibilityLabel={`Remove rule for ${folder}`}>
                       <Text style={{ color: theme.colors.error, paddingHorizontal: 8 }}>✕</Text>
                     </Pressable>
                   </View>
@@ -210,6 +205,9 @@ export function DestinationsScreen({ navigation }: { navigation: any }) {
                   <Pressable
                     key={p.id}
                     onPress={() => setRuleProfileId(p.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Route to ${p.name}`}
+                    accessibilityState={{ selected: ruleProfileId === p.id }}
                     style={[
                       styles.chip,
                       {
@@ -263,7 +261,7 @@ export function DestinationsScreen({ navigation }: { navigation: any }) {
                   {item.channelTitle ?? item.channelId}
                 </Text>
               </View>
-              <Pressable hitSlop={8} onPress={() => confirmDelete(item)}>
+              <Pressable hitSlop={8} onPress={() => confirmDelete(item)} accessibilityRole="button" accessibilityLabel={`Remove ${item.name}`}>
                 <Text style={{ color: theme.colors.error, fontWeight: "600" }}>Remove</Text>
               </Pressable>
             </View>

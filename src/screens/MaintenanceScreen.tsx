@@ -3,7 +3,7 @@ import { Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { Button, Card, SectionLabel, Dialog } from "../components/ui";
+import { Button, Card, SectionLabel, Dialog, AppBar, EmptyState } from "../components/ui";
 import {
   findDuplicateGroups,
   checkIntegrity,
@@ -58,6 +58,12 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [integrityRunning, setIntegrityRunning] = useState(false);
   const [integrity, setIntegrity] = useState<IntegrityProgress | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [brokenIds, setBrokenIds] = useState<string[]>([]);
+  const [nearDupConfirm, setNearDupConfirm] = useState<{
+    group: NearDupGroup;
+    rest: PhotoRow[];
+  } | null>(null);
   const [verifyRunning, setVerifyRunning] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<VerificationProgress | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerificationResult | null>(null);
@@ -101,14 +107,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [tagError, setTagError] = useState<string | null>(null);
 
   function confirmRestore() {
-    Alert.alert(
-      "Restore originals to this device?",
-      `Downloads up to ${stats.uploaded} backed-up photo(s) from your channel into this device's gallery. Photos already on the device are skipped. Keep the app open while it runs.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Restore", onPress: () => void runRestore() },
-      ]
-    );
+    setRestoreConfirm(true);
   }
 
   async function runRestore() {
@@ -198,21 +197,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
         `Checked ${result.checked} photos — ${result.brokenIds.length} broken`
       );
       if (result.brokenIds.length > 0) {
-        Alert.alert(
-          `${result.brokenIds.length} broken photo${result.brokenIds.length === 1 ? "" : "s"}`,
-          "These photos could not be reached in your Telegram channel (file may have been deleted). Remove them from the index?",
-          [
-            { text: "Keep", style: "cancel" },
-            {
-              text: "Remove",
-              style: "destructive",
-              onPress: async () => {
-                await removeBrokenPhotos(result.brokenIds);
-                await refreshMeta();
-              },
-            },
-          ]
-        );
+        setBrokenIds(result.brokenIds);
       }
     } finally {
       setIntegrityRunning(false);
@@ -310,41 +295,31 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       ).then(() => setNearDups((prev) => prev.filter((g) => g !== group)));
       return;
     }
-    Alert.alert(
-      `Delete ${rest.length} duplicate copies from the channel too?`,
-      "This permanently removes their messages from Telegram (including for other devices) and moves them to the app's trash so they never re-upload. The newest copy is kept.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete for good",
-          style: "destructive",
-          onPress: () => void (async () => {
-            try {
-              const channelId = await getChannelId();
-              for (const p of rest) {
-                if (channelId && p.message_id) {
-                  const token = await tokenForPhoto(p);
-                  await deleteMessage(channelId, p.message_id, token ?? undefined);
-                  if (p.preview_message_id) {
-                    await deleteMessage(channelId, p.preview_message_id, token ?? undefined);
-                  }
-                }
-                // Trash (not hard-delete): the row must survive so auto-sync
-                // keeps skipping the local file — a hard delete would let the
-                // next scan re-upload the duplicate we just removed.
-                await addToTrash(p.id);
-                await markTrashRemoteDeleted(p.id);
-              }
-              await refreshMeta();
-              setNearDups((prev) => prev.filter((g) => g !== group));
-            } catch (e: any) {
-              Alert.alert("Delete failed", e?.message ?? "Could not delete the duplicates.");
-            }
-          })(),
-        },
-      ],
-      { cancelable: true }
-    );
+    setNearDupConfirm({ group, rest });
+  }
+
+  async function deleteNearGroupFromChannel(group: NearDupGroup, rest: PhotoRow[]) {
+    try {
+      const channelId = await getChannelId();
+      for (const p of rest) {
+        if (channelId && p.message_id) {
+          const token = await tokenForPhoto(p);
+          await deleteMessage(channelId, p.message_id, token ?? undefined);
+          if (p.preview_message_id) {
+            await deleteMessage(channelId, p.preview_message_id, token ?? undefined);
+          }
+        }
+        // Trash (not hard-delete): the row must survive so auto-sync
+        // keeps skipping the local file — a hard delete would let the
+        // next scan re-upload the duplicate we just removed.
+        await addToTrash(p.id);
+        await markTrashRemoteDeleted(p.id);
+      }
+      await refreshMeta();
+      setNearDups((prev) => prev.filter((g) => g !== group));
+    } catch (e: any) {
+      Alert.alert("Delete failed", e?.message ?? "Could not delete the duplicates.");
+    }
   }
 
   useEffect(() => {
@@ -531,13 +506,8 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Maintenance</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Maintenance" onBack={() => navigation.goBack()} theme={theme} borderless />
 
       <FlatList
         data={[
@@ -1162,6 +1132,65 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
           </View>
         )}
       </Dialog>
+
+      <Dialog
+        visible={restoreConfirm}
+        theme={theme}
+        title="Restore originals to this device?"
+        message={`Downloads up to ${stats.uploaded} backed-up photos from your channel into this device's gallery. Photos already on the device are skipped. Keep the app open while it runs.`}
+        onClose={() => setRestoreConfirm(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setRestoreConfirm(false), variant: "text" },
+          {
+            label: "Restore",
+            variant: "tonal",
+            onPress: () => {
+              setRestoreConfirm(false);
+              void runRestore();
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={brokenIds.length > 0}
+        theme={theme}
+        title={`${brokenIds.length} broken photo${brokenIds.length === 1 ? "" : "s"}`}
+        message="These photos could not be reached in your Telegram channel (the file may have been deleted). Remove them from the index?"
+        onClose={() => setBrokenIds([])}
+        actions={[
+          { label: "Keep", onPress: () => setBrokenIds([]), variant: "text" },
+          {
+            label: "Remove from index",
+            variant: "danger",
+            onPress: () => {
+              const ids = brokenIds;
+              setBrokenIds([]);
+              void removeBrokenPhotos(ids).then(() => refreshMeta());
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={!!nearDupConfirm}
+        theme={theme}
+        title={`Delete ${nearDupConfirm?.rest.length ?? 0} duplicate cop${(nearDupConfirm?.rest.length ?? 0) === 1 ? "y" : "ies"} from the channel too?`}
+        message="This permanently removes their messages from Telegram (including for other devices) and moves them to the app's trash so they never re-upload. The best copy is kept."
+        onClose={() => setNearDupConfirm(null)}
+        actions={[
+          { label: "Cancel", onPress: () => setNearDupConfirm(null), variant: "text" },
+          {
+            label: "Delete for good",
+            variant: "danger",
+            onPress: () => {
+              const pending = nearDupConfirm;
+              setNearDupConfirm(null);
+              if (pending) void deleteNearGroupFromChannel(pending.group, pending.rest);
+            },
+          },
+        ]}
+      />
     </View>
   );
 }

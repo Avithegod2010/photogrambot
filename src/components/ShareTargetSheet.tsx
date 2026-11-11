@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
   Modal,
   Pressable,
@@ -16,9 +15,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { Button } from "./ui";
+import { CloseIcon } from "./icons";
 import { enqueueUploads, processQueue } from "../lib/uploader";
 import { listProfiles } from "../lib/destinations";
 import { clearSharedMedia } from "../../modules/share-intent";
+import { useResponsive } from "../lib/responsive";
+import { spacing } from "../theme";
 
 const COLUMNS = 4;
 
@@ -36,7 +38,8 @@ export function ShareTargetSheet({
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([]);
   const [destId, setDestId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const tile = (Dimensions.get("window").width - 8) / COLUMNS;
+  const { width: sheetWidth } = useResponsive();
+  const tile = (sheetWidth - spacing.sm * 2 - spacing.xs * (COLUMNS - 1)) / COLUMNS;
 
   React.useEffect(() => {
     if (multiDest) {
@@ -103,13 +106,22 @@ export function ShareTargetSheet({
     <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
       <View style={[styles.sheet, { backgroundColor: theme.colors.background }]}>
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-          <Pressable onPress={onCancel} hitSlop={8}>
-            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel sharing"
+            style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center" }}
+          >
+            <CloseIcon color={theme.colors.onSurfaceVariant} size={20} />
           </Pressable>
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" }}>
+          <Text
+            accessibilityRole="header"
+            style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 16, flex: 1, textAlign: "center" }}
+          >
             Shared with {appDisplayName || "PhotogramBot"}
           </Text>
-          <View style={{ width: 18 }} />
+          <View style={{ width: 48 }} />
         </View>
         <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 }}>
           {uris.length} item{uris.length === 1 ? "" : "s"} shared from another app. Upload them to your Telegram channel?
@@ -120,6 +132,9 @@ export function ShareTargetSheet({
               <Pressable
                 key={p.id}
                 onPress={() => setDestId(destId === p.id ? null : p.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`${p.name} destination`}
+                accessibilityState={{ selected: destId === p.id }}
                 style={[
                   styles.destChip,
                   {

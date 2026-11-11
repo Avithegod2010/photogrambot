@@ -25,7 +25,8 @@ import { useSetupStore } from "../store/useSetupStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useUploadStore } from "../store/useUploadStore";
-import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog } from "../components/ui";
+import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog, AppBar, SearchField, ListRow } from "../components/ui";
+import { typography, spacing, radius, touchTarget } from "../theme";
 import { formatBytes } from "../lib/format";
 import { getStorageSummary, type StorageSummary } from "../lib/db";
 import { runSyncNow } from "../lib/sync";
@@ -104,6 +105,23 @@ import {
   recoveryKeyCreatedAt,
 } from "../lib/recoveryKey";
 
+const SETTINGS_SECTIONS: { id: string; label: string; keywords: string }[] = [
+  { id: "bot", label: "Bot & channel", keywords: "token channel botfather reconfigure admin" },
+  { id: "backup", label: "Backup & sync", keywords: "auto sync wifi charging interval mirror destination queue" },
+  { id: "ai", label: "AI captioning (Gemini)", keywords: "gemini api key caption model prompt tagging" },
+  { id: "folders", label: "Folder synchronisation", keywords: "folders include exclude camera screenshots" },
+  { id: "appearance", label: "Appearance", keywords: "theme dark amoled light accent colour font grid columns icon widget layout" },
+  { id: "captions", label: "Channel captions", keywords: "caption fields order filename date hash gps" },
+  { id: "onDeviceAi", label: "On-device AI", keywords: "models face scene download tensorflow" },
+  { id: "notifications", label: "Notifications", keywords: "quiet hours alerts upload failures progress" },
+  { id: "privacy", label: "Privacy & security", keywords: "app lock pin decoy biometric break-in encryption passphrase wipe secure" },
+  { id: "diagnostics", label: "Diagnostics", keywords: "crash log startup errors report" },
+  { id: "maintenance", label: "Maintenance", keywords: "duplicates ocr index zip free up space repair verify" },
+  { id: "database", label: "Database", keywords: "backup restore export csv index channel" },
+  { id: "storage", label: "Storage", keywords: "space cache thumbnails chart size" },
+  { id: "about", label: "About", keywords: "version update release license" },
+];
+
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -169,6 +187,19 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [modelBusy, setModelBusy] = useState<ModelId | null>(null);
   const [modelNote, setModelNote] = useState<string | null>(null);
   const [taggingKeyDraft, setTaggingKeyDraft] = useState("");
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [encryptConfirm, setEncryptConfirm] = useState(false);
+  const [encryptNote, setEncryptNote] = useState<string | null>(null);
+  const settingsScrollRef = useRef<ScrollView>(null);
+  const sectionY = useRef<Record<string, number>>({});
+  const settingMatches = React.useMemo(() => {
+    const q = settingsQuery.trim().toLowerCase();
+    if (!q) return [];
+    return SETTINGS_SECTIONS.filter(
+      (s) => s.label.toLowerCase().includes(q) || s.keywords.includes(q)
+    ).map((s) => ({ section: s.id, title: s.label, sectionLabel: "Jump to section" }));
+  }, [settingsQuery]);
 
   useEffect(() => {
     if (prefs.multiDestination) {
@@ -498,13 +529,53 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const canDynamic = Platform.OS === "android" && Number(Platform.Version) >= 31;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Settings</Text>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar
+        title="Settings"
+        onBack={() => navigation.goBack()}
+        theme={theme}
+        borderless
+      />
+      <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
+        <SearchField
+          value={settingsQuery}
+          onChangeText={setSettingsQuery}
+          placeholder="Search settings"
+          theme={theme}
+          accessibilityLabel="Search settings"
+        />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <SectionLabel text={t("settings.bot", prefs.language)} theme={theme} />
+      {settingsQuery.trim() ? (
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 }}>
+          {settingMatches.length === 0 ? (
+            <Text style={[typography.small, { color: theme.colors.onSurfaceVariant, textAlign: "center", marginTop: spacing.xl }]}>
+              No settings match “{settingsQuery.trim()}”.
+            </Text>
+          ) : (
+            <View style={[styles.group, { backgroundColor: theme.colors.surface }]}>
+              {settingMatches.map((m) => (
+                <ListRow
+                  key={`${m.section}:${m.title}`}
+                  title={m.title}
+                  subtitle={m.sectionLabel}
+                  theme={theme}
+                  showChevron
+                  onPress={() => {
+                    const y = sectionY.current[m.section] ?? 0;
+                    setSettingsQuery("");
+                    requestAnimationFrame(() =>
+                      settingsScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })
+                    );
+                  }}
+                />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      ) : (
+      <ScrollView ref={settingsScrollRef} contentContainerStyle={styles.scroll}>
+        <SectionLabel text={t("settings.bot", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.bot = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <View style={styles.configRow}>
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>Bot</Text>
@@ -523,16 +594,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
             variant="outlined"
             theme={theme}
             style={{ marginTop: 12 }}
-            onPress={() =>
-              Alert.alert("Reconfigure bot?", "This clears the saved token and channel. Your photos stay safe in Telegram — you can restore the index from the pinned backup afterwards.", [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Reset",
-                  style: "destructive",
-                  onPress: () => void reset(),
-                },
-              ])
-            }
+            onPress={() => setResetConfirm(true)}
           />
         </Card>
 
@@ -550,7 +612,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text={t("settings.backup", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.backup", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.backup = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Button
             title="Sync full gallery now"
@@ -743,7 +805,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text={t("settings.ai", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.ai", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.ai = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <ToggleRow
             title="AI captions"
@@ -788,7 +850,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text={t("settings.folders", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.folders", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.folders = e.nativeEvent.layout.y; }} />
         <Card theme={theme} onPress={() => navigation.navigate("FolderSync")}>
           <View style={styles.folderRow}>
             <View style={{ flex: 1 }}>
@@ -805,7 +867,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text={t("settings.appearance", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.appearance", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.appearance = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Text style={[styles.groupLabel, { color: theme.colors.onSurfaceVariant }]}>Theme</Text>
           <ChipRow
@@ -1184,7 +1246,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text={t("settings.captions", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.captions", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.captions = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Choose which metadata lines appear under each upload and reorder them. The
@@ -1199,7 +1261,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text={t("settings.onDeviceAi", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.onDeviceAi", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.onDeviceAi = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Models are downloaded on demand and are <Text style={{ fontWeight: "700" }}>not</Text>{" "}
@@ -1287,7 +1349,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text={t("settings.notifications", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.notifications", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.notifications = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <ToggleRow
             title="Upload progress"
@@ -1335,7 +1397,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text={t("settings.privacy", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.privacy", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.privacy = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <ToggleRow
             title="App lock"
@@ -1500,7 +1562,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Dialog>
 
-        <SectionLabel text={t("settings.diagnostics", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.diagnostics", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.diagnostics = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
             Share the break-in log and the recent failure log as a JSON file. It contains no
@@ -1574,7 +1636,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           ) : null}
         </Card>
 
-        <SectionLabel text={t("settings.maintenance", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.maintenance", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.maintenance = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <ToggleRow
             title="Screenshot sunset"
@@ -1637,7 +1699,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </View>
         </Card>
 
-        <SectionLabel text={t("settings.database", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.database", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.database = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <View style={styles.statsGrid}>
             <Stat label="Backed up" value={String(stats.uploaded)} theme={theme} />
@@ -1786,36 +1848,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
               variant="outlined"
               theme={theme}
               style={{ marginTop: 10 }}
-              onPress={() => {
-                Alert.alert(
-                  "Encrypt local database?",
-                  "The index is re-written with SQLCipher in place. This can take a moment on a large library. Restart the app afterwards. The channel archive is not affected.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Encrypt",
-                      onPress: () => {
-                        void (async () => {
-                          setBusyLabel("Encrypting local database.");
-                          try {
-                            const { enableDatabaseEncryption } = await import("../lib/db");
-                            await enableDatabaseEncryption();
-                            await update({ dbEncryption: true });
-                            Alert.alert(
-                              "Encrypted",
-                              "The local index is now encrypted. Restart the app so every screen reopens the database with the key."
-                            );
-                          } catch (e: any) {
-                            Alert.alert("Could not encrypt", e?.message ?? "Encryption failed.");
-                          } finally {
-                            setBusyLabel(null);
-                          }
-                        })();
-                      },
-                    },
-                  ]
-                );
-              }}
+              onPress={() => setEncryptConfirm(true)}
             />
           ) : null}
           <Button
@@ -1831,7 +1864,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
         </Card>
 
-        <SectionLabel text={t("settings.storage", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.storage", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.storage = e.nativeEvent.layout.y; }} />
         {storage ? <StorageCard storage={storage} theme={theme} /> : null}
         {freeBytes !== null ? (
           <Card theme={theme}>
@@ -1876,7 +1909,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           </Card>
         ) : null}
 
-        <SectionLabel text={t("settings.about", prefs.language)} theme={theme} />
+        <SectionLabel text={t("settings.about", prefs.language)} theme={theme} onLayout={(e) => { sectionY.current.about = e.nativeEvent.layout.y; }} />
         <Card theme={theme}>
           <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>
             {prefs.appDisplayName || "PhotogramBot"}
@@ -1908,6 +1941,70 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
 
         <View style={{ height: 60 }} />
       </ScrollView>
+      )}
+
+      <Dialog
+        visible={resetConfirm}
+        theme={theme}
+        title="Reconfigure bot?"
+        message="This clears the saved token and channel. Your photos stay safe in Telegram — you can restore the index from the pinned backup afterwards."
+        onClose={() => setResetConfirm(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setResetConfirm(false), variant: "text" },
+          {
+            label: "Reset",
+            variant: "danger",
+            onPress: () => {
+              setResetConfirm(false);
+              void reset();
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={encryptConfirm}
+        theme={theme}
+        title="Encrypt local database?"
+        message="The index is re-written with SQLCipher in place. This can take a moment on a large library. Restart the app afterwards. The channel archive is not affected."
+        onClose={() => setEncryptConfirm(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setEncryptConfirm(false), variant: "text" },
+          {
+            label: "Encrypt",
+            variant: "tonal",
+            onPress: () => {
+              setEncryptConfirm(false);
+              void (async () => {
+                setBusyLabel("Encrypting local database.");
+                try {
+                  const { enableDatabaseEncryption } = await import("../lib/db");
+                  await enableDatabaseEncryption();
+                  await update({ dbEncryption: true });
+                  setEncryptNote(
+                    "The local index is now encrypted. Restart the app so every screen reopens the database with the key."
+                  );
+                } catch (e: any) {
+                  setEncryptNote(e?.message ?? "Encryption failed.");
+                } finally {
+                  setBusyLabel(null);
+                }
+              })();
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={!!encryptNote}
+        theme={theme}
+        title="Local database"
+        message={encryptNote ?? undefined}
+        onClose={() => setEncryptNote(null)}
+        actions={[
+          { label: "Close", onPress: () => setEncryptNote(null) },
+        ]}
+      />
 
       <Dialog
         visible={restoreDialog}
@@ -2437,6 +2534,9 @@ function StorageCard({
 }
 
 const styles = StyleSheet.create({
+  group: {
+    marginBottom: spacing.sm,
+  },
   container: {
     flex: 1,
   },

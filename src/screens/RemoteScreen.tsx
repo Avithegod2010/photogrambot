@@ -3,7 +3,7 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from "../
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { Button, Card, Dialog, SectionLabel, TextField, ToggleRow } from "../components/ui";
+import { Button, Card, Dialog, SectionLabel, TextField, ToggleRow, AppBar } from "../components/ui";
 import { parseRemoteAdmins, type RemoteAdmin, type RemoteRole } from "../lib/remoteAuth";
 import {
   getDeviceSummaries,
@@ -28,6 +28,7 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
 
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [revoked, setRevoked] = useState(false);
+  const [revokeConfirm, setRevokeConfirm] = useState(false);
   const [renameTarget, setRenameTarget] = useState<DeviceSummary | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [adminDialog, setAdminDialog] = useState(false);
@@ -88,15 +89,8 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityLabel="Back">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={{ color: theme.colors.onSurface, fontSize: 17, fontWeight: "700", flex: 1 }}>
-          Remote & sharing
-        </Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Remote & sharing" onBack={() => navigation.goBack()} theme={theme} borderless />
       <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
         <SectionLabel text="Remote admins" theme={theme} />
         <Card theme={theme}>
@@ -121,6 +115,8 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
                 </View>
                 <Pressable
                   hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove admin ${a.id}`}
                   onPress={() => {
                     const next = admins.filter((x) => x.id !== a.id);
                     void update({ remoteAdmins: next });
@@ -157,6 +153,8 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
               </View>
               <Pressable
                 hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Rename device ${d.name ?? d.id}`}
                 onPress={() => {
                   setRenameTarget(d);
                   setRenameDraft(d.name);
@@ -172,24 +170,7 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
               title={revoked ? "Unrevoke this device" : "Revoke this device"}
               variant={revoked ? "outlined" : "danger"}
               theme={theme}
-              onPress={() => {
-                Alert.alert(
-                  revoked ? "Unrevoke?" : "Revoke this device?",
-                  revoked
-                    ? "Automatic uploads can resume."
-                    : "Automatic uploads stop on this phone. The channel archive is untouched. Only the target device can apply this; a compromised device could ignore it.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: revoked ? "Unrevoke" : "Revoke",
-                      style: "destructive",
-                      onPress: () => {
-                        void setDeviceRevoked(!revoked).then(() => void refresh());
-                      },
-                    },
-                  ]
-                );
-              }}
+              onPress={() => setRevokeConfirm(true)}
             />
           </View>
           <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 6 }}>
@@ -404,6 +385,9 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
             <Pressable
               key={r}
               onPress={() => setAdminRole(r)}
+              accessibilityRole="button"
+              accessibilityLabel={`Set role ${r}`}
+              accessibilityState={{ selected: adminRole === r }}
               style={{
                 paddingHorizontal: 12,
                 paddingVertical: 6,
@@ -453,6 +437,28 @@ export function RemoteScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
+      <Dialog
+        visible={revokeConfirm}
+        theme={theme}
+        title={revoked ? "Unrevoke this device?" : "Revoke this device?"}
+        message={
+          revoked
+            ? "Automatic uploads can resume."
+            : "Automatic uploads stop on this phone. The channel archive is untouched. Only the target device can apply this; a compromised device could ignore it."
+        }
+        onClose={() => setRevokeConfirm(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setRevokeConfirm(false), variant: "text" },
+          {
+            label: revoked ? "Unrevoke" : "Revoke",
+            variant: revoked ? "tonal" : "danger",
+            onPress: () => {
+              setRevokeConfirm(false);
+              void setDeviceRevoked(!revoked).then(() => void refresh());
+            },
+          },
+        ]}
+      />
     </View>
   );
 }

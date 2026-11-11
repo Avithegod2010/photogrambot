@@ -94,6 +94,13 @@ const en: Dict = {
   "viewer.info": "Info",
   "viewer.compare": "Compare",
   "viewer.slideshow": "Slideshow",
+  "gallery.emptyBody": "New photos back up automatically when Auto sync is on, or share photos to {app} from any app.",
+  "gallery.emptyLocalBody": "Photos from this device appear here. New photos back up automatically when Auto sync is on.",
+  "gallery.openBackupSettings": "Open backup settings",
+  "common.selected": "{n} selected",
+  "common.moreActions": "More selection actions",
+  "common.selectAll": "Select all",
+  "common.clearSearch": "Clear search",
 };
 
 const hi: Dict = {

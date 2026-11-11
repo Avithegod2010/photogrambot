@@ -1,19 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "../rn";
+import { Pressable, StyleSheet, Text, View } from "../rn";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { Button } from "../components/ui";
+import { Button, Dialog } from "../components/ui";
+import { LockIcon } from "../components/icons";
 import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../lib/applock";
 import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
 import { logBreakIn } from "../lib/breakin";
 import { setSecureFlag } from "../../modules/share-intent";
+import { overlay, radius, spacing, typography } from "../theme";
 
 function fmtBackoff(ms: number): string {
   const s = Math.ceil(ms / 1000);
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}:${String(s % 60).padStart(2, "0")}` : `0:${String(s).padStart(2, "0")}`;
 }
+
+const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"] as const;
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const theme = useTheme();
@@ -31,6 +35,8 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   // is what an attacker can brute) but biometric stays live — a biometric
   // success proves ownership and clears the counter.
   const [backoffMs, setBackoffMs] = useState(0);
+  const [panicVisible, setPanicVisible] = useState(false);
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
 
   // Hide the lock screen (and its PIN entry) from screenshots/recents.
   useEffect(() => {
@@ -141,161 +147,264 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     }
   }
 
+  const statusText =
+    backoffMs > 0
+      ? `Too many attempts — try again in ${fmtBackoff(backoffMs)}`
+      : pinWrong
+        ? "Wrong PIN. Try again."
+        : hasHardware === false
+          ? "Enter your PIN to open your photos"
+          : "Authenticate to open your photos";
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.logo, { backgroundColor: theme.colors.primaryContainer }]}>
-        <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 26, fontWeight: "800" }}>
-          🔒
+      <View style={styles.hero}>
+        <View style={[styles.logo, { backgroundColor: theme.colors.primaryContainer }]}>
+          <LockIcon color={theme.colors.onPrimaryContainer} size={30} />
+        </View>
+        <Pressable
+          delayLongPress={2500}
+          onLongPress={() => {
+            if (panicWipeEnabled) setPanicVisible(true);
+          }}
+          accessibilityRole="header"
+          accessibilityLabel={`${appDisplayName || "PhotogramBot"} is locked`}
+          accessibilityHint={panicWipeEnabled ? "Long-press to panic-wipe local data" : undefined}
+          style={styles.titleHit}
+        >
+          <Text style={[typography.title, { color: theme.colors.onSurface, textAlign: "center" }]}>
+            {appDisplayName || "PhotogramBot"} is locked
+          </Text>
+        </Pressable>
+        <Text
+          accessibilityLiveRegion="polite"
+          style={[
+            typography.small,
+            {
+              color: pinWrong || backoffMs > 0 ? theme.colors.error : theme.colors.onSurfaceVariant,
+              textAlign: "center",
+              minHeight: 40,
+              marginTop: spacing.xs,
+            },
+          ]}
+        >
+          {statusText}
         </Text>
       </View>
-      <Pressable
-        delayLongPress={2500}
-        onLongPress={() => {
-          if (!panicWipeEnabled) return;
-          Alert.alert(
-            "Panic wipe?",
-            "Erase the local index, cached photos and every saved credential on this phone. The Telegram channel archive is not touched and can be restored later.",
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Wipe",
-                style: "destructive",
-                onPress: () => {
-                  void (async () => {
-                    try {
-                      const { panicWipe } = await import("../lib/panicWipe");
-                      await panicWipe();
-                      Alert.alert(
-                        "Wiped",
-                        "Local data and credentials are gone. Close the app; the channel archive is still intact."
-                      );
-                    } catch (e: any) {
-                      Alert.alert("Wipe failed", e?.message ?? "Could not wipe local data.");
-                    }
-                  })();
-                },
-              },
-            ],
-            { cancelable: true }
-          );
-        }}
-        accessibilityRole="header"
-        accessibilityHint={panicWipeEnabled ? "Long-press to panic-wipe local data" : undefined}
-      >
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-          {appDisplayName || "PhotogramBot"} is locked
-        </Text>
-      </Pressable>
-      <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
-        {backoffMs > 0
-          ? `Too many attempts — try again in ${fmtBackoff(backoffMs)}`
-          : pinWrong
-            ? "Wrong PIN"
-            : hasHardware === false
-              ? "Unlock to access your photos"
-              : "Authenticate to access your photos"}
-      </Text>
-      <Button
-        title={failed ? "Try again" : "Unlock"}
-        theme={theme}
-        busy={busy}
-        onPress={authenticate}
-        style={{ marginTop: 20, minWidth: 160 }}
-      />
-      {pinAvailable ? (
-        !showPad ? (
-          <Pressable onPress={() => setShowPad(true)} hitSlop={8} style={{ marginTop: 14 }}>
-            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>
-              Use PIN instead
-            </Text>
-          </Pressable>
-        ) : (
-          <View style={{ marginTop: 20, alignItems: "center" }}>
-            <Text style={{ color: theme.colors.onSurface, fontSize: 18, letterSpacing: 6, minHeight: 24 }}>
-              {"•".repeat(entry.length)}
-            </Text>
-            <View style={styles.pad}>
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((key, i) =>
-                key === "" ? (
-                  <View key={i} style={styles.padKey} />
-                ) : (
-                  <Pressable
+
+      <View style={styles.actions}>
+        {hasHardware !== false ? (
+          <Button
+            title={failed ? "Try again" : "Unlock"}
+            theme={theme}
+            busy={busy}
+            onPress={authenticate}
+            style={styles.primaryBtn}
+          />
+        ) : null}
+
+        {pinAvailable ? (
+          !showPad ? (
+            <Button
+              title="Use PIN instead"
+              theme={theme}
+              variant="text"
+              onPress={() => setShowPad(true)}
+              style={{ marginTop: spacing.sm }}
+            />
+          ) : (
+            <View style={styles.padWrap}>
+              <View
+                style={styles.dots}
+                accessibilityRole="text"
+                accessibilityLabel={`${entry.length} of at least 4 digits entered`}
+              >
+                {Array.from({ length: Math.max(4, entry.length) }).map((_, i) => (
+                  <View
                     key={i}
-                    style={[styles.padKey, { backgroundColor: theme.colors.surfaceContainer, opacity: backoffMs > 0 ? 0.4 : 1 }]}
-                    disabled={backoffMs > 0}
-                    onPress={() => {
-                      if (key === "⌫") setEntry((e) => e.slice(0, -1));
-                      else pressDigit(key);
-                    }}
-                  >
-                    <Text style={{ color: theme.colors.onSurface, fontSize: 20, fontWeight: "600" }}>
-                      {key}
-                    </Text>
-                  </Pressable>
-                )
-              )}
+                    style={[
+                      styles.dot,
+                      {
+                        backgroundColor:
+                          i < entry.length ? theme.colors.primary : theme.colors.outlineVariant,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+              <View style={styles.pad}>
+                {KEYS.map((key, i) =>
+                  key === "" ? (
+                    <View key={i} style={styles.padKey} />
+                  ) : (
+                    <Pressable
+                      key={i}
+                      android_ripple={{ color: overlay.ripple, borderless: true }}
+                      accessibilityRole="button"
+                      accessibilityLabel={key === "⌫" ? "Delete last digit" : `Digit ${key}`}
+                      accessibilityState={{ disabled: backoffMs > 0 }}
+                      disabled={backoffMs > 0}
+                      onPress={() => {
+                        if (key === "⌫") setEntry((e) => e.slice(0, -1));
+                        else pressDigit(key);
+                      }}
+                      style={[
+                        styles.padKey,
+                        {
+                          backgroundColor: theme.colors.surfaceContainer,
+                          opacity: backoffMs > 0 ? 0.4 : 1,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          key === "⌫" ? typography.section : typography.headline,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {key}
+                      </Text>
+                    </Pressable>
+                  )
+                )}
+              </View>
+              <View style={styles.padActions}>
+                <Button
+                  title="Hide"
+                  theme={theme}
+                  variant="text"
+                  onPress={() => setShowPad(false)}
+                />
+                <Button
+                  title="Enter"
+                  theme={theme}
+                  variant="filled"
+                  disabled={entry.length < 4 || backoffMs > 0}
+                  onPress={() => void submitPin()}
+                  style={styles.enterBtn}
+                />
+              </View>
             </View>
-            <View style={{ flexDirection: "row", gap: 16, marginTop: 12 }}>
-              <Pressable onPress={() => setShowPad(false)} hitSlop={8}>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>Hide</Text>
-              </Pressable>
-              <Pressable onPress={() => void submitPin()} hitSlop={8} disabled={entry.length < 4}>
-                <Text
-                  style={{
-                    color: entry.length >= 4 ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                    fontSize: 13,
-                    fontWeight: "700",
-                  }}
-                >
-                  Enter
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        )
-      ) : null}
+          )
+        ) : null}
+      </View>
+
+      <Dialog
+        visible={panicVisible}
+        theme={theme}
+        title="Panic wipe?"
+        message="Erase the local index, cached photos and every saved credential on this phone. The Telegram channel archive is not touched and can be restored later."
+        onClose={() => setPanicVisible(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setPanicVisible(false), variant: "text" },
+          {
+            label: "Wipe this phone",
+            variant: "danger",
+            onPress: () => {
+              setPanicVisible(false);
+              void (async () => {
+                try {
+                  const { panicWipe } = await import("../lib/panicWipe");
+                  await panicWipe();
+                  setNotice({
+                    title: "Wiped",
+                    message:
+                      "Local data and credentials are gone. Close the app; the channel archive is still intact.",
+                  });
+                } catch (e: any) {
+                  setNotice({
+                    title: "Wipe failed",
+                    message: e?.message ?? "Could not wipe local data.",
+                  });
+                }
+              })();
+            },
+          },
+        ]}
+      />
+      <Dialog
+        visible={!!notice}
+        theme={theme}
+        title={notice?.title ?? ""}
+        message={notice?.message}
+        onClose={() => setNotice(null)}
+        actions={[{ label: "Close", onPress: () => setNotice(null) }]}
+      />
     </View>
   );
 }
+
+const KEY_SIZE = 68;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 32,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xxl,
+  },
+  hero: {
+    alignItems: "center",
   },
   logo: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
+    width: 76,
+    height: 76,
+    borderRadius: radius.sheet,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: "800",
+  titleHit: {
+    minHeight: 32,
+    justifyContent: "center",
   },
-  subtitle: {
-    fontSize: 13.5,
-    marginTop: 6,
-    textAlign: "center",
-    lineHeight: 19,
+  actions: {
+    marginTop: spacing.xl,
+    alignItems: "center",
+    width: "100%",
+  },
+  primaryBtn: {
+    minWidth: 200,
+  },
+  padWrap: {
+    alignItems: "center",
+    marginTop: spacing.lg,
+  },
+  dots: {
+    flexDirection: "row",
+    gap: spacing.md,
+    height: 24,
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: radius.pill,
   },
   pad: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    width: 240,
-    marginTop: 12,
+    width: (KEY_SIZE + spacing.sm) * 3,
   },
   padKey: {
-    width: 72,
-    height: 56,
-    borderRadius: 16,
-    margin: 4,
+    width: KEY_SIZE,
+    height: KEY_SIZE,
+    borderRadius: radius.pill,
+    margin: spacing.xs,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  padActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  enterBtn: {
+    minWidth: 120,
   },
 });

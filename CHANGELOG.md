@@ -3,6 +3,56 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [1.3.0] - calm interface overhaul
+
+A UI-only release. Backup, sync, encryption, remote-control and database logic
+are untouched; every screen now shares one visual and accessibility system.
+
+### Foundation
+- **Design tokens** in `src/theme.ts`: a closed type scale (10/11/12/13/15/17/20/24/30),
+  4-based spacing, five radii, a 120/180/240 ms motion scale, a 48 dp touch
+  target, semantic status tokens and centralised overlay/fallback colours.
+- **Accessible primitives** in `src/components/ui.tsx`: Button, IconButton,
+  ListRow, Chip, ToggleRow, Dialog, Sheet, AppBar, SegmentedControl, Badge,
+  StatusPill, ProgressBar, Stat, EmptyState, ErrorState, Section, Divider,
+  Screen, SearchField. Roles, labels, states and 48 dp targets are built in.
+- **Press feedback** on the UI thread (Reanimated, 120 ms, reduced-motion aware).
+- **ErrorBoundary** recovery screen ("your archive is safe").
+- **Static UI guard** (`tests/ui-system.test.mjs`) fails on raw hex colours,
+  `Dimensions.get`, type sizes outside the scale, or missing primitive
+  accessibility contracts.
+
+### Screens
+- **Gallery**: photo-first chrome, segmented Days/Months/Years, measured sticky
+  date header (only after the first section scrolls), collapsible library
+  overview, upload progress bar, selection bar with overflow sheet, trash
+  confirmation dialog, skeleton/empty/error states.
+- **Collections**: responsive 2/3/4 album grid with cover mosaics, bottom-sheet
+  album/trip/search menus, trash selection with dialog confirms.
+- **Settings**: search field with section jump index; destructive resets and
+  SQLCipher encryption moved from system alerts to dialogs.
+- **Upload queue**: trust surface with a three-stat summary, throughput card,
+  semantic status pills, inline errors and retry-all.
+- **Setup**: Token → Channel → Restore step rail, token show/hide, inline errors.
+- **Lock**: larger keypad, fixed-height status area, panic wipe dialog.
+- **Viewer, Map, People, Best Of, Similar, Search, Period screens, Folder sync,
+  Sync, Slideshow, Compare, Share target, Photo info, Maintenance, Free up
+  space, Remote, Destinations**: shared app bars, empty states, responsive
+  grids and accessibility labels.
+
+### Accessibility
+- Every interactive element has a role, a label where needed, and a state.
+- Progress and upload status announce via live regions.
+- Decorative images are hidden from TalkBack.
+- Arabic RTL mirrors back/chevron icons; logical padding is used throughout.
+- Reduced-motion is honoured (skeleton pulse removed, theme fade skipped).
+
+### Notes
+- 78 system alerts remain; all are informational, error reports or OS-level
+  prompts, except a few multi-choice confirmations still queued for migration.
+- Device verification of this release was limited to the Gallery chrome because
+  the dev-client bundle cache could not be refreshed in the build session.
+
 ## [1.2.0] - remote, multi-device & engineering wave
 
 ### Remote control & multi-device

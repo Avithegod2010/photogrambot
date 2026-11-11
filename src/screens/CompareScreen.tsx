@@ -10,8 +10,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useT } from "../useT";
 import { TelegramImage } from "../components/TelegramImage";
+import { EmptyState } from "../components/ui";
+import { CloseIcon } from "../components/icons";
 import { formatBytes, formatDate } from "../lib/format";
 import type { PhotoRow } from "../lib/db";
+import { motion } from "../theme";
 
 /**
  * Side-by-side comparison. Each pane zooms and pans independently (pinch +
@@ -30,12 +33,13 @@ export function CompareScreen({ route, navigation }: { route: any; navigation: a
   if (!left || !right) {
     return (
       <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <Text style={{ color: theme.colors.onSurface, textAlign: "center", marginTop: 80 }}>
-          Pick two photos to compare.
-        </Text>
-        <Pressable onPress={() => navigation.goBack()} style={{ alignSelf: "center", marginTop: 16 }}>
-          <Text style={{ color: theme.colors.primary }}>{tr("common.close")}</Text>
-        </Pressable>
+        <EmptyState
+          theme={theme}
+          title="Pick two photos"
+          message="Select exactly two photos in the gallery, then choose Compare from the selection bar."
+          actionLabel={tr("common.close")}
+          onAction={() => navigation.goBack()}
+        />
       </View>
     );
   }
@@ -43,11 +47,19 @@ export function CompareScreen({ route, navigation }: { route: any; navigation: a
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12} accessibilityLabel="Close compare">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 22 }}>✕</Text>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          accessibilityLabel="Close compare"
+          accessibilityRole="button"
+          style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center" }}
+        >
+          <CloseIcon color={theme.colors.onSurface} size={22} />
         </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>{tr("viewer.compare")}</Text>
-        <View style={{ width: 22 }} />
+        <Text accessibilityRole="header" style={[styles.title, { color: theme.colors.onSurface }]}>
+          {tr("viewer.compare")}
+        </Text>
+        <View style={{ width: 48 }} />
       </View>
 
       <View style={[styles.panes, { flexDirection: stacked ? "column" : "row" }]}>
@@ -107,9 +119,9 @@ function ComparePane({
     })
     .onEnd(() => {
       if (scale.value <= 1.02) {
-        scale.value = withTiming(1);
-        translateX.value = withTiming(0);
-        translateY.value = withTiming(0);
+        scale.value = withTiming(1, { duration: motion.base });
+        translateX.value = withTiming(0, { duration: motion.base });
+        translateY.value = withTiming(0, { duration: motion.base });
       }
     });
 
@@ -126,9 +138,9 @@ function ComparePane({
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .onEnd(() => {
-      scale.value = withTiming(1);
-      translateX.value = withTiming(0);
-      translateY.value = withTiming(0);
+      scale.value = withTiming(1, { duration: motion.base });
+      translateX.value = withTiming(0, { duration: motion.base });
+      translateY.value = withTiming(0, { duration: motion.base });
     });
 
   const gesture = Gesture.Simultaneous(pinch, pan, doubleTap);

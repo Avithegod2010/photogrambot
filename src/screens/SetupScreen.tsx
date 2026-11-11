@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,11 +11,102 @@ import {
 import { useSetupStore } from "../store/useSetupStore";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { Button, Card, SectionLabel, TextField } from "../components/ui";
+import { Button, Card, IconButton, SectionLabel, TextField } from "../components/ui";
+import { CheckIcon } from "../components/icons";
 import { restoreFromChannelPinned } from "../lib/backup";
 import { setBackupPassphrase } from "../lib/settings";
 import { countAllPhotoVersions, getAlbums, getSavedSearches } from "../lib/db";
 import { runSyncNow } from "../lib/sync";
+import { radius, spacing, touchTarget, typography, type AppTheme } from "../theme";
+
+type SetupStep = "token" | "channel" | "restore" | "done";
+
+const STEP_LABELS: { key: SetupStep; label: string; short: string }[] = [
+  { key: "token", label: "Bot token", short: "Token" },
+  { key: "channel", label: "Backup channel", short: "Channel" },
+  { key: "restore", label: "Restore library", short: "Restore" },
+];
+
+function stepIndex(step: SetupStep): number {
+  if (step === "done") return 3;
+  return Math.max(0, STEP_LABELS.findIndex((s) => s.key === step));
+}
+
+/** 3-dot progress rail: complete / current / upcoming, always labelled. */
+function StepIndicator({ step, theme }: { step: SetupStep; theme: AppTheme }) {
+  const active = stepIndex(step);
+  return (
+    <View
+      style={styles.stepper}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Setup progress"
+      accessibilityValue={{ min: 0, max: 3, now: Math.min(3, active + 1) }}
+    >
+      {STEP_LABELS.map((s, i) => {
+        const done = i < active || step === "done";
+        const current = i === active && step !== "done";
+        return (
+          <React.Fragment key={s.key}>
+            {i > 0 ? (
+              <View
+                style={[
+                  styles.stepLine,
+                  { backgroundColor: i <= active ? theme.colors.primary : theme.colors.outlineVariant },
+                ]}
+              />
+            ) : null}
+            <View style={styles.stepItem}>
+              <View
+                style={[
+                  styles.stepDot,
+                  {
+                    backgroundColor: done
+                      ? theme.colors.primary
+                      : current
+                        ? theme.colors.primaryContainer
+                        : theme.colors.surfaceContainer,
+                    borderColor: current || done ? theme.colors.primary : theme.colors.outline,
+                  },
+                ]}
+              >
+                {done ? (
+                  <CheckIcon color={theme.colors.onPrimary} size={14} />
+                ) : (
+                  <Text
+                    style={[
+                      typography.caption,
+                      {
+                        color: current
+                          ? theme.colors.onPrimaryContainer
+                          : theme.colors.onSurfaceVariant,
+                        fontWeight: "700",
+                      },
+                    ]}
+                  >
+                    {i + 1}
+                  </Text>
+                )}
+              </View>
+              <Text
+                numberOfLines={1}
+                style={[
+                  typography.caption,
+                  {
+                    color: current ? theme.colors.onSurface : theme.colors.onSurfaceVariant,
+                    fontWeight: current ? "700" : "500",
+                    marginTop: 4,
+                  },
+                ]}
+              >
+                {s.short}
+              </Text>
+            </View>
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
 
 export function SetupScreen() {
   const theme = useTheme();
@@ -26,13 +118,12 @@ export function SetupScreen() {
 
   const [tokenInput, setTokenInput] = useState("");
   const [channelInput, setChannelInput] = useState("");
-  const [step, setStep] = useState<"token" | "channel" | "restore" | "done">(
-    token && !channelId ? "channel" : "token"
-  );
+  const [step, setStep] = useState<SetupStep>(token && !channelId ? "channel" : "token");
   const [localError, setLocalError] = useState<string | null>(null);
   const [detectedTitle, setDetectedTitle] = useState<string | null>(null);
   const [passInput, setPassInput] = useState("");
   const [restoring, setRestoring] = useState(false);
+  const [showToken, setShowToken] = useState(false);
   const [summary, setSummary] = useState<{
     photos: number;
     versions: number;
@@ -120,97 +211,183 @@ export function SetupScreen() {
     await afterChannelSaved(ok, "Could not reach this chat. Make sure the bot is an admin there.");
   }
 
+  const heading = useMemo(() => {
+    switch (step) {
+      case "channel":
+        return "Connect your channel";
+      case "restore":
+        return "Restore your library";
+      case "done":
+        return "You're all set";
+      default:
+        return "Connect your bot";
+    }
+  }, [step]);
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.hero}>
           <View style={[styles.logo, { backgroundColor: theme.colors.primaryContainer }]}>
-            <Text style={[styles.logoText, { color: theme.colors.onPrimaryContainer }]}>PB</Text>
+            <Text style={[typography.headline, { color: theme.colors.onPrimaryContainer }]}>PB</Text>
           </View>
-          <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+          <Text
+            accessibilityRole="header"
+            style={[typography.display, { color: theme.colors.onSurface, textAlign: "center" }]}
+          >
             {appDisplayName || "PhotogramBot"}
           </Text>
-          <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
-            Your personal photo gallery, backed by your own Telegram bot and channel.
-            Unlimited storage, no middleman.
+          <Text
+            style={[
+              typography.body,
+              {
+                color: theme.colors.onSurfaceVariant,
+                textAlign: "center",
+                marginTop: spacing.sm,
+                maxWidth: 340,
+              },
+            ]}
+          >
+            Your photo gallery, backed by your own Telegram bot and channel. Unlimited storage,
+            no middleman.
           </Text>
         </View>
 
+        <StepIndicator step={step} theme={theme} />
+
+        <Text
+          accessibilityRole="header"
+          style={[
+            typography.title,
+            { color: theme.colors.onSurface, marginTop: spacing.xl, marginBottom: spacing.md },
+          ]}
+        >
+          {heading}
+        </Text>
+
         {step === "token" ? (
           <Card theme={theme}>
-            <SectionLabel text="Step 1 · Bot token" theme={theme} />
-            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
-              Open Telegram, message {"@BotFather"}, send /newbot and paste the token here.
+            <SectionLabel text="Step 1 of 3" theme={theme} action={undefined} />
+            <Text style={[typography.small, { color: theme.colors.onSurfaceVariant }]}>
+              Open Telegram, message @BotFather, send /newbot and paste the token here. It is stored
+              encrypted on this device.
             </Text>
             <TextField
               value={tokenInput}
-              onChangeText={setTokenInput}
-              placeholder="123456789:AAHb..."
+              onChangeText={(v) => {
+                setTokenInput(v);
+                if (localError) setLocalError(null);
+              }}
+              placeholder="123456789:AAHb…"
+              label="Bot token"
               theme={theme}
+              secureTextEntry={!showToken}
               autoCapitalize="none"
+              error={shownError}
+              style={{ marginTop: spacing.md }}
+              trailing={
+                <Pressable
+                  onPress={() => setShowToken((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={showToken ? "Hide bot token" : "Show bot token"}
+                  accessibilityState={{ expanded: showToken }}
+                  style={styles.showToggle}
+                >
+                  <Text style={[typography.label, { color: theme.colors.primary }]}>
+                    {showToken ? "Hide" : "Show"}
+                  </Text>
+                </Pressable>
+              }
             />
-            {shownError ? (
-              <Text style={[styles.error, { color: theme.colors.error }]}>{shownError}</Text>
-            ) : null}
             <Button
-              title="Verify token"
+              title="Verify and continue"
               onPress={onVerifyToken}
               theme={theme}
               busy={busy}
-              style={styles.cta}
+              style={{ marginTop: spacing.lg }}
             />
           </Card>
         ) : null}
 
         {step === "channel" ? (
           <Card theme={theme}>
-            <SectionLabel text="Step 2 · Backup channel" theme={theme} />
-            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
-              1. Create a private channel in Telegram.{"\n"}
-              2. Add your bot as an admin with all permissions.{"\n"}
-              3. Post anything in the channel, then tap Detect — or paste the channel ID.
-            </Text>
+            <SectionLabel text="Step 2 of 3" theme={theme} />
+            <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
+              {[
+                "Create a private channel in Telegram.",
+                "Add your bot as an admin with all permissions.",
+                "Post anything in the channel, then tap Detect.",
+              ].map((line, i) => (
+                <View key={line} style={styles.bulletRow}>
+                  <View style={[styles.bullet, { backgroundColor: theme.colors.primary }]}>
+                    <Text style={[typography.badge, { color: theme.colors.onPrimary }]}>{i + 1}</Text>
+                  </View>
+                  <Text style={[typography.small, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
+                    {line}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
             {detectedTitle ? (
-              <Text style={[styles.detected, { color: theme.colors.success }]}>
-                Detected: {detectedTitle}
-              </Text>
+              <View
+                style={[styles.successRow, { backgroundColor: theme.colors.surfaceContainer }]}
+                accessibilityLiveRegion="polite"
+              >
+                <View style={[styles.successDot, { backgroundColor: theme.colors.success }]} />
+                <Text style={[typography.small, { color: theme.colors.onSurface, flex: 1 }]}>
+                  Detected {detectedTitle}
+                </Text>
+              </View>
             ) : null}
+
             <Button
               title="Detect channel"
               onPress={onDetect}
               theme={theme}
-              variant="outlined"
+              variant="tonal"
               busy={busy}
-              style={styles.cta}
             />
-            <Text style={[styles.or, { color: theme.colors.onSurfaceVariant }]}>or</Text>
+            <View style={styles.orRow}>
+              <View style={[styles.orLine, { backgroundColor: theme.colors.outlineVariant }]} />
+              <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant }]}>
+                or
+              </Text>
+              <View style={[styles.orLine, { backgroundColor: theme.colors.outlineVariant }]} />
+            </View>
             <TextField
               value={channelInput}
-              onChangeText={setChannelInput}
+              onChangeText={(v) => {
+                setChannelInput(v);
+                if (localError) setLocalError(null);
+              }}
               placeholder="-1001234567890"
+              label="Channel ID"
               theme={theme}
               keyboardType="numeric"
+              error={shownError}
             />
-            {shownError ? (
-              <Text style={[styles.error, { color: theme.colors.error }]}>{shownError}</Text>
-            ) : null}
             <Button
               title="Use this channel"
               onPress={onManualChannel}
               theme={theme}
               busy={busy}
-              style={styles.cta}
+              style={{ marginTop: spacing.lg }}
             />
           </Card>
         ) : null}
 
         {step === "restore" && migrationOffer ? (
           <Card theme={theme}>
-            <SectionLabel text="Step 3 · Restore from backup" theme={theme} />
-            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+            <SectionLabel text="Step 3 of 3" theme={theme} />
+            <Text style={[typography.small, { color: theme.colors.onSurfaceVariant }]}>
               This channel already holds a PhotogramBot backup
               {migrationOffer.exportedAt ? ` from ${migrationOffer.exportedAt.slice(0, 10)}` : ""}
               {migrationOffer.encrypted ? " (encrypted)" : ""}. Restore your whole library —
@@ -218,27 +395,30 @@ export function SetupScreen() {
             </Text>
             <TextField
               value={passInput}
-              onChangeText={setPassInput}
+              onChangeText={(v) => {
+                setPassInput(v);
+                if (localError) setLocalError(null);
+              }}
               placeholder="Backup passphrase"
+              label="Backup passphrase"
               theme={theme}
               secureTextEntry
+              error={shownError}
+              style={{ marginTop: spacing.md }}
             />
-            {shownError ? (
-              <Text style={[styles.error, { color: theme.colors.error }]}>{shownError}</Text>
-            ) : null}
             <Button
               title="Restore library"
               onPress={onRestore}
               theme={theme}
               busy={restoring}
-              style={styles.cta}
+              style={{ marginTop: spacing.lg }}
             />
             <Button
               title="Skip — set up as new"
               onPress={finishMigration}
               theme={theme}
               variant="text"
-              style={styles.cta}
+              style={{ marginTop: spacing.sm }}
             />
           </Card>
         ) : null}
@@ -246,12 +426,17 @@ export function SetupScreen() {
         {step === "done" && migrationOffer ? (
           <Card theme={theme}>
             <SectionLabel text="Restore complete" theme={theme} />
-            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+            <Text style={[typography.small, { color: theme.colors.onSurfaceVariant }]}>
               Restored {summary?.photos ?? 0} photos, {summary?.versions ?? 0} version history
               entries, {summary?.albums ?? 0} albums and {summary?.searches ?? 0} saved searches
               from your channel backup.
             </Text>
-            <Text style={[styles.help, { color: theme.colors.onSurfaceVariant }]}>
+            <Text
+              style={[
+                typography.small,
+                { color: theme.colors.onSurfaceVariant, marginTop: spacing.sm },
+              ]}
+            >
               PhotogramBot is scanning this device now — photos found on this phone are relinked
               automatically. Anything not on this phone stays safely in your cloud.
             </Text>
@@ -259,15 +444,22 @@ export function SetupScreen() {
               title="Open PhotogramBot"
               onPress={finishMigration}
               theme={theme}
-              style={styles.cta}
+              style={{ marginTop: spacing.lg }}
             />
           </Card>
         ) : null}
 
-        <Text style={[styles.footer, { color: theme.colors.onSurfaceVariant }]}>
-          Your token is stored encrypted on this device. Photos go directly from your phone to
-          your own channel — PhotogramBot has no servers.
-        </Text>
+        <View style={styles.footerRow}>
+          <IconButton
+            icon={<CheckIcon color={theme.colors.onSurfaceVariant} size={16} />}
+            label="Privacy note"
+            theme={theme}
+            style={styles.footerIcon}
+          />
+          <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
+            Photos go directly from your phone to your own channel. PhotogramBot has no servers.
+          </Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -278,65 +470,102 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scroll: {
-    padding: 20,
-    paddingTop: 64,
-    paddingBottom: 48,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl + 24,
+    paddingBottom: spacing.xxl + spacing.lg,
+    maxWidth: 560,
+    width: "100%",
+    alignSelf: "center",
   },
   hero: {
     alignItems: "center",
-    marginBottom: 28,
+    marginBottom: spacing.xl,
   },
   logo: {
     width: 72,
     height: 72,
-    borderRadius: 22,
+    borderRadius: radius.sheet,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
+    marginBottom: spacing.lg,
   },
-  logoText: {
-    fontSize: 26,
-    fontWeight: "800",
+  stepper: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "800",
+  stepItem: {
+    alignItems: "center",
+    width: 72,
   },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
-    marginTop: 8,
-    paddingHorizontal: 8,
+  stepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  help: {
-    fontSize: 13.5,
-    lineHeight: 20,
-    marginBottom: 12,
+  stepLine: {
+    flex: 1,
+    height: 2,
+    borderRadius: radius.pill,
+    marginTop: 13,
+    marginHorizontal: spacing.xs,
   },
-  cta: {
-    marginTop: 16,
+  bulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
   },
-  or: {
-    textAlign: "center",
-    marginVertical: 10,
-    fontSize: 13,
+  bullet: {
+    width: 20,
+    height: 20,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  error: {
-    fontSize: 13,
-    marginTop: 10,
-    lineHeight: 18,
+  successRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.control,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
   },
-  detected: {
-    fontSize: 13,
-    marginBottom: 10,
-    fontWeight: "600",
+  successDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radius.pill,
   },
-  footer: {
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: "center",
-    marginTop: 24,
-    paddingHorizontal: 12,
+  orRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginVertical: spacing.md,
+  },
+  orLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  showToggle: {
+    minHeight: touchTarget,
+    minWidth: touchTarget,
+    paddingHorizontal: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+    paddingHorizontal: spacing.xs,
+  },
+  footerIcon: {
+    width: 32,
+    height: 32,
   },
 });

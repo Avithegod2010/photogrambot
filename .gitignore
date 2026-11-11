@@ -76,3 +76,6 @@ latest.json
 *.aab
 eas-build*.json
 eas-build*.log
+
+# Metro / dev-server logs
+metro*.log

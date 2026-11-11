@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { Dimensions, Pressable, StyleSheet, Text, View } from "../rn";
+import { Pressable, StyleSheet, Text, View } from "../rn";
 import { useTheme } from "../useTheme";
 import { getMemories, type MemoryGroup } from "../lib/db";
 import { TelegramImage } from "./TelegramImage";
+import { overlay, radius, spacing, typography } from "../theme";
 
+/**
+ * "On this day" memories. This is one of the few places where a little
+ * delight is allowed: taller cards, a scrim, and type sitting on the photo.
+ */
 export function MemoriesCarousel({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const [memories, setMemories] = useState<MemoryGroup[]>([]);
@@ -19,7 +24,12 @@ export function MemoriesCarousel({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.title, { color: theme.colors.onSurface }]}>Memories</Text>
+      <Text
+        accessibilityRole="header"
+        style={[typography.bodyStrong, { color: theme.colors.onSurface, paddingHorizontal: spacing.lg, marginBottom: spacing.sm }]}
+      >
+        Memories
+      </Text>
       <View style={styles.row}>
         {memories.map((m) => (
           <Pressable
@@ -31,6 +41,8 @@ export function MemoriesCarousel({ navigation }: { navigation: any }) {
               if (photos.length === 0) return;
               navigation.navigate("Viewer", { photos, index: 0, title: m.label });
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`${m.label}, ${m.count} photo${m.count === 1 ? "" : "s"}`}
           >
             <TelegramImage
               fileId={m.cover_preview_id ?? m.cover_file_id}
@@ -38,10 +50,10 @@ export function MemoriesCarousel({ navigation }: { navigation: any }) {
             />
             <View style={[styles.overlay, { backgroundColor: theme.colors.scrim }]} />
             <View style={styles.cardText}>
-              <Text style={[styles.years, { color: "#fff" }]} numberOfLines={1}>
+              <Text style={[typography.smallStrong, { color: overlay.onMedia }]} numberOfLines={1}>
                 {m.label}
               </Text>
-              <Text style={[styles.count, { color: "rgba(255,255,255,0.85)" }]}>
+              <Text style={[typography.caption, { color: overlay.onMediaMuted }]}>
                 {m.count} photo{m.count === 1 ? "" : "s"}
               </Text>
             </View>
@@ -54,40 +66,30 @@ export function MemoriesCarousel({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   wrap: {
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: "700",
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
   row: {
     flexDirection: "row",
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: radius.card,
     overflow: "hidden",
   },
   overlay: {
-    ...{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     opacity: 0.45,
   },
   cardText: {
     position: "absolute",
-    left: 10,
-    right: 10,
-    bottom: 10,
-  },
-  years: {
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  count: {
-    fontSize: 11,
-    marginTop: 2,
+    left: spacing.sm,
+    right: spacing.sm,
+    bottom: spacing.sm,
   },
 });

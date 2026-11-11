@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View, type ColorValue } from "../rn";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import {
@@ -14,10 +14,26 @@ import {
 import { processQueue } from "../lib/uploader";
 import { formatBytes } from "../lib/format";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { RetryIcon, TrashIcon } from "../components/icons";
+import { RetryIcon, TrashIcon, WarningIcon } from "../components/icons";
+import {
+  AppBar,
+  Button,
+  EmptyState,
+  IconButton,
+  Stat,
+  StatusPill,
+} from "../components/ui";
+import { radius, spacing, typography } from "../theme";
+import type { StatusKind } from "../theme";
 
 const STATE_ORDER: Record<string, number> = { running: 0, pending: 1, failed: 2 };
 const PAGE_LIMIT = 200;
+
+function statusFor(state: QueueRow["state"]): StatusKind {
+  if (state === "running") return "uploading";
+  if (state === "failed") return "failed";
+  return "queued";
+}
 
 export function UploadQueueScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -28,6 +44,7 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [throughput, setThroughput] = useState<UploadThroughput | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [c, rows, tp] = await Promise.all([
@@ -50,13 +67,14 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
 
   async function retry(item: QueueRow) {
     setBusyId(item.id);
+    setNotice(null);
     try {
       if (await retryQueueItem(item.id)) {
         await refresh();
         void processQueue();
       }
     } catch (e: any) {
-      Alert.alert("Retry failed", e?.message ?? "Could not requeue this item.");
+      setNotice(e?.message ?? "Could not requeue this item.");
     } finally {
       setBusyId(null);
     }
@@ -64,13 +82,14 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
 
   async function remove(item: QueueRow) {
     setBusyId(item.id);
+    setNotice(null);
     try {
       if (await removeQueueItem(item.id)) {
         await refresh();
         await refreshMeta();
       }
     } catch (e: any) {
-      Alert.alert("Remove failed", e?.message ?? "Could not remove this item.");
+      setNotice(e?.message ?? "Could not remove this item.");
     } finally {
       setBusyId(null);
     }
@@ -80,56 +99,36 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
   const pending = counts.pending ?? 0;
   const failed = counts.failed ?? 0;
   const capped = running + pending + failed > items.length;
-
-  function stateChip(state: QueueRow["state"]) {
-    const map: Record<string, { label: string; color: ColorValue }> = {
-      running: { label: "Uploading", color: theme.colors.primary },
-      pending: { label: "Pending", color: theme.colors.onSurfaceVariant },
-      failed: { label: "Failed", color: theme.colors.error },
-    };
-    const s = map[state] ?? { label: state, color: theme.colors.onSurfaceVariant };
-    return <Text style={{ color: s.color, fontSize: 11, fontWeight: "700" }}>{s.label}</Text>;
-  }
+  const total = running + pending;
 
   return (
-    <View
-      style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}
-    >
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Upload queue</Text>
-      </View>
-      <View style={styles.countsRow}>
-        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, fontWeight: "600" }}>
-          Uploading {running}
-        </Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, fontWeight: "600" }}>
-          Pending {pending}
-        </Text>
-        <Text
-          style={{
-            color: failed > 0 ? theme.colors.error : theme.colors.onSurfaceVariant,
-            fontSize: 12.5,
-            fontWeight: "600",
-          }}
-        >
-          Failed {failed}
-        </Text>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Upload queue" onBack={() => navigation.goBack()} theme={theme} borderless />
+
+      <View style={[styles.summary, { backgroundColor: theme.colors.surface }]}>
+        <View style={styles.statsRow} accessibilityLiveRegion="polite">
+          <Stat label="Uploading" value={String(running)} theme={theme} />
+          <Stat label="Waiting" value={String(pending)} theme={theme} />
+          <Stat
+            label="Failed"
+            value={String(failed)}
+            theme={theme}
+            hint={failed > 0 ? "Needs attention" : "All healthy"}
+          />
+        </View>
       </View>
 
       {throughput && throughput.lastHour > 0 ? (
-        <View style={[styles.throughputRow, { backgroundColor: theme.colors.surface }]}>
+        <View style={[styles.throughputRow, { backgroundColor: theme.colors.surfaceContainer }]}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: "700" }}>
+            <Text style={[typography.smallStrong, { color: theme.colors.onSurface }]}>
               {throughput.perMinute}/min this hour
             </Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 2 }}>
+            <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant, marginTop: 2 }]}>
               {throughput.lastHour} uploaded · {throughput.recentPerMinute}/min last 10 min
             </Text>
           </View>
-          <View style={styles.spark}>
+          <View style={styles.spark} accessible={false} importantForAccessibility="no">
             {throughput.buckets.map((n, i) => {
               const max = Math.max(1, ...throughput.buckets);
               const h = 4 + Math.round((n / max) * 20);
@@ -150,118 +149,145 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
         </View>
       ) : null}
 
+      {notice ? (
+        <View
+          style={[styles.notice, { backgroundColor: theme.colors.errorContainer }]}
+          accessibilityLiveRegion="assertive"
+        >
+          <WarningIcon color={theme.colors.error} size={18} />
+          <Text style={[typography.small, { color: theme.colors.error, flex: 1 }]}>{notice}</Text>
+          <Pressable
+            onPress={() => setNotice(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss error"
+            hitSlop={8}
+          >
+            <Text style={{ color: theme.colors.error, fontWeight: "700" }}>Dismiss</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <FlatList
         data={items}
         keyExtractor={(i) => String(i.id)}
-        contentContainerStyle={{ padding: 16, paddingBottom: 60 }}
-        renderItem={({ item }) => (
-          <View style={[styles.row, { backgroundColor: theme.colors.surface }]}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        contentContainerStyle={{
+          paddingHorizontal: spacing.lg,
+          paddingTop: spacing.sm,
+          paddingBottom: insets.bottom + 60,
+        }}
+        renderItem={({ item }) => {
+          const busy = busyId === item.id;
+          return (
+            <View style={[styles.row, { backgroundColor: theme.colors.surface }]}>
+              <View style={{ flex: 1 }}>
+                <View style={styles.rowTop}>
+                  <Text
+                    style={[typography.bodyStrong, { color: theme.colors.onSurface, flexShrink: 1 }]}
+                    numberOfLines={1}
+                  >
+                    {item.filename}
+                  </Text>
+                  <StatusPill status={statusFor(item.state)} theme={theme} />
+                </View>
                 <Text
-                  style={{
-                    color: theme.colors.onSurface,
-                    fontWeight: "600",
-                    fontSize: 14,
-                    flexShrink: 1,
-                  }}
+                  style={[typography.caption, { color: theme.colors.onSurfaceVariant, marginTop: 2 }]}
                   numberOfLines={1}
                 >
-                  {item.filename}
+                  {[
+                    item.folder ?? "Unfiled",
+                    formatBytes(item.size),
+                    item.retries > 0 ? `${item.retries} retry${item.retries === 1 ? "" : "s"}` : null,
+                    // Priority lanes (R27): make the lane visible so "why is my
+                    // screenshot last?" has an answer.
+                    item.priority === 0 ? "priority" : item.priority === 2 ? "low priority" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </Text>
-                {stateChip(item.state)}
+                {item.state === "failed" && item.error ? (
+                  <Text
+                    style={[typography.small, { color: theme.colors.error, marginTop: spacing.xs }]}
+                    numberOfLines={3}
+                  >
+                    {item.error}
+                  </Text>
+                ) : null}
               </View>
-              <Text
-                style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 2 }}
-                numberOfLines={1}
-              >
-                {[
-                  item.folder ?? "Unfiled",
-                  formatBytes(item.size),
-                  item.retries > 0 ? `${item.retries} retry${item.retries === 1 ? "" : "s"}` : null,
-                  // Priority lanes (R27): make the lane visible so "why is my
-                  // screenshot last?" has an answer.
-                  item.priority === 0 ? "priority" : item.priority === 2 ? "low priority" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-              {item.state === "failed" && item.error ? (
-                <Text
-                  style={{ color: theme.colors.error, fontSize: 12, marginTop: 4, lineHeight: 16 }}
-                  numberOfLines={2}
-                >
-                  {item.error}
-                </Text>
+              {item.state === "failed" ? (
+                <View style={styles.actions}>
+                  <IconButton
+                    icon={
+                      busy ? (
+                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                      ) : (
+                        <RetryIcon color={theme.colors.primary} size={20} />
+                      )
+                    }
+                    label={`Retry ${item.filename}`}
+                    theme={theme}
+                    disabled={busy}
+                    onPress={() => void retry(item)}
+                  />
+                  <IconButton
+                    icon={<TrashIcon color={theme.colors.error} size={20} />}
+                    label={`Remove ${item.filename} from the queue`}
+                    theme={theme}
+                    disabled={busy}
+                    onPress={() => void remove(item)}
+                  />
+                </View>
+              ) : item.state === "pending" ? (
+                <View style={styles.actions}>
+                  <IconButton
+                    icon={<TrashIcon color={theme.colors.onSurfaceVariant} size={20} />}
+                    label={`Remove ${item.filename} from the queue`}
+                    theme={theme}
+                    disabled={busy}
+                    onPress={() => void remove(item)}
+                  />
+                </View>
               ) : null}
             </View>
-            {item.state === "failed" ? (
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={() => void retry(item)}
-                  disabled={busyId === item.id}
-                  style={styles.iconBtn}
-                  hitSlop={8}
-                  accessibilityLabel="Retry upload"
-                  accessibilityRole="button"
-                >
-                  {busyId === item.id ? (
-                    <ActivityIndicator size="small" color={theme.colors.primary} />
-                  ) : (
-                    <RetryIcon color={theme.colors.primary} size={20} />
-                  )}
-                </Pressable>
-                <Pressable
-                  onPress={() => void remove(item)}
-                  disabled={busyId === item.id}
-                  style={styles.iconBtn}
-                  hitSlop={8}
-                  accessibilityLabel="Remove failed upload"
-                  accessibilityRole="button"
-                >
-                  <TrashIcon color={theme.colors.error} size={20} />
-                </Pressable>
-              </View>
-            ) : item.state === "pending" ? (
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={() => void remove(item)}
-                  disabled={busyId === item.id}
-                  style={styles.iconBtn}
-                  hitSlop={8}
-                  accessibilityLabel="Remove from queue"
-                  accessibilityRole="button"
-                >
-                  <TrashIcon color={theme.colors.onSurfaceVariant} size={20} />
-                </Pressable>
-              </View>
-            ) : null}
-          </View>
-        )}
+          );
+        }}
         ListEmptyComponent={
-          <Text
-            style={{
-              color: theme.colors.onSurfaceVariant,
-              fontSize: 13.5,
-              textAlign: "center",
-              marginTop: 40,
-            }}
-          >
-            Queue is empty — nothing is waiting to upload.
-          </Text>
+          <EmptyState
+            theme={theme}
+            title="Nothing waiting"
+            message="Every photo on this phone is backed up. New photos join the queue automatically when Auto sync is on."
+            actionLabel="Back to gallery"
+            onAction={() => navigation.goBack()}
+          />
         }
         ListFooterComponent={
           capped ? (
             <Text
-              style={{
-                color: theme.colors.onSurfaceVariant,
-                fontSize: 12,
-                textAlign: "center",
-                marginTop: 8,
-              }}
+              style={[
+                typography.caption,
+                { color: theme.colors.onSurfaceVariant, textAlign: "center", marginTop: spacing.sm },
+              ]}
             >
               Showing the latest {PAGE_LIMIT} — the rest appear as the queue drains.
             </Text>
+          ) : failed > 0 ? (
+            <View style={{ marginTop: spacing.lg }}>
+              <Button
+                title={`Retry all ${failed} failed`}
+                variant="tonal"
+                theme={theme}
+                onPress={() => {
+                  // Requeue every failed item through the same per-item path
+                  // the row buttons use, then drain once.
+                  void (async () => {
+                    for (const f of items.filter((i) => i.state === "failed")) {
+                      await retryQueueItem(f.id).catch(() => {});
+                    }
+                    await refresh();
+                    void processQueue();
+                  })();
+                }}
+              />
+            </View>
           ) : null
         }
       />
@@ -273,38 +299,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
+  summary: {
+    marginHorizontal: spacing.lg,
+    borderRadius: radius.card,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  statsRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  countsRow: {
-    flexDirection: "row",
-    gap: 16,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    gap: spacing.xl,
   },
   throughputRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginHorizontal: 16,
-    marginBottom: 10,
-    padding: 12,
-    borderRadius: 16,
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.card,
   },
   spark: {
     flexDirection: "row",
@@ -312,22 +324,31 @@ const styles = StyleSheet.create({
     gap: 3,
     height: 24,
   },
-  row: {
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 8,
+  notice: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.control,
+  },
+  row: {
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  rowTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   actions: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
   },
 });

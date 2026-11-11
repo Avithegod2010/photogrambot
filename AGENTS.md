@@ -487,3 +487,18 @@ Listed by value; none of these is approved or started.
 **Windows — don't go native first; build a web companion.** `react-native-windows` lags Expo SDK 57 badly and the modules this app leans on (media library, share-target, background tasks) do not exist there. `api.telegram.org` allows CORS, so a browser app (Expo web export wrapped as PWA/Electron/Tauri) can browse the channel library, search a restored index, download originals, and manage collections — **with the phone remaining the backup engine**. The channel-as-backend design already makes this multi-device: any client can restore the pinned database backup and see the whole library. A full native Windows port (folder watching, drag-in import) would come later via Tauri + a ported Bot API client.
 
 ---
+
+## UI rules (added 2026-11-11 — read `docs/UI-SYSTEM.md` before touching a screen)
+
+1. **Tokens only.** Type, spacing, radius, motion and touch sizes come from `src/theme.ts`. The closed type sizes are 10/11/12/13/15/17/20/24/30 and the only weights are 400/500/600/700. No new half-point sizes.
+2. **Colour comes from `useTheme()`.** Raw hex is forbidden outside `src/theme.ts` (plus the documented accent-preset, fallback, public-HTML and widget exceptions). `tests/ui-system.test.mjs` fails the build otherwise.
+3. **Use the primitives.** `Button`, `IconButton`, `ListRow`, `Chip`, `ToggleRow`, `Dialog`, `Sheet`, `AppBar`, `EmptyState`, `ErrorState`, `StatusPill`, `ProgressBar`, `Stat`, `Badge`, `Section`. Do not hand-roll a header, empty state or pressable row.
+4. **Every pressable is 48 dp** and has `accessibilityRole`, a label when icon-only, and `accessibilityState` (selected/disabled/busy/checked). Decorative images are hidden from TalkBack.
+5. **Four states per data screen**: loading, empty (why + next action), error (what happened + retry), permission/offline where relevant. Never a blank screen.
+6. **Status vocabulary**: local / queued / uploading / backed up / failed / restored / duplicate — always icon + text + colour, never colour alone.
+7. **Destructive or multi-choice actions use `Dialog`/`Sheet`.** `Alert.alert` only for OS-level confirmations and unrecoverable errors.
+8. **Motion**: 120 ms feedback, 180 ms state, 240 ms transitions, standard easing. Never animate keyboard-initiated or high-frequency actions. Honour `useReducedMotion()`. One memorable motion moment per screen at most.
+9. **Responsive**: use `useResponsive()`; never `Dimensions.get`. Grids are 2–3 columns on phones and 3–6 on tablets/DeX.
+10. **Decoy mode is a UI requirement.** No real names, counts, chips, photos or accessibility labels may appear in a decoy session.
+11. **Localisation**: new strings go through `useT()`/`t()`. Arabic is RTL — use logical padding (`paddingStart/End`), never hardcoded left/right.
+12. Run `npm run check` before every commit; it includes the static UI guard.

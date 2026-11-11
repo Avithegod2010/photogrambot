@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
-import { Button, Card, SectionLabel } from "../components/ui";
+import { Button, Card, SectionLabel, AppBar } from "../components/ui";
 import {
   getSyncConflicts,
   pendingSyncOpCount,
@@ -38,15 +38,8 @@ export function SyncScreen({ navigation }: { navigation: any }) {
   }, []);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityLabel="Back">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={{ color: theme.colors.onSurface, fontSize: 17, fontWeight: "700", flex: 1 }}>
-          Index sync
-        </Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Index sync" onBack={() => navigation.goBack()} theme={theme} borderless />
       <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
         <SectionLabel text="Sync status" theme={theme} />
         <Card theme={theme}>

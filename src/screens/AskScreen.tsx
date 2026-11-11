@@ -10,6 +10,7 @@ import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { EmptySearchArt } from "../components/illustrations";
 import { formatDate } from "../lib/format";
 import { isDecoyActive } from "../lib/applock";
+import { AppBar } from "../components/ui";
 
 interface ChatMessage {
   id: string;
@@ -103,19 +104,8 @@ export function AskScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          accessibilityLabel="Back"
-          accessibilityRole="button"
-        >
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Ask your photos</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>Gemini</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Ask your photos" subtitle="Answered by Gemini" onBack={() => navigation.goBack()} theme={theme} borderless />
 
       <FlatList
         ref={listRef}

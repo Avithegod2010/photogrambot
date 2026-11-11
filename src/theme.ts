@@ -1,4 +1,142 @@
-import { Platform, PlatformColor, type ColorValue } from "react-native";
+import {
+  Platform,
+  PlatformColor,
+  type ColorValue,
+  type TextStyle,
+  type ViewStyle,
+} from "react-native";
+
+/* ------------------------------------------------------------------------- *
+ * Design tokens
+ *
+ * The theme owns colour. These scales own everything else so screens never
+ * invent a one-off size, radius, duration or touch target. Additive: the
+ * existing AppTheme/ThemeColors contract is unchanged, so every screen that
+ * predates the token system keeps working while it is migrated.
+ * ------------------------------------------------------------------------- */
+
+/** 4-based spacing scale. `seam` is the only sub-4 value: photo-grid gaps. */
+export const spacing = {
+  seam: 2,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+} as const;
+
+/** Corner radii. Thumbnails stay sharp; controls, cards and sheets round up. */
+export const radius = {
+  thumb: 4,
+  control: 12,
+  card: 16,
+  sheet: 24,
+  pill: 999,
+} as const;
+
+/**
+ * One type scale: 10 (photo badge) · 11 · 12 · 13 · 15 · 17 · 20 · 24 · 30.
+ * Four weights only: 400 / 500 / 600 / 700. Line height stays 1.2–1.4.
+ */
+export const typography = {
+  display: { fontSize: 30, lineHeight: 36, fontWeight: "700" },
+  headline: { fontSize: 24, lineHeight: 30, fontWeight: "700" },
+  title: { fontSize: 20, lineHeight: 26, fontWeight: "700" },
+  section: { fontSize: 17, lineHeight: 22, fontWeight: "600" },
+  body: { fontSize: 15, lineHeight: 21, fontWeight: "400" },
+  bodyStrong: { fontSize: 15, lineHeight: 21, fontWeight: "600" },
+  small: { fontSize: 13, lineHeight: 18, fontWeight: "400" },
+  smallStrong: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  label: { fontSize: 12, lineHeight: 16, fontWeight: "600" },
+  caption: { fontSize: 11, lineHeight: 14, fontWeight: "500" },
+  badge: { fontSize: 10, lineHeight: 12, fontWeight: "700" },
+} satisfies Record<string, TextStyle>;
+
+/** Motion scale in ms. Anything longer than `slow` needs a written reason. */
+export const motion = {
+  /** Press feedback / hover. */
+  fast: 120,
+  /** State change: selection, expand, chip switch. */
+  base: 180,
+  /** Navigation, sheet and theme transitions. */
+  slow: 240,
+  /** Standard easing: fast start, gentle settle. */
+  easing: [0.2, 0, 0, 1] as const,
+} as const;
+
+/** Minimum interactive size in dp (Material / Android accessibility floor). */
+export const touchTarget = 48;
+
+/**
+ * Non-theme overlays. White/black are the only literal colours in the design
+ * system; they live here so no screen needs its own hex.
+ */
+export const overlay = {
+  /** Android ripple. Neutral so it reads on both light and dark surfaces. */
+  ripple: "rgba(128,128,128,0.16)",
+  /** Scrim behind media chrome (photo viewer, slideshow). */
+  mediaScrim: "rgba(0,0,0,0.55)",
+  mediaScrimStrong: "rgba(0,0,0,0.75)",
+  mediaScrimSoft: "rgba(0,0,0,0.35)",
+  onMedia: "#FFFFFF",
+  onMediaMuted: "rgba(255,255,255,0.72)",
+  onMediaSubtle: "rgba(255,255,255,0.18)",
+  /** Photo letterbox / full-screen canvas. */
+  mediaCanvas: "#000000",
+  /** Neutral skeleton wash. */
+  skeleton: "rgba(128,128,128,0.18)",
+} as const;
+
+/** String fallbacks for APIs that require a literal colour (tabs, SVG props). */
+export const fallback = {
+  primary: "#A8C7FA",
+  onSurface: "#E4E2EA",
+  onSurfaceVariant: "#C4C6D0",
+  favorite: "#FF8FA3",
+} as const;
+
+/** Tonal-first elevation; shadows only for floating chrome and sheets. */
+export const elevation = {
+  none: {} as ViewStyle,
+  floating: {
+    elevation: 3,
+    shadowColor: "#000000",
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  } as ViewStyle,
+  sheet: {
+    elevation: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: -2 },
+  } as ViewStyle,
+} as const;
+
+/**
+ * One status vocabulary for every trust surface (gallery badges, upload queue,
+ * digests, info sheet). Always icon + text + colour — never colour alone.
+ */
+export type StatusKind =
+  | "local"
+  | "queued"
+  | "uploading"
+  | "backed_up"
+  | "failed"
+  | "restored"
+  | "duplicate";
+
+export const STATUS_LABELS: Record<StatusKind, string> = {
+  local: "On this phone",
+  queued: "Queued",
+  uploading: "Uploading",
+  backed_up: "Backed up",
+  failed: "Failed",
+  restored: "Restored",
+  duplicate: "Skipped — duplicate",
+};
 
 export type ThemeColors = {
   [key: string]: ColorValue | undefined;

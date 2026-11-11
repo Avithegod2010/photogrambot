@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "../rn";
+import { StyleSheet, Text, View } from "../rn";
 import MapView, { Marker, type Region } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
@@ -7,6 +7,9 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { getGeotagged, type GeotaggedPhoto } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
 import { placeLabel } from "../lib/places";
+import { Button, EmptyState, IconButton } from "../components/ui";
+import { ArrowLeftIcon, CloseIcon, MapPinIcon } from "../components/icons";
+import { radius, spacing, touchTarget, typography, elevation } from "../theme";
 
 export function MapScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -53,24 +56,36 @@ export function MapScreen({ navigation }: { navigation: any }) {
     return Array.from(byCoord.values());
   }, [photos]);
 
+  const place = selected.length > 0 ? placeLabel(selected[0].latitude, selected[0].longitude) : null;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <MapView style={StyleSheet.absoluteFill} initialRegion={initialRegion} mapType={mapStyle}>
+      <MapView
+        style={StyleSheet.absoluteFill}
+        initialRegion={initialRegion}
+        mapType={mapStyle}
+        accessibilityLabel={`Map with ${clusters.length} photo locations`}
+      >
         {clusters.map((cluster) => (
           <Marker
             key={`${cluster[0].latitude},${cluster[0].longitude}`}
             coordinate={{ latitude: cluster[0].latitude, longitude: cluster[0].longitude }}
             onPress={() => setSelected(cluster)}
             tracksViewChanges={false}
+            accessibilityLabel={
+              cluster.length > 1
+                ? `${cluster.length} photos at ${placeLabel(cluster[0].latitude, cluster[0].longitude) ?? "this place"}`
+                : `Photo at ${placeLabel(cluster[0].latitude, cluster[0].longitude) ?? "this place"}`
+            }
           >
             <View
               style={[
                 styles.pin,
                 { backgroundColor: theme.colors.primary },
-                cluster.length > 1 && { minWidth: 34, height: 34, borderRadius: 17 },
+                cluster.length > 1 && styles.pinCluster,
               ]}
             >
-              <Text style={[styles.pinText, { color: theme.colors.onPrimary }]}>
+              <Text style={[typography.label, { color: theme.colors.onPrimary }]}>
                 {cluster.length > 1 ? cluster.length : "•"}
               </Text>
             </View>
@@ -78,50 +93,75 @@ export function MapScreen({ navigation }: { navigation: any }) {
         ))}
       </MapView>
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={[styles.chip, { backgroundColor: theme.colors.surfaceContainer }]}
-        >
-          <Text style={{ color: theme.colors.onSurface }}>←</Text>
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "600", fontSize: 13 }}>
-            Map · {photos.length} photos
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={[styles.topPill, elevation.floating, { backgroundColor: theme.colors.surface }]}>
+          <IconButton
+            icon={<ArrowLeftIcon color={theme.colors.onSurface} size={20} />}
+            label="Back"
+            theme={theme}
+            onPress={() => navigation.goBack()}
+            style={styles.topIcon}
+          />
+          <Text style={[typography.bodyStrong, { color: theme.colors.onSurface }]} numberOfLines={1}>
+            {photos.length} photo{photos.length === 1 ? "" : "s"} on the map
           </Text>
-        </Pressable>
+        </View>
       </View>
 
-      {selected.length > 0 ? (
-        <View style={[styles.bottomCard, { backgroundColor: theme.colors.surface, paddingBottom: insets.bottom + 12 }]}>
-          <View style={styles.bottomHeader}>
-            <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }}>
-              {selected.length} photo{selected.length === 1 ? "" : "s"} here
-            </Text>
-            <Pressable onPress={() => setSelected([])}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
-            </Pressable>
+      {photos.length === 0 && !decoy ? (
+        <View style={styles.emptyWrap}>
+          <View style={[styles.emptyCard, elevation.floating, { backgroundColor: theme.colors.surface }]}>
+            <EmptyState
+              compact
+              theme={theme}
+              art={<MapPinIcon color={theme.colors.primary} size={40} />}
+              title="No places yet"
+              message="Photos taken with location data appear here as pins. Turn on location tagging in your camera app."
+            />
           </View>
-          {placeLabel(selected[0].latitude, selected[0].longitude) ? (
-            <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: "600", marginBottom: 2 }}>
-              {placeLabel(selected[0].latitude, selected[0].longitude)}
-            </Text>
-          ) : null}
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginBottom: 8 }}>
-            {new Date(selected[0].taken_at).toLocaleDateString()} —{" "}
-            {selected[selected.length - 1] &&
-              new Date(selected[selected.length - 1].taken_at).toLocaleDateString()}
-          </Text>
-          <Pressable
-            style={[styles.viewBtn, { backgroundColor: theme.colors.primaryContainer }]}
+        </View>
+      ) : null}
+
+      {selected.length > 0 ? (
+        <View
+          style={[
+            styles.bottomCard,
+            elevation.floating,
+            { backgroundColor: theme.colors.surface, paddingBottom: insets.bottom + spacing.md },
+          ]}
+        >
+          <View style={styles.bottomHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.section, { color: theme.colors.onSurface }]}>
+                {selected.length} photo{selected.length === 1 ? "" : "s"} here
+              </Text>
+              {place ? (
+                <Text style={[typography.smallStrong, { color: theme.colors.primary }]} numberOfLines={1}>
+                  {place}
+                </Text>
+              ) : null}
+              <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant }]}>
+                {new Date(selected[0].taken_at).toLocaleDateString()} —{" "}
+                {new Date(selected[selected.length - 1].taken_at).toLocaleDateString()}
+              </Text>
+            </View>
+            <IconButton
+              icon={<CloseIcon color={theme.colors.onSurfaceVariant} size={20} />}
+              label="Close place details"
+              theme={theme}
+              onPress={() => setSelected([])}
+            />
+          </View>
+          <Button
+            title="View photos"
+            theme={theme}
             onPress={() => {
               // Rows come from getGeotagged as complete photo rows — the
               // viewer gets real favorite/status/camera/exif, no overrides.
               navigation.navigate("Viewer", { photos: selected, index: 0 });
             }}
-          >
-            <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: "700" }}>
-              View photos
-            </Text>
-          </Pressable>
+            style={{ marginTop: spacing.md }}
+          />
         </View>
       ) : null}
     </View>
@@ -139,42 +179,54 @@ const styles = StyleSheet.create({
     top: 0,
     alignItems: "center",
   },
-  chip: {
+  topPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    gap: spacing.xs,
+    borderRadius: radius.pill,
+    paddingEnd: spacing.lg,
+    paddingStart: spacing.xs,
+    minHeight: touchTarget,
+  },
+  topIcon: {
+    width: 40,
+    height: 40,
   },
   pin: {
-    minWidth: 26,
-    height: 26,
-    borderRadius: 13,
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 6,
+    paddingHorizontal: spacing.xs,
   },
-  pinText: {
-    fontSize: 12,
-    fontWeight: "800",
+  pinCluster: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  emptyWrap: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xxl,
+  },
+  emptyCard: {
+    borderRadius: radius.card,
+    padding: spacing.sm,
   },
   bottomCard: {
     position: "absolute",
-    left: 12,
-    right: 12,
+    left: spacing.md,
+    right: spacing.md,
     bottom: 0,
-    borderRadius: 20,
-    padding: 16,
+    borderTopStartRadius: radius.sheet,
+    borderTopEndRadius: radius.sheet,
+    padding: spacing.lg,
   },
   bottomHeader: {
     flexDirection: "row",
-    alignItems: "center",
-  },
-  viewBtn: {
-    alignItems: "center",
-    borderRadius: 999,
-    paddingVertical: 12,
-    marginTop: 4,
+    alignItems: "flex-start",
+    gap: spacing.sm,
   },
 });
