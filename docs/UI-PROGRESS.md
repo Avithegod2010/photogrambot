@@ -88,6 +88,13 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
   present.
 - One on-device screenshot confirms the new Gallery chrome renders (see
   `.tmp-harness/ui-gallery-observed.png`, gitignored).
-- Not verified on device: every other screen, TalkBack order, RTL, 200% font
-  scale, accents/themes, Maestro smoke.
+- **1.3.0 build, release and install completed:** EAS build
+  `7a8d3981-d318-43d8-a95c-11358ae0d427` (commit `59898af`, versionCode 5),
+  re-signed with the local debug keystore, installed with `adb install -r`
+  (firstInstallTime unchanged — index preserved). GitHub prerelease
+  `v1.3.0-preview.1` carries the APK + latest.json.
+- **Not verified on device:** the tab-bar inset fix needs a visual check after
+  unlocking (the phone was on its secure lock screen at the end of the session);
+  every other screen, TalkBack order, RTL, 200% font scale, accents/themes and
+  the Maestro smoke also remain owed.
 
