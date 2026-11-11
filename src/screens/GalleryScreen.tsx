@@ -17,6 +17,16 @@ import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { useReducedMotion } from "../useReducedMotion";
+import { hapticImpact, hapticSelection } from "../lib/haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSetupStore } from "../store/useSetupStore";
@@ -50,7 +60,7 @@ import {
   Sheet,
   TextField,
 } from "../components/ui";
-import { radius, spacing, touchTarget, typography, fallback, overlay } from "../theme";
+import { radius, spacing, touchTarget, typography, fallback, overlay, motion } from "../theme";
 import { nlToSearch } from "../lib/ai";
 import { searchSemantic } from "../lib/semsearch";
 import { getAiApiKey } from "../lib/settings";
@@ -82,6 +92,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const tr = useT();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotion();
   const { photos, loading, loadingMore, hasMore, loadInitial, loadMore, refresh, refreshMeta, stats } =
     useLibraryStore();
   const { channelId, channelTitle } = useSetupStore();
@@ -724,6 +735,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         accessibilityLabel={`Photo ${photo.filename}${photo.favorite ? ", favorite" : ""}${photo.status === "uploaded" ? ", backed up" : ""}`}
         onPress={() => {
           paintState.current = null;
+          if (selectionMode) hapticSelection();
+          else hapticImpact("light");
           onTilePress(photo, 0);
         }}
         onPressIn={(e) => {
@@ -749,9 +762,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         onLongPress={() => {
           paintState.current = null;
           if (selectionMode && rangeAnchorId && rangeAnchorId !== photo.id) {
+            hapticSelection();
             selectRange(rangeAnchorId, photo.id);
             return;
           }
+          hapticImpact("medium");
           setSelectionMode(true);
           setSelection(new Set([photo.id]));
           setRangeAnchorId(photo.id);
@@ -1378,7 +1393,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : null}
 
       {selectionMode ? (
-        <View
+        <Animated.View
+          entering={reduceMotion ? undefined : FadeInDown.duration(motion.base)}
+          exiting={reduceMotion ? undefined : FadeOutDown.duration(motion.fast)}
           style={[
             styles.selectionBar,
             { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + spacing.sm },
@@ -1417,7 +1434,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           </Pressable>
           <IconButton
             icon={<MoreVerticalIcon color={theme.colors.onSurfaceVariant} size={20} />}
-            label="More selection actions"            theme={theme}
+            label="More selection actions"
+            theme={theme}
             onPress={() => setSelMenuVisible(true)}
             style={styles.selAction}
           />
@@ -1430,7 +1448,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
               setSelectionMode(false);
             }}
           />
-        </View>
+        </Animated.View>
       ) : null}
 
       <Sheet
@@ -1685,6 +1703,17 @@ function OverviewCard({
   stats: { total: number; uploaded: number; pending: number; failed: number; totalBytes: number };
 }) {
   const [open, setOpen] = useState(false);
+  const reduce = useReducedMotion();
+  const rot = useSharedValue(0);
+  useEffect(() => {
+    rot.value = withTiming(open ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: Easing.bezier(...motion.easing),
+    });
+  }, [open, reduce, rot]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rot.value * 90}deg` }],
+  }));
   const [buckets, setBuckets] = useState<MonthBucket[]>([]);
   useEffect(() => {
     void getMonthlyBuckets(6).then(setBuckets);
@@ -1716,9 +1745,9 @@ function OverviewCard({
             {stats.pending + stats.failed} pending · {formatBytes(stats.totalBytes)} · {percent}%
           </Text>
         </View>
-        <View style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }}>
+        <Animated.View style={chevronStyle}>
           <ChevronRightIcon color={theme.colors.onSurfaceVariant} size={20} />
-        </View>
+        </Animated.View>
       </Pressable>
       {open ? (
         <View>

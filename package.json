@@ -17,6 +17,7 @@
     "expo-crypto": "~57.0.4",
     "expo-dev-client": "~57.0.21",
     "expo-file-system": "~57.0.5",
+    "expo-haptics": "~57.0.3",
     "expo-image-manipulator": "~57.0.22",
     "expo-image-picker": "~57.0.21",
     "expo-local-authentication": "~57.0.3",

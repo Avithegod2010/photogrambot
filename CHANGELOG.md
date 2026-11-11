@@ -3,6 +3,24 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [Unreleased] - Material You motion & haptics
+
+- **Material 3 navigation bar** - animated 32 dp active indicator pill behind the
+  selected tab icon; bar reserves the gesture inset.
+- **M3 controls** - switch with a sliding thumb and check mark, selected
+  segments grow and gain a check, filter chips show a check when selected,
+  dialogs/sheets use 28 dp corners and a scale/fade entrance.
+- **Ripples everywhere** - every pressable now shows a Material ripple in every
+  theme, including dynamic colour.
+- **Haptics** (`expo-haptics`) - selection ticks for tabs/segments/chips/switches
+  and the PIN keypad, light impacts for actions, medium for long-press and
+  destructive confirms, success/error for outcomes. New Settings -> Appearance
+  toggle, on by default. Calls are lazy and fail-soft, so a JS-only update on a
+  build without the native module stays silent. **A native rebuild is required
+  for haptics to be felt.**
+- **Motion** - animated progress bars, sliding selection bar, rotating overview
+  chevron, all reduced-motion aware and within the 240 ms budget.
+
 ## [1.3.0] - calm interface overhaul
 
 A UI-only release. Backup, sync, encryption, remote-control and database logic

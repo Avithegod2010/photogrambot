@@ -80,6 +80,13 @@ import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
 import { fallback, motion } from "./src/theme";
 import { useReducedMotion } from "./src/useReducedMotion";
+import Reanimated, {
+  Easing as REasing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { hapticSelection } from "./src/lib/haptics";
 import { installCrashHandler } from "./src/lib/crashlog";
 import { installCrashReporter, startStallWatchdog, flushCrashReports } from "./src/lib/crashReport";
 import { t, isRTLLanguage, resolveLanguage } from "./src/lib/i18n";
@@ -199,12 +206,50 @@ function SettingsTabPlaceholder() {
   return null;
 }
 
+/** Material 3 navigation-bar item: an animated pill behind the active icon. */
+function TabIcon({
+  focused,
+  activeBackground,
+  children,
+}: {
+  focused: boolean;
+  activeBackground: any;
+  children: React.ReactNode;
+}) {
+  const reduce = useReducedMotion();
+  const p = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    p.value = withTiming(focused ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: REasing.bezier(...motion.easing),
+    });
+  }, [focused, reduce, p]);
+  const pillStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.9 + p.value * 0.1 }],
+    opacity: 0.72 + p.value * 0.28,
+  }));
+  return (
+    <Reanimated.View
+      style={[
+        styles.tabPill,
+        focused && { backgroundColor: activeBackground },
+        pillStyle,
+      ]}
+    >
+      {children}
+    </Reanimated.View>
+  );
+}
+
 function Tabs() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const language = useSettingsStore((s) => s.prefs.language);
   return (
     <Tab.Navigator
+      screenListeners={{
+        tabPress: () => hapticSelection(),
+      }}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor:
@@ -218,11 +263,11 @@ function Tabs() {
         tabBarStyle: {
           backgroundColor: theme.colors.surfaceContainer,
           borderTopColor: theme.colors.outlineVariant,
-          // The gesture bar sits inside the system inset; reserve it so the
-          // labels never collide with the home indicator. Some devices report
-          // a 0 bottom inset under enforced edge-to-edge, so keep a floor.
-          height: 58 + Math.max(insets.bottom, 24),
-          paddingTop: 6,
+          // Material 3 navigation bar: 32 dp active indicator + label. The
+          // gesture bar sits inside the system inset; reserve it so the labels
+          // never collide with the home indicator (some devices report 0).
+          height: 64 + Math.max(insets.bottom, 24),
+          paddingTop: 4,
           paddingBottom: Math.max(insets.bottom, 24),
         },
         tabBarLabel: ({ color, children }) => (
@@ -239,24 +284,49 @@ function Tabs() {
       <Tab.Screen
         name="GalleryTab"
         component={GalleryScreen}
-        options={{ title: t("tabs.gallery", language), tabBarIcon: ({ color }) => <PhotoFrameIcon color={color} /> }}
+        options={{
+          title: t("tabs.gallery", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <PhotoFrameIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="CloudTab"
         component={CloudTab}
-        options={{ title: t("tabs.cloud", language), tabBarIcon: ({ color }) => <CloudIcon color={color} /> }}
+        options={{
+          title: t("tabs.cloud", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <CloudIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="CollectionsTab"
         component={CollectionsScreen}
-        options={{ title: t("tabs.collections", language), tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
+        options={{
+          title: t("tabs.collections", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <SearchIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsTabPlaceholder}
         options={{
           title: t("tabs.settings", language),
-          tabBarIcon: ({ color }) => <GearIcon color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <GearIcon color={color} />
+            </TabIcon>
+          ),
           tabBarButton: (props) => (
             <Pressable
               {...(props as any)}
@@ -264,6 +334,7 @@ function Tabs() {
               accessibilityLabel="Settings"
               onPress={() => {
                 // A decoy session must not expose the real settings entry.
+                hapticSelection();
                 if (!isDecoyActive()) navigationRef.navigate("Settings");
               }}
             />
@@ -661,5 +732,12 @@ const styles = StyleSheet.create({
   },
   splashText: {
     fontSize: 13,
+  },
+  tabPill: {
+    width: 56,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

@@ -9,6 +9,7 @@ import { hasAnyPin, verifyPin, setDecoyActive, type PinVerifyResult } from "../l
 import { clearFailures, getBackoffRemaining, recordFailure } from "../lib/lockbackoff";
 import { logBreakIn } from "../lib/breakin";
 import { setSecureFlag } from "../../modules/share-intent";
+import { hapticError, hapticSelection, hapticSuccess } from "../lib/haptics";
 import { overlay, radius, spacing, typography } from "../theme";
 
 function fmtBackoff(ms: number): string {
@@ -112,6 +113,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   }
 
   function pressDigit(d: string) {
+    hapticSelection();
     setPinWrong(false);
     const next = (entry + d).slice(0, 8);
     setEntry(next);
@@ -127,16 +129,19 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       const result: PinVerifyResult = await verifyPin(entry);
       setEntry("");
       if (result === "real") {
+        hapticSuccess();
         await clearFailures();
         onUnlock();
       } else if (result === "decoy") {
         // A decoy hit proves knowledge too — clear, and keep the decoy session
         // indistinguishable from a real unlock (both pass the same backoff).
+        hapticSuccess();
         void logBreakIn("decoy_unlock");
         await clearFailures();
         setDecoyActive(true);
         onUnlock();
       } else {
+        hapticError();
         setPinWrong(true);
         void logBreakIn("pin_fail");
         await recordFailure();
@@ -245,8 +250,10 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
                       accessibilityState={{ disabled: backoffMs > 0 }}
                       disabled={backoffMs > 0}
                       onPress={() => {
-                        if (key === "⌫") setEntry((e) => e.slice(0, -1));
-                        else pressDigit(key);
+                        if (key === "⌫") {
+                          hapticSelection();
+                          setEntry((e) => e.slice(0, -1));
+                        } else pressDigit(key);
                       }}
                       style={[
                         styles.padKey,

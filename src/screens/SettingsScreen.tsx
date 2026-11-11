@@ -1104,9 +1104,16 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           />
           <ToggleRow
             title="Loading skeletons"
-            subtitle="Pulse placeholders while thumbnails download"
+            subtitle="Quiet placeholders while thumbnails download"
             value={prefs.skeletonLoading}
             onChange={(v) => void update({ skeletonLoading: v })}
+            theme={theme}
+          />
+          <ToggleRow
+            title="Haptic feedback"
+            subtitle="A gentle tick for tabs, switches, chips and confirmations"
+            value={prefs.haptics}
+            onChange={(v) => void update({ haptics: v })}
             theme={theme}
           />
 

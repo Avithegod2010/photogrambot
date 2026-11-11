@@ -498,7 +498,9 @@ Listed by value; none of these is approved or started.
 6. **Status vocabulary**: local / queued / uploading / backed up / failed / restored / duplicate — always icon + text + colour, never colour alone.
 7. **Destructive or multi-choice actions use `Dialog`/`Sheet`.** `Alert.alert` only for OS-level confirmations and unrecoverable errors.
 8. **Motion**: 120 ms feedback, 180 ms state, 240 ms transitions, standard easing. Never animate keyboard-initiated or high-frequency actions. Honour `useReducedMotion()`. One memorable motion moment per screen at most.
-9. **Responsive**: use `useResponsive()`; never `Dimensions.get`. Grids are 2–3 columns on phones and 3–6 on tablets/DeX.
-10. **Decoy mode is a UI requirement.** No real names, counts, chips, photos or accessibility labels may appear in a decoy session.
-11. **Localisation**: new strings go through `useT()`/`t()`. Arabic is RTL — use logical padding (`paddingStart/End`), never hardcoded left/right.
-12. Run `npm run check` before every commit; it includes the static UI guard.
+9. **Haptics**: one tick per user action via `src/lib/haptics.ts` — selection for tabs/segments/chips/switches, light impact for actions, medium for long-press/destructive, success/error for outcomes. Never on scroll or per frame; always paired with a visual. Respect the Settings toggle.
+10. **Material 3**: keep the navigation-bar active indicator, M3 switch, check marks in selected chips/segments, 28 dp dialogs/sheets, clipped ripples, and 48 dp targets. Use tonal surfaces before shadows.
+11. **Responsive**: use `useResponsive()`; never `Dimensions.get`. Grids are 2-3 columns on phones and 3-6 on tablets/DeX.
+12. **Decoy mode is a UI requirement.** No real names, counts, chips, photos or accessibility labels may appear in a decoy session.
+13. **Localisation**: new strings go through `useT()`/`t()`. Arabic is RTL - use logical padding (`paddingStart/End`), never hardcoded left/right.
+14. Run `npm run check` before every commit; it includes the static UI guard.

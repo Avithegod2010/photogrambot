@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   ActivityIndicator,
   I18nManager,
@@ -15,6 +15,7 @@ import {
   type ViewStyle,
 } from "../rn";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -33,8 +34,10 @@ import {
   type StatusKind,
 } from "../theme";
 import { useReducedMotion } from "../useReducedMotion";
+import { hapticImpact, hapticSelection } from "../lib/haptics";
 import {
   ArrowLeftIcon,
+  CheckIcon,
   ChevronRightIcon,
   CloseIcon,
   SearchIcon,
@@ -72,14 +75,31 @@ function usePressScale(disabled?: boolean) {
 function isDynamicColor(value: ColorValue | undefined): boolean {
   return value != null && typeof value !== "string";
 }
-
-/** Ripple needs a plain string; dynamic (PlatformColor) themes get none. */
-function rippleFor(color: ColorValue | undefined) {
-  return isDynamicColor(color) ? undefined : { color: overlay.ripple, borderless: false };
+/**
+ * Material ripple on every pressable, in every theme. The ripple colour is a
+ * neutral string because Android's ripple layer does not accept the dynamic
+ * PlatformColor values used by Material You.
+ */
+function rippleFor(_background?: ColorValue) {
+  return { color: overlay.ripple, borderless: false };
 }
 
 function textColor(value: ColorValue): string | ColorValue {
   return value;
+}
+
+/** Wrap a handler with one haptic, matching the weight of the action. */
+function withHaptic(
+  fn: (() => void) | undefined,
+  kind: "none" | "light" | "selection" | "medium"
+): (() => void) | undefined {
+  if (!fn) return undefined;
+  if (kind === "none") return fn;
+  return () => {
+    if (kind === "selection") hapticSelection();
+    else hapticImpact(kind);
+    fn();
+  };
 }
 
 /* ------------------------------- Buttons -------------------------------- */
@@ -120,9 +140,13 @@ export function Button({
           ? theme.colors.error
           : theme.colors.primary;
   const press = usePressScale(disabled || busy);
+  const handlePress = withHaptic(
+    onPress,
+    variant === "text" ? "none" : variant === "danger" ? "medium" : "light"
+  );
   return (
     <AnimatedPressable
-      onPress={onPress}
+      onPress={handlePress}
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
       disabled={disabled || busy}
@@ -183,7 +207,7 @@ export function IconButton({
   const press = usePressScale(disabled);
   return (
     <AnimatedPressable
-      onPress={onPress}
+      onPress={withHaptic(onPress, "light")}
       onPressIn={press.onPressIn}
       onPressOut={press.onPressOut}
       disabled={disabled}
@@ -410,7 +434,10 @@ export function ToggleRow({
   return (
     <Pressable
       onPress={() => {
-        if (!disabled) onChange(!value);
+        if (!disabled) {
+          hapticSelection();
+          onChange(!value);
+        }
       }}
       disabled={disabled}
       android_ripple={rippleFor(theme.colors.surface)}
@@ -441,9 +468,20 @@ export function ToggleRow({
   );
 }
 
-// A drawn switch keeps the row's touch target and label in one place. It is
-// visually close to the platform switch but follows the theme accent.
+// Material 3 switch: a 52×32 track, a thumb that slides, and a check mark on
+// the thumb when on. The row above is the single TalkBack stop.
 function SwitchVisual({ value, theme }: { value: boolean; theme: AppTheme }) {
+  const reduce = useReducedMotion();
+  const t = useSharedValue(value ? 1 : 0);
+  useEffect(() => {
+    t.value = withTiming(value ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: Easing.bezier(...motion.easing),
+    });
+  }, [value, reduce, t]);
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: t.value * 20 }],
+  }));
   return (
     <View
       style={[
@@ -454,15 +492,17 @@ function SwitchVisual({ value, theme }: { value: boolean; theme: AppTheme }) {
         },
       ]}
     >
-      <View
+      <Animated.View
         style={[
           styles.switchThumb,
-          {
-            backgroundColor: value ? theme.colors.onPrimary : theme.colors.onSurfaceVariant,
-            alignSelf: value ? "flex-end" : "flex-start",
-          },
+          { backgroundColor: value ? theme.colors.onPrimary : theme.colors.onSurfaceVariant },
+          thumbStyle,
         ]}
-      />
+      >
+        <View style={{ opacity: value ? 1 : 0 }}>
+          <CheckIcon color={theme.colors.primary} size={14} />
+        </View>
+      </Animated.View>
     </View>
   );
 }
@@ -530,7 +570,7 @@ export function ListRow({
   }
   return (
     <Pressable
-      onPress={onPress}
+      onPress={withHaptic(onPress, "light")}
       disabled={disabled}
       android_ripple={rippleFor(theme.colors.surface)}
       accessibilityRole="button"
@@ -750,37 +790,71 @@ export function SegmentedControl<T extends string>({
       accessibilityLabel={accessibilityLabel}
       style={[styles.segmented, { backgroundColor: theme.colors.surfaceContainer }]}
     >
-      {options.map((o) => {
-        const active = o.key === value;
-        return (
-          <Pressable
-            key={o.key}
-            onPress={() => onChange(o.key)}
-            android_ripple={{ color: overlay.ripple, borderless: true }}
-            accessibilityRole="tab"
-            accessibilityLabel={o.label}
-            accessibilityState={{ selected: active }}
-            style={[
-              styles.segment,
-              active && { backgroundColor: theme.colors.primaryContainer },
-            ]}
-          >
-            <Text
-              numberOfLines={1}
-              style={[
-                typography.label,
-                {
-                  color: active ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant,
-                  fontWeight: active ? "700" : "500",
-                },
-              ]}
-            >
-              {o.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+      {options.map((o) => (
+        <Segment
+          key={o.key}
+          label={o.label}
+          active={o.key === value}
+          theme={theme}
+          onPress={() => onChange(o.key)}
+        />
+      ))}
     </View>
+  );
+}
+
+function Segment({
+  label,
+  active,
+  onPress,
+  theme,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  theme: AppTheme;
+}) {
+  const reduce = useReducedMotion();
+  const t = useSharedValue(active ? 1 : 0);
+  useEffect(() => {
+    t.value = withTiming(active ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: Easing.bezier(...motion.easing),
+    });
+  }, [active, reduce, t]);
+  const scaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.97 + t.value * 0.03 }],
+  }));
+  return (
+    <Pressable
+      onPress={() => {
+        hapticSelection();
+        onPress();
+      }}
+      android_ripple={{ color: overlay.ripple, borderless: false }}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      style={[styles.segment, active && { backgroundColor: theme.colors.primaryContainer }]}
+    >
+      <Animated.View style={[styles.segmentInner, scaleStyle]}>
+        {active ? (
+          <CheckIcon color={theme.colors.onPrimaryContainer} size={15} />
+        ) : null}
+        <Text
+          numberOfLines={1}
+          style={[
+            typography.label,
+            {
+              color: active ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant,
+              fontWeight: active ? "700" : "500",
+            },
+          ]}
+        >
+          {label}
+        </Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -803,10 +877,10 @@ export function Chip({
 }) {
   return (
     <Pressable
-      onPress={onPress}
+      onPress={withHaptic(onPress, "selection")}
       disabled={disabled}
       hitSlop={{ top: 6, bottom: 6 }}
-      android_ripple={{ color: overlay.ripple, borderless: true }}
+      android_ripple={{ color: overlay.ripple, borderless: false }}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ selected: !!selected, disabled: !!disabled }}
@@ -819,7 +893,11 @@ export function Chip({
         disabled && { opacity: 0.45 },
       ]}
     >
-      {icon}
+      {selected ? (
+        <CheckIcon color={theme.colors.onPrimaryContainer} size={15} />
+      ) : (
+        icon
+      )}
       <Text
         numberOfLines={1}
         style={[
@@ -929,6 +1007,15 @@ export function ProgressBar({
   indeterminate?: boolean;
 }) {
   const pct = Math.max(0, Math.min(1, value));
+  const reduce = useReducedMotion();
+  const width = useSharedValue(indeterminate ? 35 : Math.round(pct * 100));
+  useEffect(() => {
+    width.value = withTiming(indeterminate ? 35 : Math.round(pct * 100), {
+      duration: reduce ? 0 : motion.base,
+      easing: Easing.bezier(...motion.easing),
+    });
+  }, [pct, indeterminate, reduce, width]);
+  const fillStyle = useAnimatedStyle(() => ({ width: `${width.value}%` }));
   return (
     <View
       accessibilityRole="progressbar"
@@ -936,14 +1023,8 @@ export function ProgressBar({
       accessibilityValue={{ min: 0, max: 100, now: Math.round(pct * 100) }}
       style={[styles.progressTrack, { backgroundColor: theme.colors.surfaceHighest }]}
     >
-      <View
-        style={[
-          styles.progressFill,
-          {
-            width: `${indeterminate ? 35 : Math.round(pct * 100)}%`,
-            backgroundColor: theme.colors.primary,
-          },
-        ]}
+      <Animated.View
+        style={[styles.progressFill, { backgroundColor: theme.colors.primary }, fillStyle]}
       />
     </View>
   );
@@ -1122,6 +1203,21 @@ export function Dialog({
   onClose?: () => void;
   actions?: DialogAction[];
 }) {
+  const reduce = useReducedMotion();
+  const enter = useSharedValue(0);
+  useEffect(() => {
+    if (visible) {
+      enter.value = 0;
+      enter.value = withTiming(1, {
+        duration: reduce ? 0 : motion.base,
+        easing: Easing.bezier(...motion.easing),
+      });
+    }
+  }, [visible, reduce, enter]);
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ scale: 0.95 + enter.value * 0.05 }],
+  }));
   return (
     <Modal
       visible={visible}
@@ -1131,9 +1227,9 @@ export function Dialog({
       onRequestClose={onClose ?? (() => {})}
     >
       <View style={[styles.dialogScrim, { backgroundColor: theme.colors.scrim }]}>
-        <View
+        <Animated.View
           accessibilityViewIsModal
-          style={[styles.dialogCard, { backgroundColor: theme.colors.surfaceContainer }]}
+          style={[styles.dialogCard, { backgroundColor: theme.colors.surfaceContainer }, cardStyle]}
         >
           <Text
             accessibilityRole="header"
@@ -1165,7 +1261,7 @@ export function Dialog({
               ))}
             </View>
           ) : null}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -1342,6 +1438,8 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   listRow: {
     flexDirection: "row",
@@ -1397,6 +1495,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     padding: 4,
     gap: 2,
+  },
+  segmentInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
   segment: {
     flex: 1,
@@ -1467,6 +1570,10 @@ const styles = StyleSheet.create({
   },
   dialogActions: {
     marginTop: spacing.lg,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   sheetScrimWrap: {
@@ -1481,7 +1588,7 @@ const styles = StyleSheet.create({
   },
   grabber: {
     alignSelf: "center",
-    width: 36,
+    width: 32,
     height: 4,
     borderRadius: radius.pill,
     marginBottom: spacing.sm,

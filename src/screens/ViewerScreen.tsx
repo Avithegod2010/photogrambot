@@ -26,6 +26,7 @@ import { tokenForPhoto } from "../lib/destinations";
 import { isVideoMime } from "../lib/format";
 import { useResponsive } from "../lib/responsive";
 import { typography, touchTarget, overlay, fallback } from "../theme";
+import { hapticImpact, hapticSuccess } from "../lib/haptics";
 import type { PhotoRow } from "../lib/db";
 
 function CloudVideo({
@@ -131,6 +132,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     setSaving(true);
     try {
       await savePhotoToDevice(photo);
+      hapticSuccess();
       Alert.alert("Saved", "Photo saved to your device gallery.");
     } catch (e: any) {
       Alert.alert("Save failed", e?.message ?? "Could not download the photo.");
@@ -310,7 +312,10 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
           >
             <Pressable
               style={styles.actionBtn}
-              onPress={() => void toggleFavorite(photo)}
+              onPress={() => {
+                hapticImpact("light");
+                void toggleFavorite(photo);
+              }}
               accessibilityRole="button"
               accessibilityLabel={photo.favorite ? "Remove from favorites" : "Add to favorites"}
               accessibilityState={{ selected: !!photo.favorite }}

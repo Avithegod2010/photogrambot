@@ -31,7 +31,7 @@ export const radius = {
   thumb: 4,
   control: 12,
   card: 16,
-  sheet: 24,
+  sheet: 28,
   pill: 999,
 } as const;
 

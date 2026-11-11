@@ -42,7 +42,7 @@ All tokens are exported from `src/theme.ts`.
 | `thumb` | 4 | Photo thumbnails (kept sharp) |
 | `control` | 12 | Inputs, tonal blocks, small cards |
 | `card` | 16 | Group cards, album tiles |
-| `sheet` | 24 | Bottom sheets, dialogs |
+| `sheet` | 28 | Bottom sheets, dialogs (Material 3) |
 | `pill` | 999 | Buttons, chips, badges, tabs |
 
 ### Type — `typography`
@@ -77,6 +77,32 @@ tokens stay the single source even at 200%.
 
 Rules: never longer than 300 ms for UI; animate `transform`/`opacity` only;
 respect `useReducedMotion()`.
+
+### Haptics — `src/lib/haptics.ts`
+
+| Moment | Call |
+| --- | --- |
+| Tab, segment, chip, switch, keypad digit | `hapticSelection()` |
+| Completed action (button, row, tile) | `hapticImpact("light")` |
+| Long-press, destructive confirm | `hapticImpact("medium")` |
+| 3D-style success (saved, restored) | `hapticSuccess()` |
+| Wrong PIN | `hapticError()` |
+
+Rules: one haptic per user action, never on scroll or per frame, always paired
+with a visual, and never the only feedback. The Settings → Haptics toggle is
+checked at call time. Calls are lazy and fail-soft so a JS-only update on a build
+without `expo-haptics` stays silent instead of crashing.
+
+### Material 3 specifics
+
+- Navigation bar: 32 dp active indicator pill behind the icon, animated
+  (`scale` + `opacity`, 180 ms), 64 dp bar + gesture inset.
+- Switch: 52×32 track, sliding thumb with a check mark when on.
+- Segmented button: selected segment grows slightly and gains a check mark.
+- Filter chips: check mark replaces the leading icon when selected.
+- Dialogs scale from 0.95 + fade; bottom sheets keep the native slide.
+- Ripples on every pressable, clipped to the control's rounded outline.
+- Progress fills animate width; selection bars slide up on entry.
 
 ### Touch — `touchTarget`
 

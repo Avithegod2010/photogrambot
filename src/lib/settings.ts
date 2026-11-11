@@ -66,6 +66,7 @@ export interface Prefs {
   slideshowShuffle: boolean;
   infoSheetDensity: InfoDensity;
   skeletonLoading: boolean;
+  haptics: boolean;
   widgetShowDate: boolean;
   widgetCompact: boolean;
   fontScale: number;
@@ -159,6 +160,7 @@ export const defaultPrefs: Prefs = {
   slideshowShuffle: false,
   infoSheetDensity: "detailed",
   skeletonLoading: true,
+  haptics: true,
   widgetShowDate: true,
   widgetCompact: false,
   fontScale: 1,
