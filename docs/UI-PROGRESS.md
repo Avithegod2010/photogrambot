@@ -93,8 +93,12 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
   re-signed with the local debug keystore, installed with `adb install -r`
   (firstInstallTime unchanged — index preserved). GitHub prerelease
   `v1.3.0-preview.1` carries the APK + latest.json.
-- **Not verified on device:** the tab-bar inset fix needs a visual check after
-  unlocking (the phone was on its secure lock screen at the end of the session);
-  every other screen, TalkBack order, RTL, 200% font scale, accents/themes and
-  the Maestro smoke also remain owed.
+- **1.4.0 Material You build installed:** EAS build
+  `12ba03f1-0c6d-4cdd-bd08-79296704dc1d` (commit `f1b3737`, versionCode 6),
+  re-signed with the local debug keystore, installed with `adb install -r`
+  (firstInstallTime unchanged). GitHub prerelease `v1.4.0-preview.1` carries the
+  APK + latest.json. On-device screenshot confirms the Material 3 tab indicator
+  and the reserved gesture inset; haptics feel cannot be verified remotely.
+- **Not verified on device:** every other screen, TalkBack order, RTL, 200% font
+  scale, accents/themes and the Maestro smoke remain owed.
 
