@@ -219,10 +219,11 @@ function Tabs() {
           backgroundColor: theme.colors.surfaceContainer,
           borderTopColor: theme.colors.outlineVariant,
           // The gesture bar sits inside the system inset; reserve it so the
-          // labels never collide with the home indicator.
-          height: 58 + insets.bottom,
+          // labels never collide with the home indicator. Some devices report
+          // a 0 bottom inset under enforced edge-to-edge, so keep a floor.
+          height: 58 + Math.max(insets.bottom, 24),
           paddingTop: 6,
-          paddingBottom: Math.max(insets.bottom, 6),
+          paddingBottom: Math.max(insets.bottom, 24),
         },
         tabBarLabel: ({ color, children }) => (
           <Text

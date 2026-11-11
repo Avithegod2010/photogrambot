@@ -79,3 +79,7 @@ eas-build*.log
 
 # Metro / dev-server logs
 metro*.log
+
+# Local screenshots / signing sidecars
+.tmp-*
+*.idsig
