@@ -10,6 +10,7 @@ export const VIDEO_PART_BYTES = 19 * 1024 * 1024;
 export interface VideoPart {
   file_id: string;
   size: number;
+  message_id?: number;
 }
 
 export function buildVideoPartCaption(
@@ -56,6 +57,7 @@ export async function splitAndUploadVideo(
 ): Promise<{ parts: VideoPart[]; thumbFileId: string | null }> {
   const file = new File(fileUri);
   if (!file.exists) throw new Error("Video file missing on device");
+  if (!(file.size > 0)) throw new Error("Video file is empty");
   const total = Math.max(1, Math.ceil(file.size / VIDEO_PART_BYTES));
   const resume = opts.resumeParts ?? [];
   let thumbFileId: string | null = null;
@@ -88,7 +90,13 @@ export async function splitAndUploadVideo(
           signal: opts.signal,
         });
         if (!message.document) throw new Error(`Part ${i} upload returned no document`);
-        parts.push({ file_id: message.document.file_id, size: bytes.length });
+        parts.push({
+          file_id: message.document.file_id,
+          size: bytes.length,
+          // Kept so a future repair can delete the broken chain. Older
+          // persisted parts lack this field; repair degrades to leaving them.
+          message_id: message.message_id,
+        });
         // Part 1's auto-thumbnail is ~the video's first frame — good tile.
         if (!thumbFileId) thumbFileId = message.document.thumbnail?.file_id ?? null;
       } finally {

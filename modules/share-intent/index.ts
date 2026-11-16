@@ -6,6 +6,8 @@ type ShareIntentModuleType = {
   shareMedia: (uris: string[], mime: string) => boolean;
   installApk: (filePath: string) => boolean;
   openInstallSettings: () => boolean;
+  setAppIcon: (variant: string) => boolean;
+  setSecureFlag: (enabled: boolean) => boolean;
 };
 
 const mod = requireNativeModule<ShareIntentModuleType>("ShareIntent");
@@ -43,6 +45,22 @@ export function installApk(filePath: string): boolean {
 export function openInstallSettings(): boolean {
   try {
     return mod.openInstallSettings();
+  } catch {
+    return false;
+  }
+}
+
+export function setAppIcon(variant: string): boolean {
+  try {
+    return mod.setAppIcon(variant);
+  } catch {
+    return false;
+  }
+}
+
+export function setSecureFlag(enabled: boolean): boolean {
+  try {
+    return mod.setSecureFlag(enabled);
   } catch {
     return false;
   }

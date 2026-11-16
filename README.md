@@ -11,6 +11,7 @@
 [![React Native 0.86](https://img.shields.io/badge/React_Native-0.86-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml/badge.svg)](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml)
 
 </div>
 
@@ -82,6 +83,30 @@ There is **no middleman server** — the app talks directly to `api.telegram.org
 - Home-screen widget showing a random photo from your library (optionally favorites only)
 - Material You theming, a themed app icon, and upload notifications that deep-link to the queue
 
+## Customisation
+
+Settings → **Appearance** controls the whole look of the app:
+
+- **Theme** — Dark, AMOLED, Light, or Auto (system), plus an optional scheduled
+  switch (dark at night, light during the day).
+- **Accent colour** — eight presets or a custom `#RRGGBB`; tinted buttons,
+  chips, tab bar, selection bar and upload banner.
+- **Gallery** — 2–5 columns, square or natural aspect, compact gaps, per-badge
+  toggles (cloud / video / favourite / status), date-header counts and a
+  draggable date scrubber.
+- **Viewer** — auto-hiding top/bottom bars with a configurable delay, and a
+  compact/detailed photo info sheet.
+- **Text** — four font scales and four date formats (applied to gallery
+  headers, search results and channel captions).
+- **Albums** — per-album accent colours; long-press a photo to set the cover,
+  or reset it to the newest photo from the album style dialog.
+- **Branding** — custom in-app name, Default / Accent / Monochrome launcher
+  icons, and an accent-coloured cold-start splash.
+- **Widget & notifications** — widget date overlay and compact layout;
+  notification accent colour.
+- **Captions** — choose and reorder the metadata lines written to the channel
+  (the content hash is always kept so restore and dedupe keep working).
+
 ## Privacy
 
 - Your bot token is stored in the device keychain (SecureStore) — never in the cloud, never in a backup's plaintext, never logged
@@ -152,6 +177,27 @@ Without `latest.json` the updater falls back to comparing the release tag's sema
 ## In-app setup
 
 Paste the bot token → **Verify** → the app detects your channel (or paste the `-100…` channel ID) → done. Everything after that runs on-device.
+
+## Backup & restore explained
+
+There are two distinct things people mean by "backup" in PhotogramBot, and they use the channel differently:
+
+**1. The channel is the media archive (automatic, continuous).**
+Every photo and video you back up produces a *preview* message plus a *full-quality original* document in your Telegram channel, with a metadata caption (date, size, camera, GPS, tags). This is the only place your actual media lives off-device. It needs no action from you beyond turning on auto-sync — the app keeps the channel and the on-device index in sync, including a perceptual-hash guard that quietly skips re-saves and recompressions (they show up under **Skipped** in the stats).
+
+**2. The encrypted database backup is the index (manual, pinned).**
+The SQLite library — every caption, hash, album, trip, and favorite — lives only on your phone. To protect it (and to move to a new phone), Settings → Maintenance → **Backup to channel** uploads a single, *encrypted* snapshot and pins it in the channel. The passphrase (AES-256-GCM, key stretched with PBKDF2-HMAC-SHA256 at 600 000 iterations) never leaves the device; you can also choose to embed the bot token inside the backup so a fresh device can adopt it without re-pasting.
+
+**Restoring — pick the scope you need:**
+
+| You want to… | Do this |
+| --- | --- |
+| Pull one original back to the phone | Viewer → **Save** (or reply `/restore` to its channel message) |
+| Refill a phone that lost its local copies | Maintenance → **Restore all originals**, or an album/trip header → **Restore all** (gap-filling — only downloads what's missing) |
+| Move to a new phone | Install → Setup → when a pinned backup is detected, the **migration wizard** restores the whole index behind a passphrase, then a follow-up scan *relinks* photos already on the new device by content hash (no re-upload) |
+| Rebuild after losing the app | The pinned backup is the source of truth; the index is recreated locally and re-syncs from the channel |
+
+Nothing is ever deleted from the channel by a local action unless you explicitly choose **delete from Telegram too**.
 
 ## How it works
 

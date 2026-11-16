@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { normalizeSearchFilters, searchPhotos } from "../lib/db";
 import { groupPhotosByDate } from "../lib/format";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage } from "../components/TelegramImage";
+import { EmptySearchArt } from "../components/illustrations";
+import { AppBar, EmptyState } from "../components/ui";
 import type { PhotoRow } from "../lib/db";
 
 // Runs a pinned saved search (Collections → Smart collections). Virtual by
@@ -17,6 +20,7 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
   const title: string = route.params?.title ?? "Search";
   const query: string = route.params?.query ?? "";
   const filtersJson: string = route.params?.filtersJson ?? "null";
+  const dateFormat = useSettingsStore((s) => s.prefs.dateFormat);
   const [photos, setPhotos] = useState<PhotoRow[] | null>(null);
 
   useEffect(() => {
@@ -45,28 +49,24 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
     };
   }, [query, filtersJson]);
 
-  const sections = photos ? groupPhotosByDate(photos) : [];
+  const sections = photos ? groupPhotosByDate(photos, dateFormat) : [];
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
-          {title}
-        </Text>
-        {photos ? (
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{photos.length}</Text>
-        ) : null}
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar
+        title={title}
+        subtitle={photos ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : undefined}
+        onBack={() => navigation.goBack()}
+        theme={theme}
+        borderless
+      />
       <FlatList
         data={sections}
         keyExtractor={(s, i) => `${i}:${s.label}`}
         contentContainerStyle={{ paddingBottom: 40 }}
         renderItem={({ item }) => (
           <View>
-            <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+            <Text accessibilityRole="header" style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
               {item.label}
             </Text>
             <View style={styles.grid}>
@@ -80,6 +80,8 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
                       index: item.items.findIndex((x) => x.id === p.id),
                     })
                   }
+                  accessibilityRole="button"
+                  accessibilityLabel={p.filename}
                 >
                   <TelegramImage
                     fileId={p.preview_file_id ?? p.thumb_file_id ?? p.remote_file_id}
@@ -94,9 +96,14 @@ export function SearchResultsScreen({ route, navigation }: { route: any; navigat
         )}
         ListEmptyComponent={
           photos ? (
-            <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
-              Nothing matches this search.
-            </Text>
+            <EmptyState
+              theme={theme}
+              art={<EmptySearchArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={104} />}
+              title="Nothing matches this search"
+              message="Try fewer words, or adjust the filters in the gallery."
+              actionLabel="Back to gallery"
+              onAction={() => navigation.goBack()}
+            />
           ) : (
             <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
           )

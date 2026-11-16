@@ -39,6 +39,11 @@ export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
   // /pause from the channel (remote.ts) is the cheapest gate — check it first
   // so a paused device never even touches the network/battery probes.
   if (await isRemotePaused()) return false;
+  // Per-device stop: /revoke or /pause <thisDeviceId>.
+  try {
+    const { thisDeviceBlocked } = await import("./devices");
+    if (await thisDeviceBlocked()) return false;
+  } catch {}
   // Low-storage guard (storage.ts): automatic work stops below the critical
   // threshold — a full disk turns uploads/preview writes into silent failures.
   // Manual syncs never hit this path.
@@ -107,12 +112,20 @@ export async function scanAndEnqueueAll(
   const seenLocalIds = new Set<string>();
   let scanned = 0;
   let enqueued = 0;
+  // A capped pass (overnight catch-up) has not seen the whole library, so it
+  // must NOT advance lastFullSyncAt: the background recent-scan uses that
+  // timestamp as its floor, and moving it forward would hide the older part of
+  // the backlog from every later incremental scan.
+  let capped = false;
 
   for (const album of albums) {
     // Overnight catch-up passes maxNew — once the per-night budget is spent,
     // stop entirely. The next night continues where this one stopped:
     // enqueueUploads only enqueues rows that aren't uploaded yet.
-    if (maxNew !== undefined && enqueued >= maxNew) break;
+    if (maxNew !== undefined && enqueued >= maxNew) {
+      capped = true;
+      break;
+    }
     let title: string;
     try {
       title = await album.getTitle();
@@ -152,6 +165,7 @@ export async function scanAndEnqueueAll(
       if (items.length > 0) {
         const slice =
           maxNew !== undefined ? items.slice(0, Math.max(0, maxNew - enqueued)) : items;
+        if (slice.length < items.length) capped = true;
         if (slice.length > 0) {
           enqueued += await enqueueUploads(slice, "sync");
         }
@@ -165,7 +179,7 @@ export async function scanAndEnqueueAll(
     }
   }
 
-  await savePrefs({ lastFullSyncAt: Date.now() });
+  if (!capped) await savePrefs({ lastFullSyncAt: Date.now() });
   return { scanned, enqueued };
 }
 
@@ -222,8 +236,25 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
 export async function runSyncNow(
   onProgress?: (scanned: number, enqueued: number) => void
 ): Promise<ScanResult> {
+  // /revoke is a hard stop for this device, including manual scans.
+  try {
+    const { isDeviceRevoked } = await import("./devices");
+    if (await isDeviceRevoked()) {
+      return { scanned: 0, enqueued: 0 };
+    }
+  } catch {}
   const result = await scanAndEnqueueAll(onProgress);
   void processQueue();
+  // Auto-add album rules run after a scan; idempotent, best-effort.
+  void import("./albumRulesApply").then(({ applyAlbumRules }) => applyAlbumRules());
+  // Optional automatic ML pass (only when the user enabled it and models exist).
+  void import("./settings").then(async ({ loadPrefs }) => {
+    const prefs = await loadPrefs();
+    if (prefs.autoMlIndex) {
+      const { runAutoMlIndex } = await import("./mlAuto");
+      void runAutoMlIndex(10);
+    }
+  });
   return result;
 }
 

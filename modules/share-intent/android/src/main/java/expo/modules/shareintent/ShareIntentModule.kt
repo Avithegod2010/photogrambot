@@ -1,10 +1,13 @@
 package expo.modules.shareintent
 
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -91,6 +94,68 @@ class ShareIntentModule : Module() {
       } catch (e: SecurityException) {
         false
       }
+    }
+
+    // Launcher-icon variants (Appearance → App icon). The manifest ships three
+    // launcher activity-aliases pointing at MainActivity; only one may be
+    // enabled at a time or the launcher shows duplicate icons. Enable the
+    // target BEFORE disabling the others so there is never zero launcher icons.
+    Function("setAppIcon") { variant: String ->
+      val context = appContext.reactContext ?: return@Function false
+      val pkg = context.packageName
+      // Colour × shape variants generated into the manifest (see
+      // scripts + app.config notes). Legacy "accent"/"mono" keys stay valid.
+      val names = mutableMapOf(
+        "default" to "$pkg.IconDefault",
+        "accent" to "$pkg.IconAccent",
+        "mono" to "$pkg.IconMono"
+      )
+      val colors = listOf("default", "blue", "teal", "orange", "green", "violet", "rose")
+      val shapes = listOf("default", "round", "squircle", "circle")
+      for (color in colors) {
+        for (shape in shapes) {
+          if (color == "default" && shape == "default") continue
+          names["$color-$shape"] = "$pkg.Icon_${color}_${shape}"
+        }
+      }
+      // Normalise unknown values to "default": skipping a key that is not in
+      // the map would otherwise disable every alias and remove the launcher
+      // icon entirely.
+      val key = if (names.containsKey(variant)) variant else "default"
+      val target = names[key]!!
+      try {
+        val pm = context.packageManager
+        pm.setComponentEnabledSetting(
+          ComponentName(context, target),
+          PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+          PackageManager.DONT_KILL_APP
+        )
+        for ((nameKey, name) in names) {
+          if (nameKey == key) continue
+          pm.setComponentEnabledSetting(
+            ComponentName(context, name),
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP
+          )
+        }
+        true
+      } catch (e: Exception) {
+        false
+      }
+    }
+
+    // Screenshot / recents protection. Applied only while the viewer or the
+    // lock screen is mounted, then cleared when it unmounts.
+    Function("setSecureFlag") { enabled: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function false
+      activity.runOnUiThread {
+        if (enabled) {
+          activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+          activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+      }
+      true
     }
 
     Function("openInstallSettings") {

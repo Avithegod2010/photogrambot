@@ -194,6 +194,10 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // SQLCipher runtime (expo-sqlite marks OpenSSL compileOnly). Packaging it
+    // here provides both the prefab package for the SQLCipher CMake build and
+    // the libcrypto shared libraries at runtime.
+    implementation("io.github.ronickg:openssl:3.3.2-1")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

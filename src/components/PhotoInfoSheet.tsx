@@ -1,27 +1,30 @@
 import React from "react";
 import {
   Alert,
-  Dimensions,
   Linking,
   Modal,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import MapView, { Marker } from "react-native-maps";
 import { useTheme } from "../useTheme";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { formatBytes, formatDate } from "../lib/format";
 import { getPhotoVersions, type PhotoRow, type PhotoVersionRow } from "../lib/db";
 import { isDecoyActive } from "../lib/applock";
 import { savePhotoToDevice, saveMotionClip } from "../lib/restore";
+import { placeLabel } from "../lib/places";
 import { Button } from "./ui";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
-import { ActivityIndicator } from "react-native";
+import { ActivityIndicator } from "../rn";
+import { overlay, spacing, typography } from "../theme";
 
 interface TechnicalExif {
   aperture?: string | null;
@@ -44,6 +47,7 @@ export function PhotoInfoSheet({
   onFindSimilar?: () => void;
   theme: ReturnType<typeof useTheme>;
 }) {
+  const compact = useSettingsStore((s) => s.prefs.infoSheetDensity === "compact");
   const [versions, setVersions] = React.useState<PhotoVersionRow[] | null>(null);
   const [savingVersionId, setSavingVersionId] = React.useState<number | null>(null);
   const [savingMotion, setSavingMotion] = React.useState(false);
@@ -113,6 +117,7 @@ export function PhotoInfoSheet({
   })();
 
   const hasGps = p.latitude != null && p.longitude != null;
+  const place = hasGps ? placeLabel(p.latitude!, p.longitude!) : null;
   const taken = new Date(p.taken_at);
   const dateHeader = taken.toLocaleDateString(undefined, {
     weekday: "long",
@@ -134,8 +139,16 @@ export function PhotoInfoSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetRoot}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: theme.colors.background }]}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close photo details"
+        />
+        <View
+          accessibilityViewIsModal
+          style={[styles.sheet, { backgroundColor: theme.colors.background }]}
+        >
           <View style={[styles.grabber, { backgroundColor: theme.colors.outline }]} />
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -151,7 +164,12 @@ export function PhotoInfoSheet({
             {hasGps ? (
               <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Location</Text>
-                <Pressable onPress={openInMaps} style={styles.mapWrap}>
+                {place ? (
+                  <Text style={{ color: theme.colors.onSurface, fontSize: 13.5, fontWeight: "600", marginTop: -4, marginBottom: 8 }}>
+                    {place}
+                  </Text>
+                ) : null}
+                <Pressable onPress={openInMaps} style={styles.mapWrap} accessibilityRole="button" accessibilityLabel="Open location in Maps">
                   <MapView
                     style={styles.map}
                     liteMode={Platform.OS === "android"}
@@ -175,7 +193,7 @@ export function PhotoInfoSheet({
                     />
                   </MapView>
                 </Pressable>
-                <Pressable style={styles.mapLink} onPress={openInMaps}>
+                <Pressable style={styles.mapLink} onPress={openInMaps} accessibilityRole="button" accessibilityLabel="Open coordinates in Maps">
                   <Text style={[styles.coordText, { color: theme.colors.primary }]}>
                     {p.latitude!.toFixed(6)}, {p.longitude!.toFixed(6)} — open in Maps ↗
                   </Text>
@@ -187,11 +205,15 @@ export function PhotoInfoSheet({
               <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>Details</Text>
               <Row label="File name" value={p.filename} theme={theme} />
               {p.folder ? <Row label="Folder" value={p.folder} theme={theme} /> : null}
-              <Row label="Size" value={formatBytes(p.size)} theme={theme} />
+              {!compact || p.size ? (
+                <Row label="Size" value={formatBytes(p.size)} theme={theme} />
+              ) : null}
               {p.width && p.height ? (
                 <Row label="Resolution" value={`${p.width} × ${p.height} (${((p.width * p.height) / 1_000_000).toFixed(1)} MP)`} theme={theme} />
               ) : null}
-              {p.mime ? <Row label="Format" value={p.mime} theme={theme} /> : null}
+              {p.mime && (!compact || p.mime !== "image/jpeg") ? (
+                <Row label="Format" value={p.mime} theme={theme} />
+              ) : null}
               <Row
                 label="Backed up"
                 value={
@@ -207,8 +229,10 @@ export function PhotoInfoSheet({
                 }
                 theme={theme}
               />
-              {p.device ? <Row label="Uploaded by" value={`device ${p.device}`} theme={theme} /> : null}
-              {p.content_hash ? (
+              {!compact && p.device ? (
+                <Row label="Uploaded by" value={`device ${p.device}`} theme={theme} />
+              ) : null}
+              {!compact && p.content_hash ? (
                 <Row label="SHA-256" value={`${p.content_hash.slice(0, 24)}…`} theme={theme} mono />
               ) : null}
             </View>
@@ -218,9 +242,11 @@ export function PhotoInfoSheet({
                 <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
                   Version history
                 </Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
-                  Previous uploads of this photo are kept as replies in your channel.
-                </Text>
+                {!compact ? (
+                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, marginBottom: 6 }}>
+                    Previous uploads of this photo are kept as replies in your channel.
+                  </Text>
+                ) : null}
                 {versions.map((v) => (
                   <View key={v.id} style={styles.versionRow}>
                     <View style={{ flex: 1 }}>
@@ -237,6 +263,9 @@ export function PhotoInfoSheet({
                       onPress={() => void saveVersion(v)}
                       disabled={savingVersionId !== null}
                       hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Save version ${v.version}`}
+                      accessibilityState={{ busy: savingVersionId === v.id }}
                     >
                       <Text
                         style={{
@@ -278,6 +307,29 @@ export function PhotoInfoSheet({
                 <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13.5, lineHeight: 19 }}>
                   {p.ai_caption}
                 </Text>
+              </View>
+            ) : null}
+
+            {p.ocr_text ? (
+              <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.cardTitle, { color: theme.colors.onSurface }]}>
+                  Text in this image
+                </Text>
+                <Text
+                  selectable
+                  style={{ color: theme.colors.onSurface, fontSize: 13.5, lineHeight: 20 }}
+                >
+                  {p.ocr_text}
+                </Text>
+                <Button
+                  title="Share text"
+                  variant="outlined"
+                  theme={theme}
+                  style={{ marginTop: 12 }}
+                  onPress={() => {
+                    void Share.share({ message: p.ocr_text ?? "" });
+                  }}
+                />
               </View>
             ) : null}
 
@@ -326,9 +378,11 @@ export function PhotoInfoSheet({
           />
           <Pressable
             onPress={() => setMotionPlaying(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close motion clip"
             style={{ position: "absolute", top: 48, right: 20, padding: 10 }}
           >
-            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Close</Text>
+            <Text style={{ color: overlay.onMedia, fontSize: 16, fontWeight: "700" }}>Close</Text>
           </Pressable>
         </View>
       </Modal>
@@ -374,14 +428,14 @@ function MotionClipPlayer({
   if (failed) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: "#fff", fontSize: 13 }}>Could not download the motion clip.</Text>
+        <Text style={{ color: overlay.onMedia, fontSize: 13 }}>Could not download the motion clip.</Text>
       </View>
     );
   }
   if (!uri) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={overlay.onMedia} />
       </View>
     );
   }
@@ -415,8 +469,6 @@ function Row({
     </View>
   );
 }
-
-const { width } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   sheetRoot: {
@@ -468,7 +520,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   map: {
-    width: width - 72,
+    width: "100%",
     height: 180,
   },
   mapLink: {

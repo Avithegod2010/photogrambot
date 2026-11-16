@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Image, View } from "react-native";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
+import { useSettingsStore } from "../store/useSettingsStore";
+import { Skeleton } from "./Skeleton";
 
 export function TelegramImage({
   fileId,
@@ -20,6 +22,7 @@ export function TelegramImage({
 }) {
   const [uri, setUri] = useState<string | null>(localUri ?? null);
   const [failed, setFailed] = useState(false);
+  const skeletonLoading = useSettingsStore((s) => s.prefs.skeletonLoading);
 
   useEffect(() => {
     let alive = true;
@@ -50,6 +53,9 @@ export function TelegramImage({
   }, [fileId, localUri, profileId]);
 
   if (!uri) {
+    if (skeletonLoading) {
+      return <Skeleton style={style} color={failed ? "rgba(128,128,128,0.12)" : undefined} />;
+    }
     return (
       <View
         style={[style, { backgroundColor: "rgba(128,128,128,0.12)" }, failed && { opacity: 0.5 }]}
