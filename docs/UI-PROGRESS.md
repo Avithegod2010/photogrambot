@@ -81,6 +81,63 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
 
 ## Verification performed
 
+> **2026-11-17 — first real UI verification on hardware (1.4.0 / versionCode 6,
+> installed build, `com.photogrambot.app`, firstInstallTime untouched at
+> 2026-08-30 19:18:11).** Driven over wireless adb by bounds from
+> `uiautomator dump`, screenshots reviewed frame by frame.
+>
+> **Verified working:**
+> - **M3 navigation bar active indicator** — the tonal pill sits behind the
+>   active tab icon and moves correctly between Gallery / Cloud / Collections /
+>   Settings.
+> - **M3 switches** — ON renders green with the trailing check mark, OFF is the
+>   grey track + white thumb.
+> - **Segmented controls** — Days/Months/Years, theme, text size, grid columns
+>   all show the selected-pill treatment.
+> - **Cloud tab** — grid, per-tile backed-up check, right-edge **date scrubber**
+>   with month dots (Nov 2026 → Jul 2024). Cloud thumbnails load (first paint
+>   shows empty tiles for a few seconds, then fill).
+> - **Settings search** — typing `theme` filters to "Appearance · Jump to
+>   section"; jumping works (needs a second tap when the keyboard is open).
+> - **Light theme** — full light palette, cards, accent swatches, custom hex
+>   field.
+> - **AMOLED theme** — true-black background, white status icons.
+> - **Dark theme** — restored to the device's original setting afterwards.
+> - **Text size: Extra large** — every chip row reflows to multiple lines, no
+>   truncation, no clipped labels. Reset to Default afterwards.
+> - **Arabic RTL** — full mirror: tab bar order reversed (المعرض at the right),
+>   header reversed, segmented controls reversed, Collections grids mirrored,
+>   section headers translated. "Restart required" dialog is correct (Android
+>   only re-lays out on the next launch). Reset to English afterwards.
+> - **Reduced motion** — with all three animation scales set to 0 the app cold
+>   starts and renders normally (no blank frame, no crash). Scales restored.
+>
+> **Issues found on hardware (all NEW, none previously known):**
+> 1. **Cold start takes ~61 s.** `Settings → Maintenance → Diagnostics` reports
+>    `Last cold start: 61289 ms (app-module 212ms, settings 220ms, db 61240ms,
+>    nav 61289ms)` — i.e. **all of it is database init**. Reproduced on every
+>    force-stop cold start. Per-step timing has now been added to `getDb()` /
+>    `migrate()` (`startup_db_steps` in kv, shown in Diagnostics as "DB init:")
+>    so the next build names the exact phase. Leading hypothesis is SQLite WAL
+>    recovery after a force-stop during heavy upload writes, but an FTS/schema
+>    rebuild running every launch is not yet excluded.
+> 2. **Status bar stays light-content in Light theme** — clock, battery and
+>    network icons render white-on-white (unreadable) on both the splash and
+>    every light-theme screen. Needs a status-bar style that follows the
+>    resolved theme.
+> 3. **Cloud date labels** overlap each other when months are close ("Mar 2025"
+>    over "Jul 2024") and are low-contrast white-on-bright-photo.
+> 4. **Collections trip tiles** truncate the album name ("Trip · 13 Aug 2026
+>    —…") and draw the label directly over the cover photo, which is hard to
+>    read on light covers.
+> 5. **i18n gaps in RTL** — core chrome strings stay English while section
+>    headers translate: the Collections segments read "Albums · 75" / "Trash ·
+>    0", tile counts read "2 photos", and the Collections title is English.
+>    Contradicts the "chrome and common actions are translated" note in
+>    Settings.
+> 6. **Not verified remotely:** haptics feel (needs a human finger) and ripple
+>    visuals (a still cannot show them).
+
 - `npm run check` — typecheck clean, **33/33 test files pass** (including the
   new `ui-system` guard).
 - Static guard — 128 files checked, no raw hex outside the allowlist, no

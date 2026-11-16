@@ -109,12 +109,24 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
+      // Cold-start diagnosis (2026-11-17 device round): a 61 s cold start was
+      // entirely inside database init. Time each phase and persist it to kv so
+      // Settings → Maintenance → Diagnostics can name the culprit instead of
+      // leaving it a guess. Cheap (a handful of Date.now() calls) and it writes
+      // a single small JSON blob.
+      const dbT0 = Date.now();
+      const dbSteps: Record<string, number> = {};
+      const markDb = (k: string) => {
+        dbSteps[k] = Date.now() - dbT0;
+      };
       const d = await SQLite.openDatabaseAsync(DB_NAME);
+      markDb("open");
       // SQLCipher: the key must be applied before ANY other statement.
       try {
         const { loadPrefs } = await import("./settings");
         const prefs = await loadPrefs();
         if (prefs.dbEncryption) await applyDbKey(d);
+        markDb("key");
       } catch (e: any) {
         // A wrong/missing key means the file cannot be read. Surface a clear
         // message instead of the raw "file is not a database".
@@ -126,7 +138,15 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
         throw e;
       }
       await d.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-      await migrate(d);
+      markDb("pragma");
+      await migrate(d, dbSteps, dbT0);
+      markDb("migrate");
+      try {
+        await d.runAsync(
+          "INSERT INTO kv (k, v) VALUES ('startup_db_steps', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+          [JSON.stringify(dbSteps)]
+        );
+      } catch {}
       return d;
     })().catch((err) => {
       dbPromise = null;
@@ -199,7 +219,14 @@ export async function enableDatabaseEncryption(): Promise<void> {
   await check.getFirstAsync("SELECT COUNT(*) AS n FROM photos");
 }
 
-async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
+async function migrate(
+  db: SQLite.SQLiteDatabase,
+  steps?: Record<string, number>,
+  t0 = Date.now()
+): Promise<void> {
+  const mark = (k: string) => {
+    if (steps) steps[k] = Date.now() - t0;
+  };
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS photos (
       id TEXT PRIMARY KEY,
@@ -336,6 +363,7 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved, created_at DESC);
   `);
+  mark("schema");
   await addColumnsIfMissing(db, "photos", [
     ["latitude", "REAL"],
     ["longitude", "REAL"],
@@ -361,8 +389,11 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     // text found (a finished result, never retried).
     ["ocr_text", "TEXT"],
   ]);
+  mark("photoColumns");
   await migrateFtsSchema(db);
-  await migrateRest(db);
+  mark("ftsSchema");
+  await migrateRest(db, mark);
+  mark("rest");
 }
 
 // OCR pending set (R30): uploaded screenshot-tagged rows never successfully
@@ -436,7 +467,10 @@ async function addColumnsIfMissing(
   }
 }
 
-async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
+async function migrateRest(
+  db: SQLite.SQLiteDatabase,
+  mark: (k: string) => void = () => {}
+): Promise<void> {
   await addColumnsIfMissing(db, "upload_queue", [
     ["next_attempt_at", "INTEGER"],
     ["profile_id", "TEXT"],
@@ -447,6 +481,7 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     // Completion timestamp (ms) for the throughput readout on the queue screen.
     ["finished_at", "INTEGER"],
   ]);
+  mark("queueColumns");
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS photo_versions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -473,6 +508,7 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
       vec BLOB NOT NULL
     );
   `);
+  mark("versionTables");
   await addColumnsIfMissing(db, "albums", [
     ["locked", "INTEGER"],
     ["query", "TEXT"],
@@ -482,7 +518,9 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     // Manual album order (drag-to-reorder). 0 = never ordered.
     ["sort_order", "INTEGER NOT NULL DEFAULT 0"],
   ]);
+  mark("albumColumns");
   await migrateFtsSchema(db);
+  mark("ftsSchema2");
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS hash_cache (
       local_id TEXT NOT NULL,
@@ -491,6 +529,7 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (local_id, modification_time)
     );
   `);
+  mark("hashCache");
   // Collapse duplicate active rows left by historical races between concurrent
   // scans (watcher scan vs bootstrap/background task run in separate contexts,
   // so the app-level hasActiveQueuedUpload check is not atomic across them),
@@ -511,6 +550,7 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_queue_dequeue
        ON upload_queue(state, priority, upload_type, taken_at);`
   );
+  mark("queueDedupe");
 }
 
 async function migrateFtsSchema(db: SQLite.SQLiteDatabase): Promise<void> {

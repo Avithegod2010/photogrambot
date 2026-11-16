@@ -28,7 +28,7 @@ import { useUploadStore } from "../store/useUploadStore";
 import { Button, Card, SectionLabel, TextField, ToggleRow, Dialog, AppBar, SearchField, ListRow } from "../components/ui";
 import { typography, spacing, radius, touchTarget } from "../theme";
 import { formatBytes } from "../lib/format";
-import { getStorageSummary, type StorageSummary } from "../lib/db";
+import { getStorageSummary, kvGet, type StorageSummary } from "../lib/db";
 import { runSyncNow } from "../lib/sync";
 import { getBackgroundSyncInfo } from "../lib/background";
 import {
@@ -143,6 +143,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const [crashPending, setCrashPending] = useState(0);
   const [crashNote, setCrashNote] = useState<string | null>(null);
   const [startupInfo, setStartupInfo] = useState<StartupInfo | null>(null);
+  const [dbSteps, setDbSteps] = useState<string | null>(null);
   const [rotateDialog, setRotateDialog] = useState(false);
   const [rotateOld, setRotateOld] = useState("");
   const [rotateNew, setRotateNew] = useState("");
@@ -223,6 +224,9 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void getDecoyBotToken().then((v) => setDecoyTokenDraft(v ?? ""));
     void pendingCrashReportCount().then(setCrashPending);
     void getLastStartup().then(setStartupInfo);
+    void kvGet("startup_db_steps")
+      .then((raw) => setDbSteps(raw))
+      .catch(() => {});
   }, []);
 
   async function shareDiagnostics() {
@@ -1590,6 +1594,14 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                   .join(", ")})`
               : "not measured yet"}
           </Text>
+          {dbSteps ? (
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 4 }}>
+              DB init:{" "}
+              {Object.entries(JSON.parse(dbSteps) as Record<string, number>)
+                .map(([k, v]) => `${k} ${v}ms`)
+                .join(", ")}
+            </Text>
+          ) : null}
           <View style={styles.divider} />
           <ToggleRow
             title="Crash reporting (opt-in)"
