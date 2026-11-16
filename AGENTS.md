@@ -300,9 +300,9 @@ npx expo run:android
 >
 > **2026-11-02 addendum (Round 37):** the repo is now **PUBLIC** (`github.com/Avithegod2010/photogrambot`), the working tree is clean at the R37 commit, and the device round has produced its first real device findings (filter sheet, weekly digest, encrypted backup upload and photo-version history all verified on hardware; **share-target filters and the near-duplicate re-enqueue loop fixed**). Two things the next session must do first: (1) **rebuild the APK natively** — the share-target manifest fix only exists in the checked-in manifest and cannot take effect until `assembleDebug`/EAS rebuilds it; (2) **turn the weekly-digest toggle back OFF** on the device (it was left ON after the digest test). The remaining device work is listed in the checklist notes at the end of the Device Verification Checklist section.
 >
-> **2026-11-03 addendum (post-R37 close-out; no device work per owner instruction):** the near-duplicate toggle escape hatch, replace-restore queue/embedding cleanup, backup temp-file cleanup, README troubleshooting and CHANGELOG are committed and pushed (`main`, head `dd134aa`+). `android/version.properties` is now **versionCode 2 / versionName 1.0.0**. A fresh **EAS preview build was submitted** — id `355a69d1-2824-4b9d-92aa-ea803e596dd9`, snapshot commit `a56e08c` (docs-only delta from the code at `353eb88`), status **in queue** at the time of writing; it takes over an hour on the free tier (the previous build waited five days). **The only correct rebuild path this machine has is EAS** — local `assembleDebug`/`assembleRelease` thrashes an 8 GB box and hits the JVM-TLS `dl.google.com` failure, so do not retry Gradle. **⚠️ CORRECTED 2026-11-16: this is stale and wrong — local release builds now work reliably in ~1 hour; see the 2026-11-16 addendum at the end of this box and `docs/RELEASE.md` §3.** Publish the finished APK with `npm run release:publish -- --apk <file> --tag v1.0.0-preview.2 --title "PhotogramBot 1.0.0 preview 2" --notes-file <notes> --prerelease` (new `scripts/publish-release.mjs`; token from `GITHUB_TOKEN` or `gh auth token` — `gh` is NOT logged in on this box). `EAS_SKIP_AUTO_FINGERPRINT=1` is mandatory with a committed `android/` directory — the fingerprint step otherwise hangs for many minutes (see docs/RELEASE.md). The dev-box disk was saturated for part of this session by a stray `npm install` from another project; check `% Disk Time` before blaming the build.
+> **2026-11-03 addendum (post-R37 close-out; no device work per owner instruction):** the near-duplicate toggle escape hatch, replace-restore queue/embedding cleanup, backup temp-file cleanup, README troubleshooting and CHANGELOG are committed and pushed (`main`, head `dd134aa`+). `android/version.properties` is now **versionCode 2 / versionName 1.0.0**. A fresh **EAS preview build was submitted** — id `355a69d1-2824-4b9d-92aa-ea803e596dd9`, snapshot commit `a56e08c` (docs-only delta from the code at `353eb88`), status **in queue** at the time of writing; it takes over an hour on the free tier (the previous build waited five days). **The only correct rebuild path this machine has is EAS** — local `assembleDebug`/`assembleRelease` thrashes an 8 GB box and hits the JVM-TLS `dl.google.com` failure, so do not retry Gradle. **⚠️ CORRECTED 2026-11-16: this is stale and wrong — local release builds now work reliably in ~1 hour; see the 2026-11-16 addendum at the end of this box and `docs/RELEASE.md` §3.** Publish the finished APK with `npm run release:publish -- --apk <file> --tag v1.0.0-preview.2 --title "PhotogramBot 1.0.0 preview 2" --notes-file <notes> --prerelease` (new `scripts/publish-release.mjs`; token from `GITHUB_TOKEN` or `gh auth token` — **⚠️ CORRECTED 2026-11-16: `gh` IS logged in on this box** (account `Avithegod2010`, keyring, scopes gist/read:org/repo/workflow); `GITHUB_TOKEN` is still unset, so use `gh auth token` as the source). `EAS_SKIP_AUTO_FINGERPRINT=1` is mandatory with a committed `android/` directory — the fingerprint step otherwise hangs for many minutes (see docs/RELEASE.md). The dev-box disk was saturated for part of this session by a stray `npm install` from another project; check `% Disk Time` before blaming the build.
 > **Release-page finding (2026-11-03):** the release left behind by the old waiter script, `v1.0.0-preview.1` (id 415250220, APK `photogrambot-1.0.0-preview.apk`, built from pre-R37 `dc69ff6`), is a **DRAFT** — drafts are invisible to anonymous API callers, so the in-app updater has never seen it (this is exactly why the R35 device check reported "No release with an APK has been published yet"). It was left as-is (not published — the APK predates the R37 fixes; not deleted — it is not ours to destroy without the owner). `pickApkRelease` skips drafts by design; `scripts/publish-release.mjs` always publishes with `draft: false`. **Install caveat for any EAS-signed APK: it cannot install over the debug-signed dev client — the app must be uninstalled first, which wipes the local SQLite index (recoverable from the channel's pinned DB backup).**
-> **Dependency audit (2026-11-03):** `npm audit --omit=dev` now reports 18 advisories (2 low / 10 moderate / 6 high). Non-breaking fixes exist for `node-forge@1.4.0` (via `@expo/cli`), `zod@3.25.76` (via `@expo/cli`) and `decode-uri-component` (via `query-string` → `@react-navigation/core`, i.e. RUNTIME deep-link parsing — low real-world risk since the app only parses its own scheme) — but **`npm audit fix` cannot run on this box**: the first attempt crashed npm natively, the second died with tar write errors + `EPERM` on locked `node_modules` dirs (`xcode`, `@react-navigation/routers`) and left the lockfile untouched. `node_modules` verified healthy afterwards (`tsc --noEmit` clean, all 11 harnesses pass). The rest (`deepmerge`, `glob`, `zod` chain) only fix with `expo@58` — bundle them into a deliberate SDK 58 upgrade decision; do not force now.
+> **Dependency audit (2026-11-03) — ⚠️ SUPERSEDED 2026-11-16, see the dependency-hygiene addendum at the end of this box.** `npm audit --omit=dev` then reported 18 advisories (2 low / 10 moderate / 6 high). Non-breaking fixes exist for `node-forge@1.4.0` (via `@expo/cli`), `zod@3.25.76` (via `@expo/cli`) and `decode-uri-component` (via `query-string` → `@react-navigation/core`, i.e. RUNTIME deep-link parsing — low real-world risk since the app only parses its own scheme) — but **`npm audit fix` cannot run on this box**: the first attempt crashed npm natively, the second died with tar write errors + `EPERM` on locked `node_modules` dirs (`xcode`, `@react-navigation/routers`) and left the lockfile untouched. `node_modules` verified healthy afterwards (`tsc --noEmit` clean, all 11 harnesses pass). The rest (`deepmerge`, `glob`, `zod` chain) only fix with `expo@58` — bundle them into a deliberate SDK 58 upgrade decision; do not force now.
 >
 > **2026-11-05 addendum (customisation round):** the working tree at `de7bc99` adds 21 appearance controls (see Round 38). The version is **1.1.0 / versionCode 3**. The **EAS preview build finished** (build id **`79c62067-68bf-4a15-a7b1-3713357df8e8`**, project `avithegod-team/photogrambot`, started 2026-11-04T22:30Z, finished 2026-11-05T01:50Z) and its APK was **published as the prerelease `v1.1.0-preview.1`** — `https://github.com/Avithegod2010/photogrambot/releases/tag/v1.1.0-preview.1` (APK 100.4 MB + `latest.json`; verified `draft=false`, `prerelease=true`). The in-app updater (Settings → About) will see it; the APK is EAS-keystore-signed, so a debug-signed dev client must be uninstalled first (that wipes the local SQLite index — restore from the channel's pinned backup). The app-icon variants and the manifest changes are only in that native build. Device verification remains the critical path and was not performed. Note the build snapshot is `de7bc99`; commits after it are docs + small visual polish (search/similar empty-state art, splash logo, Kotlin invalid-variant guard), so the published APK does not contain those three polish commits.
 >
@@ -424,6 +424,48 @@ npx expo run:android
 >    from Rounds 15-33 has ever run on hardware.
 > 4. Only then consider new features. Do not start a feature wave without the
 >    owner explicitly asking.
+>
+> ### 2026-11-16 addendum 2 (dependency hygiene — branches + advisories cleared)
+>
+> The "15 stale Dependabot branches / 4 vulnerabilities" note in the session brief
+> was already partly stale when this session started: 5 of those branches no
+> longer existed on origin (they were dead remote-tracking refs and were pruned
+> with `git fetch --prune`). **Eight** PRs were genuinely open; **all eight are
+> now resolved and every Dependabot branch is gone from origin** — only `main` and
+> the intentional `feature/local-bot-api` remain.
+>
+> **Merged (each with green CI):** `#7` checkout v4→v7, `#8` setup-node v4→v7,
+> `#18` setup-java v4→v5, `#16` `@react-navigation/core` 7.21.13→7.24.0 (this one
+> **removed `query-string`/`decode-uri-component` from the tree**, clearing the
+> **high-severity** advisory plus one medium in a single merge), `#12` zustand
+> 5.0.15→5.0.16, `#15` `@types/node` 26.2.0→26.6.6.
+>
+> **Closed with a written rationale on each PR (reopenable):** `#10` TypeScript
+> 6.0.3→**7.0.2** (the native Go compiler rewrite — belongs with SDK 58, not
+> mixed into the 1.4.0 hardware verification) and `#11`
+> `@react-native-async-storage/async-storage` 2.2.0→**3.1.1** (native major that
+> changes the storage backend; imported in only 2 files but needs its own
+> rebuild + device round, especially for the panic-wipe path).
+>
+> **Advisories: 4 → 2.** The two survivors (`glob` 13.0.6 and `minimatch` 11.0.4,
+> both moderate, both inside the Expo CLI via `@expo/fingerprint`) are dev-only,
+> never ship in the APK, and resolve only through SDK 58. **Do not force them
+> with `overrides`** — `@expo/fingerprint` asks for `glob@^13`, and pinning 14
+> there risks breaking EAS fingerprinting silently at release time. Full detail,
+> including the merge/close log and the `npm audit fix` trap on this box, is in
+> **`docs/DEPENDENCIES.md`**.
+>
+> **Real CI bug found and fixed (`6a6d0ac`, on main):** `android/gradlew` was
+> committed with mode `100644`, so the Maestro smoke workflow died after 23 s
+> with `./gradlew: Permission denied` (exit 126) and had **never** been able to
+> build. Set to `100755` with `git update-index --chmod=+x`. This hid behind the
+> workflow's path filter (`.maestro/**` or `maestro.yml` only), which is also why
+> it surfaced on the `setup-java` PR.
+>
+> Post-merge local verification: `npm install` clean, `tsc --noEmit` clean,
+> **33/33 test files pass**, `npm ls` confirms zustand 5.0.16 / @types/node
+> 26.6.6 / @react-navigation/core 7.24.0 / TypeScript 6.0.3 / async-storage 2.2.0
+> and `query-string` gone. No app source changed, so this is not device-relevant.
 
 **Immediate next steps (in order)**:
 1. **Device verification round** — the big one. Everything in the Device Verification Checklist (Phases 3–9) is still owed, PLUS these newer checks:
