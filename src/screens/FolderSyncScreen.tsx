@@ -7,11 +7,12 @@ import {
   Switch,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { listDeviceFolders, type DeviceFolder } from "../lib/sync";
+import { AppBar } from "../components/ui";
 
 export function FolderSyncScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
@@ -37,15 +38,7 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Text
-          style={{ color: theme.colors.onSurface, fontSize: 20 }}
-          onPress={() => navigation.goBack()}
-        >
-          ←
-        </Text>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Folder sync</Text>
-      </View>
+      <AppBar title="Folder sync" onBack={() => navigation.goBack()} theme={theme} borderless />
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
         Folders switched off are never uploaded by auto-sync. Long-press a folder to exclude it —
         long-press an excluded folder to re-include it.
@@ -68,6 +61,11 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
                 ]}
                 onLongPress={() => toggleFolder(item.name, isExcluded)}
                 delayLongPress={300}
+                onPress={() => toggleFolder(item.name, isExcluded)}
+                accessibilityRole="switch"
+                accessibilityLabel={item.name}
+                accessibilityHint={`${item.count} photos. ${isExcluded ? "Excluded from auto-sync" : "Included in auto-sync"}`}
+                accessibilityState={{ checked: !isExcluded }}
               >
                 <View style={{ flex: 1 }}>
                   <Text
@@ -84,12 +82,14 @@ export function FolderSyncScreen({ navigation }: { navigation: any }) {
                     {isExcluded ? " · Excluded" : ""}
                   </Text>
                 </View>
-                <Switch
-                  value={!isExcluded}
-                  onValueChange={(v) => toggleFolder(item.name, v)}
-                  trackColor={{ false: theme.colors.surfaceHighest, true: theme.colors.primaryContainer }}
-                  thumbColor={!isExcluded ? theme.colors.primary : theme.colors.onSurfaceVariant}
-                />
+                <View pointerEvents="none" importantForAccessibility="no-hide-descendants">
+                  <Switch
+                    value={!isExcluded}
+                    onValueChange={(v) => toggleFolder(item.name, v)}
+                    trackColor={{ false: theme.colors.surfaceHighest, true: theme.colors.primaryContainer }}
+                    thumbColor={!isExcluded ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                  />
+                </View>
               </Pressable>
             );
           }}

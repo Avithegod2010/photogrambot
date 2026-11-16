@@ -13,6 +13,7 @@ import {
   setChannelId,
   loadPrefs,
   getBackupPassphrase,
+  setBackupPassphrase,
 } from "./settings";
 import { getChatPinnedMessage, downloadFile, getFile } from "./telegram";
 import { encryptText, decryptText, isEncryptedBackup } from "./secretbox";
@@ -201,4 +202,53 @@ export async function restoreFromChannelPinned(replace: boolean): Promise<Restor
   try { dest.delete(); } catch {}
   await kvSet(KV_BACKUP_MESSAGE_ID, String(pinned.message_id));
   return { restored: count, source: "pinned" };
+}
+
+/**
+ * Rotate the backup passphrase without touching media: verifies the current
+ * passphrase against the pinned backup, then re-serializes the index with the
+ * new passphrase and replaces/pins it. The old recovery key wrapped the OLD
+ * passphrase, so it is invalidated and must be regenerated.
+ */
+export async function rotateBackupPassphrase(
+  oldPassphrase: string,
+  newPassphrase: string
+): Promise<void> {
+  if (!newPassphrase || newPassphrase.length < 8) {
+    throw new Error("Choose a new passphrase of at least 8 characters.");
+  }
+  const channelId = await getChannelId();
+  if (!channelId) throw new Error("Channel not configured");
+  const pinned = await getChatPinnedMessage(channelId);
+  if (!pinned?.document || !(pinned.caption ?? "").includes("#db_backup")) {
+    throw new Error("No pinned backup found to rotate. Back up to the channel first.");
+  }
+  const fileId = pinned.document.file_id;
+  const info = await getFile(fileId);
+  if ((info.file_size ?? 0) > 20 * 1024 * 1024) {
+    throw new Error("The pinned backup is too large to verify via the bot (20 MB limit).");
+  }
+  const dest = new File(Paths.cache, `rotate_${Date.now()}.json`);
+  await downloadFile(fileId, dest.uri);
+  try {
+    const text = await dest.text();
+    if (isEncryptedBackup(text)) {
+      try {
+        await decryptText(text, oldPassphrase);
+      } catch {
+        throw new Error("The current passphrase is wrong.");
+      }
+    }
+    await setBackupPassphrase(newPassphrase);
+    const { savePrefs } = await import("./settings");
+    await savePrefs({ dbBackupEncrypt: true });
+    const { clearRecoveryKey } = await import("./recoveryKey");
+    await clearRecoveryKey();
+    const ok = await uploadBackupToChannel();
+    if (!ok) throw new Error("The new backup could not be uploaded.");
+  } finally {
+    try {
+      if (dest.exists) dest.delete();
+    } catch {}
+  }
 }

@@ -1,3 +1,5 @@
+// Must be the first import: records the true cold-start origin.
+import './src/lib/startTime';
 import { registerRootComponent } from 'expo';
 import { Platform } from 'react-native';
 

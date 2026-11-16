@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Dimensions,
   FlatList,
   PanResponder,
   Pressable,
@@ -10,13 +9,24 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
+} from "../rn";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { File } from "expo-file-system";
 import { useTheme } from "../useTheme";
+import { useT } from "../useT";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, type PhotoRow, type SavedSearchRow } from "../lib/db";
+import { useSettingsStore } from "../store/useSettingsStore";
+import { ACCENT_PRESETS, albumAccent, isHexColor } from "../lib/appearance";
+import { hasRuleConditions } from "../lib/albumRules";
+import { getPhotosByUploadStatus, setAlbumLocked, setAlbumCover, setFavorite, getSavedSearches, saveSearch, deleteSavedSearch, renameSavedSearch, syncTripAlbums, reorderAlbums, type AlbumWithCover, type PhotoRow, type SavedSearchRow } from "../lib/db";
 import { getChannelId } from "../lib/settings";
 import { setMessageReaction } from "../lib/telegram";
 import { getCachedTelegramFile } from "../lib/media";
@@ -27,12 +37,31 @@ import { restorePhotosToDevice } from "../lib/restore";
 import { shareTripStory } from "../lib/story";
 import { isDecoyActive } from "../lib/applock";
 import { HeartIcon, TrashIcon, SearchIcon } from "../components/icons";
+import { EmptyAlbumArt, EmptyTrashArt } from "../components/illustrations";
 import { formatSearchFilterSummary } from "../lib/filterSummary";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
-import { Dialog, Button, TextField, SectionLabel } from "../components/ui";
-
+import {
+  AppBar,
+  Badge,
+  Button,
+  Card,
+  Chip,
+  Dialog,
+  EmptyState,
+  IconButton,
+  ListRow,
+  Section,
+  SectionLabel,
+  SegmentedControl,
+  Sheet,
+  TextField,
+} from "../components/ui";
+import { MoreVerticalIcon, PlayIcon, SparkleIcon, StackIcon } from "../components/icons";
+import { useResponsive } from "../lib/responsive";
+import { radius, spacing, touchTarget, typography, overlay, fallback } from "../theme";
 export function CollectionsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const { albums, favorites, trash, stats, newAlbum, removeAlbum } = useLibraryStore();
   const [tab, setTab] = useState<"albums" | "trash">("albums");
@@ -41,6 +70,11 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
   const [savedSearches, setSavedSearches] = useState<SavedSearchRow[]>([]);
   const [renameTarget, setRenameTarget] = useState<SavedSearchRow | null>(null);
   const [renameName, setRenameName] = useState("");
+  const [reorderMode, setReorderMode] = useState(false);
+  const [albumMenu, setAlbumMenu] = useState<AlbumWithCover | null>(null);
+  const [searchMenu, setSearchMenu] = useState<SavedSearchRow | null>(null);
+  const albumAccents = useSettingsStore((s) => s.prefs.albumAccents);
+  const decoyAlbumNames = useSettingsStore((s) => s.prefs.decoyAlbumNames);
   const decoy = isDecoyActive();
 
   useFocusEffect(
@@ -58,67 +92,97 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
     }, [decoy])
   );
 
-  const tile = (Dimensions.get("window").width - 32 - 12) / 2;
-  const visibleAlbums = decoy ? [] : albums;
-  const visibleTripAlbums = visibleAlbums.filter((album) => !!album.query);
-  const visibleManualAlbums = visibleAlbums.filter((album) => !album.query);
+  // Responsive album grid: 2 columns on phones, 3 on tablets/foldables,
+  // 4 on wide DeX/tablet landscape. No Dimensions.get — rotation must reflow.
+  const { width } = useResponsive();
+  const gridColumns = width >= 1000 ? 4 : width >= 720 ? 3 : 2;
+  const gridGap = spacing.md;
+  const tile = Math.floor((width - spacing.lg * 2 - gridGap * (gridColumns - 1)) / gridColumns);
+  const albumCardHeight = Math.round(tile * 0.78);
+  // Decoy mode shows only the configured fake album names, never real data.
+  const visibleAlbums = useMemo(
+    () =>
+      decoy
+        ? decoyAlbumNames.map((name, i) => ({
+            id: -1000 - i,
+            name,
+            created_at: 0,
+            locked: 0,
+            query: null,
+            cover_photo_id: null,
+            count: 0,
+            cover_file_id: null,
+            cover_preview_id: null,
+            covers: [] as string[],
+          }))
+        : albums,
+    [decoy, decoyAlbumNames, albums]
+  );
+  const visibleTripAlbums = useMemo(
+    () => visibleAlbums.filter((album) => !!album.query),
+    [visibleAlbums]
+  );
+  const visibleManualAlbums = useMemo(
+    () => visibleAlbums.filter((album) => !album.query),
+    [visibleAlbums]
+  );
   const visibleFavorites = decoy ? [] : favorites;
   const visibleTrash = decoy ? [] : trash;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Collections</Text>
-        {tab === "albums" ? (
-          <Pressable onPress={() => setNewAlbumVisible(true)} style={styles.addBtn}>
-            <Text style={{ color: theme.colors.primary, fontWeight: "700", fontSize: 18 }}>＋</Text>
-          </Pressable>
-        ) : null}
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar
+        title="Collections"
+        subtitle={`${visibleAlbums.length} albums · ${visibleFavorites.length} favorites`}
+        theme={theme}
+        borderless
+        right={
+          tab === "albums" ? (
+            <IconButton
+              icon={<Text style={{ color: theme.colors.onSurface, fontSize: 26, lineHeight: 28 }}>＋</Text>}
+              label="Create album"
+              theme={theme}
+              onPress={() => setNewAlbumVisible(true)}
+            />
+          ) : (
+            <View style={{ width: touchTarget }} />
+          )
+        }
+      />
 
-      <View style={[styles.tabs, { backgroundColor: theme.colors.surfaceContainer }]}>
-        {(["albums", "trash"] as const).map((t) => (
-          <Pressable
-            key={t}
-            onPress={() => setTab(t)}
-            style={[
-              styles.tabBtn,
-              tab === t && { backgroundColor: theme.colors.primaryContainer },
-            ]}
-          >
-            <Text
-              style={{
-                color: tab === t ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant,
-                fontWeight: tab === t ? "700" : "500",
-                fontSize: 13,
-              }}
-            >
-              {t === "albums" ? `Albums · ${visibleAlbums.length}` : `Trash · ${visibleTrash.length}`}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.md }}>
+        <SegmentedControl
+          accessibilityLabel="Collections sections"
+          options={[
+            { key: "albums", label: `Albums · ${visibleAlbums.length}` },
+            { key: "trash", label: `Trash · ${visibleTrash.length}` },
+          ]}
+          value={tab}
+          onChange={setTab}
+          theme={theme}
+        />
       </View>
 
       {tab === "albums" ? (
         <ScrollView contentContainerStyle={styles.scroll}>
-          <SectionLabel text="Smart collections" theme={theme} />
+          <SectionLabel text={tr("collections.smart")} theme={theme} />
           <View style={styles.albumGrid}>
             <Pressable
-              style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+              style={[styles.albumCard, { width: tile, height: albumCardHeight, backgroundColor: theme.colors.surface }]}
               onPress={() => navigation.navigate("Album", { albumId: -1, albumName: "Favorites" })}
               onLongPress={() => navigation.navigate("Album", { albumId: -1, albumName: "Favorites", selectMode: true })}
               disabled={decoy}
             >
               <View style={styles.albumTilePlaceholder}>
                 <HeartIcon
-                  color={typeof theme.colors.favorite === "string" ? theme.colors.favorite : "#FF8FA3"}
+                  color={typeof theme.colors.favorite === "string" ? theme.colors.favorite : fallback.favorite}
                   size={36}
                   filled={true}
                 />
               </View>
-              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>Favorites</Text>
+              <Text style={[styles.albumName, { color: theme.colors.onSurface }]}>{tr("common.favorites")}</Text>
               <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                {visibleFavorites.length} photos
+                {visibleFavorites.length} photo{visibleFavorites.length === 1 ? "" : "s"}
               </Text>
             </Pressable>
           </View>
@@ -128,7 +192,7 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               {savedSearches.map((s) => (
                 <Pressable
                   key={s.id}
-                  style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                  style={[styles.albumCard, { width: tile, height: albumCardHeight, backgroundColor: theme.colors.surface }]}
                   onPress={() =>
                     navigation.navigate("SearchResults", {
                       title: s.name,
@@ -136,35 +200,10 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                       filtersJson: JSON.stringify(s.filters ?? null),
                     })
                   }
-                  onLongPress={() =>
-                    // Android Alert renders at most 3 buttons; dismissal via
-                    // cancelable backdrop, never a 4th Cancel button.
-                    Alert.alert(
-                      s.name,
-                      undefined,
-                      [
-                        {
-                          text: "Rename",
-                          onPress: () => {
-                            setRenameTarget(s);
-                            setRenameName(s.name);
-                          },
-                        },
-                        {
-                          text: "Delete",
-                          style: "destructive",
-                          onPress: () => {
-                            void deleteSavedSearch(s.id)
-                              .then(() => getSavedSearches().then(setSavedSearches))
-                              .catch((e: any) =>
-                                Alert.alert("Delete search", e?.message ?? "Couldn’t delete this search.")
-                              );
-                          },
-                        },
-                      ],
-                      { cancelable: true }
-                    )
-                  }
+                  onLongPress={() => setSearchMenu(s)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${s.name}, saved search. ${formatSearchFilterSummary(s.filters, s.query)}`}
+                  accessibilityHint="Opens the saved search. Long-press for rename or delete."
                 >
                   <View style={styles.albumTilePlaceholder}>
                     <SearchIcon color={theme.colors.primary} size={36} />
@@ -182,38 +221,38 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
 
           {visibleTripAlbums.length > 0 ? (
             <>
-              <SectionLabel text="Trips & events" theme={theme} />
+              <SectionLabel text={tr("collections.trips")} theme={theme} />
               <View style={styles.albumGrid}>
                 {visibleTripAlbums.map((a) => (
                   <Pressable
                     key={a.id}
-                    style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                    style={[
+                      styles.albumCard,
+                      { width: tile, height: albumCardHeight, backgroundColor: theme.colors.surface },
+                      isHexColor(albumAccent(albumAccents, a.id, "")) && {
+                        borderWidth: 2,
+                        borderColor: albumAccent(albumAccents, a.id, ""),
+                      },
+                    ]}
                     onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, isTrip: true })}
-                    onLongPress={() =>
-                      Alert.alert(
-                        a.name,
-                        `${a.count} photos grouped by time and location`,
-                        [
-                          {
-                            text: "Select photos",
-                            onPress: () => navigation.navigate("Album", { albumId: a.id, albumName: a.name, isTrip: true, selectMode: true }),
-                          },
-                        ],
-                        { cancelable: true }
-                      )
-                    }
+                    onLongPress={() => setAlbumMenu(a)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${a.name}, trip with ${a.count} photo${a.count === 1 ? "" : "s"}`}
+                    accessibilityHint="Long-press for album actions."
                   >
                     <View style={styles.albumTilePlaceholder}>
-                      <TelegramImage
-                        fileId={a.cover_preview_id ?? a.cover_file_id}
-                        style={{ width: tile, height: tile * 0.8 }}
+                      <AlbumCoverMosaic
+                        covers={a.covers}
+                        fallbackFileId={a.cover_preview_id ?? a.cover_file_id}
+                        width={tile}
+                        height={albumCardHeight}
                       />
                     </View>
                     <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
                       {a.name}
                     </Text>
                     <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                      {a.count} photos
+                      {a.count} photo{a.count === 1 ? "" : "s"}
                     </Text>
                   </Pressable>
                 ))}
@@ -221,8 +260,32 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
             </>
           ) : null}
 
-          <SectionLabel text="Your albums" theme={theme} />
-          {visibleManualAlbums.length === 0 ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingRight: 16,
+            }}
+          >
+            <SectionLabel text={tr("collections.yourAlbums")} theme={theme} />
+            {!decoy && visibleManualAlbums.length > 1 ? (
+              <Pressable onPress={() => setReorderMode((v) => !v)} hitSlop={8}>
+                <Text style={{ color: theme.colors.primary, fontWeight: "600", fontSize: 12.5 }}>
+                  {reorderMode ? "Done" : "Reorder"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {reorderMode ? (
+            <ReorderAlbumList
+              albums={visibleManualAlbums}
+              theme={theme}
+              onCommit={(ids) => {
+                void reorderAlbums(ids).then(() => useLibraryStore.getState().refreshMeta());
+              }}
+            />
+          ) : visibleManualAlbums.length === 0 ? (
             <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
               No albums yet. Tap ＋ to create one and organize your backed-up photos.
             </Text>
@@ -231,49 +294,30 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
               {visibleManualAlbums.map((a) => (
                 <Pressable
                   key={a.id}
-                  style={[styles.albumCard, { width: tile, height: tile * 0.8, backgroundColor: theme.colors.surface }]}
+                  style={[
+                    styles.albumCard,
+                    { width: tile, height: albumCardHeight, backgroundColor: theme.colors.surface },
+                    isHexColor(albumAccent(albumAccents, a.id, "")) && {
+                      borderWidth: 2,
+                      borderColor: albumAccent(albumAccents, a.id, ""),
+                    },
+                  ]}
                   onPress={() => navigation.navigate("Album", { albumId: a.id, albumName: a.name, locked: !!a.locked })}
-                  onLongPress={() =>
-                    // Long-press is the album-management menu; "Select photos"
-                    // is the entry into the bulk-selection grid (tap still
-                    // opens the album). Android Alert renders at most 3
-                    // buttons and silently drops the rest — dismissal is
-                    // cancelable:true, never a 4th Cancel button.
-                    Alert.alert(
-                      a.name,
-                      undefined,
-                      [
-                        {
-                          text: "Select photos",
-                          onPress: () =>
-                            navigation.navigate("Album", {
-                              albumId: a.id,
-                              albumName: a.name,
-                              locked: !!a.locked,
-                              selectMode: true,
-                            }),
-                        },
-                        {
-                          text: a.locked ? "Remove lock" : "Lock album",
-                          onPress: () => {
-                            void setAlbumLocked(a.id, !a.locked);
-                            void useLibraryStore.getState().refreshMeta();
-                          },
-                        },
-                        {
-                          text: "Delete album",
-                          style: "destructive",
-                          onPress: () => void removeAlbum(a.id),
-                        },
-                      ],
-                      { cancelable: true }
-                    )
-                  }
+                  onLongPress={() => {
+                    // Decoy albums are display-only: no management menu.
+                    if (decoy) return;
+                    setAlbumMenu(a);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${a.name}, album with ${a.count} photo${a.count === 1 ? "" : "s"}${a.locked ? ", locked" : ""}`}
+                  accessibilityHint="Long-press for album actions."
                 >
                   <View style={styles.albumTilePlaceholder}>
-                    <TelegramImage
-                      fileId={a.cover_preview_id ?? a.cover_file_id}
-                      style={{ width: tile, height: tile * 0.8 }}
+                    <AlbumCoverMosaic
+                      covers={a.covers}
+                      fallbackFileId={a.cover_preview_id ?? a.cover_file_id}
+                      width={tile}
+                      height={albumCardHeight}
                     />
                   </View>
               <Text style={[styles.albumName, { color: theme.colors.onSurface }]} numberOfLines={1}>
@@ -281,14 +325,53 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
                 {a.name}
               </Text>
                   <Text style={[styles.albumCount, { color: theme.colors.onSurfaceVariant }]}>
-                    {a.count} photos
+                    {a.count} photo{a.count === 1 ? "" : "s"}
                   </Text>
                 </Pressable>
               ))}
             </View>
           )}
 
-          <View style={{ height: 40 }} />
+          <SectionLabel text="Explore" theme={theme} />
+          <View style={[styles.group, { backgroundColor: theme.colors.surface }]}>
+            <ListRow
+              title="Best of the last year"
+              subtitle="Favorites, sharpness and size — up to 60 shots"
+              leading={<SparkleIcon color={theme.colors.primary} size={22} />}
+              theme={theme}
+              showChevron
+              onPress={() => navigation.navigate("BestOf")}
+            />
+            <ListRow
+              title="Play a slideshow"
+              subtitle="Full-screen auto-advance through backed-up photos"
+              leading={<PlayIcon color={theme.colors.primary} size={22} />}
+              theme={theme}
+              showChevron
+              onPress={() => {
+                if (decoy) return;
+                navigation.navigate("Slideshow", { title: "Slideshow" });
+              }}
+            />
+            <ListRow
+              title="Ask your photos"
+              subtitle="Chat with your library — answers cite the photos (Gemini)"
+              leading={<SearchIcon color={theme.colors.primary} size={22} />}
+              theme={theme}
+              showChevron
+              onPress={() => navigation.navigate("Ask")}
+            />
+            <ListRow
+              title="People"
+              subtitle="Face clusters — the embedding model is the remaining step"
+              leading={<StackIcon color={theme.colors.primary} size={22} />}
+              theme={theme}
+              showChevron
+              onPress={() => navigation.navigate("People")}
+            />
+          </View>
+
+          <View style={{ height: spacing.xxl }} />
         </ScrollView>
       ) : (
         <TrashTab navigation={navigation} theme={theme} trash={visibleTrash} />
@@ -360,6 +443,112 @@ export function CollectionsScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
+
+      <Sheet
+        visible={!!albumMenu}
+        theme={theme}
+        title={albumMenu?.name ?? ""}
+        subtitle={
+          albumMenu
+            ? `${albumMenu.count} photo${albumMenu.count === 1 ? "" : "s"}${
+                albumMenu.query ? " · grouped by time and place" : ""
+              }`
+            : undefined
+        }
+        onClose={() => setAlbumMenu(null)}
+      >
+        {albumMenu ? (
+          <View>
+            <ListRow
+              title="Select photos"
+              subtitle="Pick several photos to share, move or delete"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const a = albumMenu;
+                setAlbumMenu(null);
+                navigation.navigate("Album", {
+                  albumId: a.id,
+                  albumName: a.name,
+                  isTrip: !!a.query,
+                  locked: !!a.locked,
+                  selectMode: true,
+                });
+              }}
+            />
+            {!albumMenu.query ? (
+              <>
+                <ListRow
+                  title={albumMenu.locked ? "Remove lock" : "Lock album"}
+                  subtitle={
+                    albumMenu.locked
+                      ? "Anyone opening this app can see the album again"
+                      : "Require biometrics or PIN to open"
+                  }
+                  theme={theme}
+                  showChevron
+                  onPress={() => {
+                    const a = albumMenu;
+                    setAlbumMenu(null);
+                    void setAlbumLocked(a.id, !a.locked);
+                    void useLibraryStore.getState().refreshMeta();
+                  }}
+                />
+                <ListRow
+                  title="Delete album"
+                  subtitle="The photos stay in your library"
+                  theme={theme}
+                  destructive
+                  onPress={() => {
+                    const a = albumMenu;
+                    setAlbumMenu(null);
+                    void removeAlbum(a.id);
+                  }}
+                />
+              </>
+            ) : null}
+          </View>
+        ) : null}
+      </Sheet>
+
+      <Sheet
+        visible={!!searchMenu}
+        theme={theme}
+        title={searchMenu?.name ?? ""}
+        subtitle="Saved search"
+        onClose={() => setSearchMenu(null)}
+      >
+        {searchMenu ? (
+          <View>
+            <ListRow
+              title="Rename"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const s = searchMenu;
+                setSearchMenu(null);
+                setRenameTarget(s);
+                setRenameName(s.name);
+              }}
+            />
+            <ListRow
+              title="Delete search"
+              subtitle="Removes the shortcut, not the photos"
+              theme={theme}
+              destructive
+              onPress={() => {
+                const s = searchMenu;
+                setSearchMenu(null);
+                void deleteSavedSearch(s.id)
+                  .then(() => getSavedSearches().then(setSavedSearches))
+                  .catch((e: any) =>
+                    Alert.alert("Delete search", e?.message ?? "Couldn’t delete this search.")
+                  );
+              }}
+            />
+          </View>
+        ) : null}
+      </Sheet>
     </View>
   );
 }
@@ -375,9 +564,14 @@ function TrashTab({
 }) {
   const insets = useSafeAreaInsets();
   const { restorePhotos, deleteForever, emptyTrash } = useLibraryStore();
-  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
+  const { width } = useResponsive();
+  const columns = width >= 1000 ? 6 : width >= 720 ? 4 : 3;
+  const tile = Math.floor((width - spacing.seam * (columns - 1)) / columns);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
+  const [menuItem, setMenuItem] = useState<(typeof trash)[number] | null>(null);
+  const [confirmIds, setConfirmIds] = useState<string[] | null>(null);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
 
   const clearSel = () => {
     setSelection(new Set());
@@ -402,27 +596,18 @@ function TrashTab({
   function deleteSelectedForever() {
     const ids = Array.from(selection);
     if (ids.length === 0) return;
-    Alert.alert(
-      `Delete ${ids.length} item${ids.length === 1 ? "" : "s"} forever?`,
-      "This also removes them from your Telegram channel. This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void deleteForever(ids).then(clearSel) },
-      ]
-    );
+    setConfirmIds(ids);
   }
 
   if (trash.length === 0) {
     return (
       <View style={styles.trashEmpty}>
-        <TrashIcon
-          color={typeof theme.colors.onSurfaceVariant === "string" ? theme.colors.onSurfaceVariant : "#C4C6D0"}
-          size={52}
+        <EmptyState
+          theme={theme}
+          art={<EmptyTrashArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={112} />}
+          title="Trash is empty"
+          message="Trashed photos wait here for 30 days before they are permanently removed."
         />
-        <Text style={[styles.emptyTitle, { color: theme.colors.onSurface }]}>Trash is empty</Text>
-        <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-          Trashed photos are hidden here for 30 days before being permanently removed.
-        </Text>
       </View>
     );
   }
@@ -430,44 +615,43 @@ function TrashTab({
   return (
     <View style={{ flex: 1 }}>
       <FlatList
+        key={columns}
         data={trash}
-        numColumns={3}
+        numColumns={columns}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ padding: 2, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
         renderItem={({ item }) => (
           <Pressable
-            style={{ width: tile, height: tile, padding: 1 }}
+            style={{ width: tile, height: tile, padding: spacing.seam / 2 }}
             onPress={() => {
               if (selectionMode) {
                 toggleSel(item.id);
                 return;
               }
-              Alert.alert(item.filename, "Restore this photo or delete it forever?", [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: item.remote_deleted ? "Remove from trash" : "Restore",
-                  onPress: () => void restorePhotos([item.id]),
-                },
-                {
-                  text: "Delete forever",
-                  style: "destructive",
-                  onPress: () => void deleteForever([item.id]),
-                },
-              ]);
+              setMenuItem(item);
             }}
             onLongPress={() => {
               setSelectionMode(true);
               setSelection(new Set([item.id]));
             }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: selection.has(item.id) }}
+            accessibilityLabel={`${item.filename}, in trash`}
+            accessibilityHint="Tap for restore or delete. Long-press to select several."
           >
             <TelegramImage
               fileId={item.preview_file_id ?? item.thumb_file_id ?? item.remote_file_id}
               localUri={item.local_uri}
               profileId={item.profile_id}
-              style={{ width: "100%", height: "100%", opacity: 0.6 }}
+              style={{ width: "100%", height: "100%", opacity: 0.62, borderRadius: radius.thumb }}
             />
             {selection.has(item.id) ? (
-              <View style={[styles.pickedOverlay, { borderColor: theme.colors.primary, backgroundColor: "rgba(0,0,0,0.45)" }]}>
+              <View
+                style={[
+                  styles.pickedOverlay,
+                  { borderColor: theme.colors.primary, backgroundColor: overlay.mediaScrim },
+                ]}
+              >
                 <View style={[styles.checkbox, { backgroundColor: theme.colors.primary }]}>
                   <Text style={{ color: theme.colors.onPrimary, fontSize: 11 }}>✓</Text>
                 </View>
@@ -482,49 +666,146 @@ function TrashTab({
         <View
           style={[
             styles.selectionBar,
-            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 8 },
+            {
+              backgroundColor: theme.colors.surfaceContainer,
+              paddingBottom: insets.bottom + spacing.sm,
+            },
           ]}
         >
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }} numberOfLines={1}>
+          <Text
+            style={[typography.bodyStrong, { color: theme.colors.onSurface, flex: 1 }]}
+            numberOfLines={1}
+            accessibilityLiveRegion="polite"
+          >
             {selection.size} selected
           </Text>
-          <Pressable onPress={() => setSelection(new Set(trash.map((t) => t.id)))} style={styles.selAction}>
+          <Pressable
+            onPress={() => setSelection(new Set(trash.map((t) => t.id)))}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Select all"
+          >
             <Text style={{ color: theme.colors.primary }}>All</Text>
           </Pressable>
-          <Pressable onPress={restoreSelected} style={styles.selAction}>
+          <Pressable
+            onPress={restoreSelected}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Restore selected"
+          >
             <Text style={{ color: theme.colors.primary }}>Restore</Text>
           </Pressable>
-          <Pressable onPress={deleteSelectedForever} style={styles.selAction}>
+          <Pressable
+            onPress={deleteSelectedForever}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Delete selected forever"
+          >
             <Text style={{ color: theme.colors.error }}>Delete</Text>
           </Pressable>
-          <Pressable onPress={clearSel} style={styles.selAction}>
+          <Pressable
+            onPress={clearSel}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel selection"
+          >
             <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
           </Pressable>
         </View>
       ) : (
         <View style={[styles.trashFooter, { backgroundColor: theme.colors.surfaceContainer }]}>
-          <Text style={{ color: theme.colors.onSurfaceVariant, flex: 1, fontSize: 12 }}>
+          <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
             Items auto-delete after 30 days
           </Text>
           <Button
             title="Empty trash"
             variant="danger"
             theme={theme}
-            onPress={() =>
-              Alert.alert("Empty trash?", "All trashed photos will be permanently deleted.", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Empty", style: "destructive", onPress: () => void emptyTrash() },
-              ])
-            }
+            onPress={() => setConfirmEmpty(true)}
           />
         </View>
       )}
+
+      <Sheet
+        visible={!!menuItem}
+        theme={theme}
+        title={menuItem?.filename ?? ""}
+        subtitle="In trash"
+        onClose={() => setMenuItem(null)}
+      >
+        {menuItem ? (
+          <View>
+            <ListRow
+              title={menuItem.remote_deleted ? "Remove from trash" : "Restore"}
+              subtitle="Bring it back to your gallery"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const id = menuItem.id;
+                setMenuItem(null);
+                void restorePhotos([id]);
+              }}
+            />
+            <ListRow
+              title="Delete forever"
+              subtitle="Also removes it from your Telegram channel"
+              theme={theme}
+              destructive
+              onPress={() => {
+                const id = menuItem.id;
+                setMenuItem(null);
+                setConfirmIds([id]);
+              }}
+            />
+          </View>
+        ) : null}
+      </Sheet>
+
+      <Dialog
+        visible={!!confirmIds}
+        theme={theme}
+        title={`Delete ${confirmIds?.length ?? 0} item${(confirmIds?.length ?? 0) === 1 ? "" : "s"} forever?`}
+        message="This also removes them from your Telegram channel. This cannot be undone."
+        onClose={() => setConfirmIds(null)}
+        actions={[
+          { label: "Cancel", onPress: () => setConfirmIds(null), variant: "text" },
+          {
+            label: "Delete forever",
+            variant: "danger",
+            onPress: () => {
+              const ids = confirmIds ?? [];
+              setConfirmIds(null);
+              void deleteForever(ids).then(clearSel);
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={confirmEmpty}
+        theme={theme}
+        title="Empty trash?"
+        message="All trashed photos will be permanently deleted."
+        onClose={() => setConfirmEmpty(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setConfirmEmpty(false), variant: "text" },
+          {
+            label: "Empty trash",
+            variant: "danger",
+            onPress: () => {
+              setConfirmEmpty(false);
+              void emptyTrash();
+            },
+          },
+        ]}
+      />
     </View>
   );
 }
 
 export function AlbumScreen({ route, navigation }: { route: any; navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
   const albumId: number = route.params?.albumId ?? -1;
   const albumName: string = route.params?.albumName ?? "Album";
@@ -534,6 +815,12 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   const needsUnlock: boolean = !!route.params?.locked && albumId !== -1;
   const [unlocked, setUnlocked] = useState(!needsUnlock);
   const { favorites, albums, addPhotosToAlbum, removePhotosFromAlbum } = useLibraryStore();
+  const prefs = useSettingsStore((s) => s.prefs);
+  const updatePrefs = useSettingsStore((s) => s.update);
+  const [styleDialog, setStyleDialog] = useState(false);
+  const [ruleFolder, setRuleFolder] = useState("");
+  const [ruleTag, setRuleTag] = useState("");
+  const [ruleFavorite, setRuleFavorite] = useState(false);
   const [photos, setPhotos] = React.useState<any[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Entered via the Collections long-press "Select photos" action or by
@@ -565,7 +852,12 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
     })();
   }, [albumId, favorites, unlocked, needsUnlock]);
 
-  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
+  const { width: viewportWidth } = useResponsive();
+  const albumColumns = viewportWidth >= 1000 ? 5 : viewportWidth >= 720 ? 4 : 3;
+  const tile = Math.floor((viewportWidth - spacing.seam * (albumColumns - 1)) / albumColumns);
+  const [albumActionsVisible, setAlbumActionsVisible] = useState(false);
+  const [photoMenu, setPhotoMenu] = useState<any | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const clearSel = () => {
     setSelection(new Set());
@@ -591,6 +883,12 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
   // action toggle to "Remove cover".
   const currentCover = albums.find((a) => a.id === albumId)?.cover_photo_id ?? null;
   const selectedId = selection.size === 1 ? Array.from(selection)[0] : null;
+  const albumTint = albumAccent(
+    prefs.albumAccents,
+    albumId,
+    typeof theme.colors.primary === "string" ? theme.colors.primary : fallback.primary
+  );
+  const hasCustomTint = isHexColor(prefs.albumAccents?.[String(albumId)]);
 
   // Curate an album/trip cover from a single selected photo (F11). Shown in
   // the header briefly; Collections reloads albums on focus so the grid tile
@@ -782,13 +1080,45 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: 0 }]}>
-      <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+      <View
+        style={[
+          styles.subHeader,
+          { paddingTop: insets.top + 6 },
+          hasCustomTint && { borderBottomWidth: 3, borderBottomColor: albumTint },
+        ]}
+      >
+        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn} accessibilityLabel="Back" accessibilityRole="button">
           <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
         </Pressable>
         <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
           {albumName}
         </Text>
+        {albumId !== -1 && !isDecoyActive() ? (
+          <Pressable
+            onPress={() => {
+              const rule = prefs.albumRules?.[String(albumId)];
+              setRuleFolder(rule?.folder ?? "");
+              setRuleTag(rule?.tag ?? "");
+              setRuleFavorite(!!rule?.favorite);
+              setStyleDialog(true);
+            }}
+            hitSlop={10}
+            style={{ marginStart: 8 }}
+            accessibilityLabel="Album style"
+            accessibilityRole="button"
+          >
+            <View
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 6,
+                backgroundColor: albumTint,
+                borderWidth: 1,
+                borderColor: theme.colors.outline,
+              }}
+            />
+          </Pressable>
+        ) : null}
         {coverNote ? (
           <Text style={{ color: theme.colors.primary, fontWeight: "600", marginStart: 10 }} numberOfLines={1}>
             {coverNote}
@@ -803,6 +1133,17 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
             {!isDecoyActive() && restoreTargets.length > 0 ? (
               <Pressable onPress={restoreAll} hitSlop={6}>
                 <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Restore all</Text>
+              </Pressable>
+            ) : null}
+            {!isDecoyActive() && photos.length > 0 ? (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate("Slideshow", { photos, title: albumName })
+                }
+                hitSlop={6}
+                style={{ marginStart: 14 }}
+              >
+                <Text style={{ color: theme.colors.primary, fontWeight: "600" }}>Play</Text>
               </Pressable>
             ) : null}
             {isTrip && !isDecoyActive() && restoreTargets.length > 0 ? (
@@ -821,23 +1162,9 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
         )}
         {albumId !== -1 && !isTrip && selection.size > 0 ? (
           <Pressable
-            onPress={() => {
-              const ids = Array.from(selection);
-              Alert.alert(
-                `Remove ${ids.length} from album?`,
-                undefined,
-                [                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Remove",
-                    style: "destructive",
-                    onPress: async () => {
-                      await removePhotosFromAlbum(albumId, ids);
-                      clearSel();
-                    },
-                  },
-                ]
-              );
-            }}
+            onPress={() => setConfirmRemove(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${selection.size} selected photos from this album`}
           >
             <Text style={{ color: theme.colors.error, fontWeight: "600" }}>
               Remove ({selection.size})
@@ -855,6 +1182,8 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           return (
             <Pressable
               style={{ width: tile, height: tile, padding: 1 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Photo${item.favorite ? ", favorite" : ""}`}
               onPress={() => {
                 if (albumId !== -1) {
                   toggleSel(item.id);
@@ -867,6 +1196,10 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
                 navigation.navigate("Viewer", { photos, index: photos.indexOf(item) });
               }}
               onLongPress={() => {
+                if (albumId !== -1 && !isTrip) {
+                  setPhotoMenu(item);
+                  return;
+                }
                 setSelectionMode(true);
                 setSelection(new Set([item.id]));
               }}
@@ -888,13 +1221,186 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           );
         }}
         ListEmptyComponent={
-          <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant, padding: 24 }]}>
-            {albumId === -1
-              ? "Tap ♥ on any photo to add it here."
-              : "No photos in this album yet. Select photos in the gallery, then use the album menu."}
-          </Text>
+          <View style={{ alignItems: "center", padding: 24 }}>
+            <EmptyAlbumArt
+              color={theme.colors.onSurfaceVariant}
+              accent={theme.colors.primary}
+              size={104}
+            />
+            <Text
+              style={[
+                styles.emptyText,
+                { color: theme.colors.onSurfaceVariant, padding: 12, textAlign: "center" },
+              ]}
+            >
+              {albumId === -1
+                ? "Tap ♥ on any photo to add it here."
+                : "No photos in this album yet. Select photos in the gallery, then use the album menu."}
+            </Text>
+          </View>
         }
       />
+
+      <Dialog
+        visible={styleDialog}
+        theme={theme}
+        title="Album style"
+        message="Pick an accent for this album, or reset its cover to the newest photo."
+      >
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+          {ACCENT_PRESETS.map((preset) => {
+            const current = prefs.albumAccents?.[String(albumId)];
+            const selected =
+              preset.key === "default" ? !hasCustomTint : !!preset.color && current === preset.color;
+            return (
+              <Pressable
+                key={preset.key}
+                onPress={() => {
+                  const next = { ...(prefs.albumAccents ?? {}) };
+                  if (preset.key === "default" || !preset.color) delete next[String(albumId)];
+                  else next[String(albumId)] = preset.color;
+                  void updatePrefs({ albumAccents: next });
+                }}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  backgroundColor: preset.color ?? theme.colors.surfaceHighest,
+                  borderWidth: selected ? 3 : 1,
+                  borderColor: selected ? theme.colors.onSurface : theme.colors.outline,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                accessibilityLabel={`${preset.label} accent`}
+                accessibilityRole="button"
+              >
+                {preset.key === "default" ? (
+                  <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>Auto</Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <View
+          style={{
+            height: 1,
+            backgroundColor: theme.colors.outlineVariant,
+            marginVertical: 16,
+          }}
+        />
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>
+          Auto-add rule
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5, lineHeight: 18, marginBottom: 8 }}>
+          New photos matching all conditions are added to this album after a scan.
+          Leave a field empty to ignore it.
+        </Text>
+        <TextField
+          value={ruleFolder}
+          onChangeText={setRuleFolder}
+          placeholder="Folder contains…"
+          theme={theme}
+        />
+        <TextField
+          value={ruleTag}
+          onChangeText={setRuleTag}
+          placeholder="Tag contains… (e.g. receipt)"
+          theme={theme}
+          style={{ marginTop: 8 }}
+        />
+        <Pressable
+          onPress={() => setRuleFavorite((v) => !v)}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 10,
+            paddingVertical: 4,
+          }}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: ruleFavorite }}
+        >
+          <View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 5,
+              borderWidth: 1,
+              borderColor: ruleFavorite ? theme.colors.primary : theme.colors.outline,
+              backgroundColor: ruleFavorite ? theme.colors.primaryContainer : "transparent",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {ruleFavorite ? (
+              <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 12 }}>✓</Text>
+            ) : null}
+          </View>
+          <Text style={{ color: theme.colors.onSurface, fontSize: 13.5 }}>
+            Favorites only
+          </Text>
+        </Pressable>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          <Button
+            title="Save rule"
+            variant="outlined"
+            theme={theme}
+            onPress={() => {
+              const next = { ...(prefs.albumRules ?? {}) };
+              const rule = {
+                folder: ruleFolder.trim() || undefined,
+                tag: ruleTag.trim() || undefined,
+                favorite: ruleFavorite || undefined,
+              };
+              if (hasRuleConditions(rule)) next[String(albumId)] = rule;
+              else delete next[String(albumId)];
+              void updatePrefs({ albumRules: next }).then(() => {
+                setCoverNote("Auto-add rule saved");
+                void import("../lib/albumRulesApply").then((m) =>
+                  m.applyAlbumRules().then((r) => {
+                    if (r.added > 0) setCoverNote(`Rule applied: ${r.added} photos added`);
+                  })
+                );
+              });
+            }}
+          />
+          <Button
+            title="Clear rule"
+            variant="text"
+            theme={theme}
+            onPress={() => {
+              const next = { ...(prefs.albumRules ?? {}) };
+              delete next[String(albumId)];
+              void updatePrefs({ albumRules: next }).then(() => {
+                setRuleFolder("");
+                setRuleTag("");
+                setRuleFavorite(false);
+                setCoverNote("Auto-add rule cleared");
+              });
+            }}
+          />
+        </View>
+
+        {albumId !== -1 && !isTrip ? (
+          <Button
+            title="Reset cover to newest"
+            variant="outlined"
+            theme={theme}
+            style={{ marginTop: 16 }}
+            onPress={() => {
+              void setAlbumCover(albumId, null).then(() => {
+                setCoverNote("Default cover restored");
+                setStyleDialog(false);
+                void useLibraryStore.getState().refreshMeta();
+              });
+            }}
+          />
+        ) : null}
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 16 }}>
+          <Button title="Done" variant="text" theme={theme} onPress={() => setStyleDialog(false)} />
+        </View>
+      </Dialog>
+
       {barVisible ? (
         <View
           style={[
@@ -911,6 +1417,30 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           >
             <Text style={{ color: theme.colors.primary }}>All</Text>
           </Pressable>
+          <Pressable
+            onPress={() => {
+              const next = new Set<string>();
+              for (const p of photos) if (!selection.has(p.id)) next.add(p.id);
+              setSelection(next);
+            }}
+            style={styles.selAction}
+          >
+            <Text style={{ color: theme.colors.primary }}>Invert</Text>
+          </Pressable>
+          {selection.size === 2 ? (
+            (() => {
+              const pair = photos.filter((p) => selection.has(p.id));
+              if (pair.length !== 2) return null;
+              return (
+                <Pressable
+                  onPress={() => navigation.navigate("Compare", { left: pair[0], right: pair[1] })}
+                  style={styles.selAction}
+                >
+                  <Text style={{ color: theme.colors.primary }}>{tr("viewer.compare")}</Text>
+                </Pressable>
+              );
+            })()
+          ) : null}
           <Pressable onPress={() => void favoriteSelected()} style={styles.selAction}>
             <Text style={{ color: theme.colors.primary }}>{allFav ? "Unfavorite" : "Favorite"}</Text>
           </Pressable>
@@ -937,6 +1467,74 @@ export function AlbumScreen({ route, navigation }: { route: any; navigation: any
           </Pressable>
         </View>
       ) : null}
+
+      <Sheet
+        visible={!!photoMenu}
+        theme={theme}
+        title={photoMenu?.filename ?? "Photo"}
+        onClose={() => setPhotoMenu(null)}
+      >
+        {photoMenu ? (
+          <View>
+            <ListRow
+              title="Open"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const item = photoMenu;
+                setPhotoMenu(null);
+                navigation.navigate("Viewer", { photos, index: photos.indexOf(item) });
+              }}
+            />
+            <ListRow
+              title="Set as album cover"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const item = photoMenu;
+                setPhotoMenu(null);
+                void setAlbumCover(albumId, item.id).then(() => {
+                  setCoverNote("Cover updated");
+                  void useLibraryStore.getState().refreshMeta();
+                });
+              }}
+            />
+            <ListRow
+              title="Select photos"
+              subtitle="Switch to the selection bar"
+              theme={theme}
+              showChevron
+              onPress={() => {
+                const item = photoMenu;
+                setPhotoMenu(null);
+                setSelectionMode(true);
+                setSelection(new Set([item.id]));
+              }}
+            />
+          </View>
+        ) : null}
+      </Sheet>
+
+      <Dialog
+        visible={confirmRemove}
+        theme={theme}
+        title={`Remove ${selection.size} photo${selection.size === 1 ? "" : "s"} from this album?`}
+        message="The photos stay in your library and in your channel."
+        onClose={() => setConfirmRemove(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setConfirmRemove(false), variant: "text" },
+          {
+            label: "Remove from album",
+            variant: "danger",
+            onPress: async () => {
+              const ids = Array.from(selection);
+              setConfirmRemove(false);
+              await removePhotosFromAlbum(albumId, ids);
+              clearSel();
+            },
+          },
+        ]}
+      />
     </View>
   );
 }
@@ -1021,17 +1619,23 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
     }, [filter])
   );
 
-  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
+  const { width: libraryWidth } = useResponsive();
+  const libraryColumns = libraryWidth >= 1000 ? 6 : libraryWidth >= 720 ? 5 : 3;
+  const tile = Math.floor((libraryWidth - spacing.seam * (libraryColumns - 1)) / libraryColumns);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.subHeader, { paddingTop: insets.top + 6 }]}>
         {route.params?.tab ? null : (
-          <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn} accessibilityLabel="Back" accessibilityRole="button">
             <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
           </Pressable>
         )}
-        <Text style={[styles.subTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
+        <Text
+          accessibilityRole="header"
+          style={[styles.subTitle, { color: theme.colors.onSurface }]}
+          numberOfLines={1}
+        >
           {title}
         </Text>
         <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, paddingRight: 12 }}>
@@ -1042,11 +1646,12 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
         <FlatList
           ref={listRef}
           data={photos}
-          numColumns={3}
+          numColumns={libraryColumns}
+          key={libraryColumns}
           keyExtractor={(p) => p.id}
           getItemLayout={(_, index) => {
             const length = tile;
-            return { length, offset: Math.floor(index / 3) * length, index };
+            return { length, offset: Math.floor(index / libraryColumns) * length, index };
           }}
           contentContainerStyle={{
             padding: 2,
@@ -1057,10 +1662,12 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
             const thumb = resolvePhotoThumb(item);
             return (
               <Pressable
-                style={{ width: tile, height: tile, padding: 1 }}
+                style={{ width: tile, height: tile, padding: spacing.seam / 2 }}
                 onPress={() =>
                   navigation.navigate("Viewer", { photos, index: photos.indexOf(item) })
                 }
+                accessibilityRole="button"
+                accessibilityLabel={`${item.filename}${item.status === "uploaded" ? ", backed up" : ""}`}
               >
                 <TelegramImage
                   fileId={thumb.fileId}
@@ -1088,11 +1695,22 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
             );
           }}
           ListEmptyComponent={
-            <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant, padding: 24 }]}>
-              {filter === "cloud"
-                ? "Nothing backed up yet. Tap ＋ in the gallery to start."
-                : "All caught up — every photo here is backed up to your channel."}
-            </Text>
+            <EmptyState
+              theme={theme}
+              art={<EmptyAlbumArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={104} />}
+              title={filter === "cloud" ? "Nothing backed up yet" : "All caught up"}
+              message={
+                filter === "cloud"
+                  ? "Turn on Auto sync in Settings, or share photos to PhotogramBot from any app."
+                  : "Every photo on this phone is backed up to your channel."
+              }
+              actionLabel={filter === "cloud" && !isDecoyActive() ? "Open backup settings" : undefined}
+              onAction={
+                filter === "cloud" && !isDecoyActive()
+                  ? () => navigation.navigate("Settings")
+                  : undefined
+              }
+            />
           }
         />
       )}
@@ -1172,7 +1790,10 @@ const styles = StyleSheet.create({
   albumGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: spacing.md,
+  },
+  group: {
+    marginBottom: spacing.sm,
   },
   albumCard: {
     borderRadius: 16,
@@ -1220,18 +1841,19 @@ const styles = StyleSheet.create({
   subHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingBottom: 8,
-    paddingHorizontal: 8,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+    paddingBottom: spacing.xs,
+    minHeight: touchTarget,
   },
   subTitle: {
+    ...typography.title,
     flex: 1,
-    fontSize: 18,
-    fontWeight: "700",
   },
   iconBtn: {
-    width: 40,
-    height: 40,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1317,3 +1939,145 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 });
+
+// 2x2 album cover mosaic: up to four newest member previews. Falls back to a
+// single cover when fewer than two previews are available.
+function AlbumCoverMosaic({
+  covers,
+  fallbackFileId,
+  width,
+  height,
+}: {
+  covers: string[] | undefined;
+  fallbackFileId: string | null;
+  width: number;
+  height: number;
+}) {
+  if (!covers || covers.length < 2) {
+    return <TelegramImage fileId={fallbackFileId} style={{ width, height }} />;
+  }
+  const items = covers.slice(0, 4);
+  return (
+    <View style={{ width, height, flexDirection: "row", flexWrap: "wrap" }}>
+      {items.map((fileId, i) => (
+        <TelegramImage
+          key={`${fileId}-${i}`}
+          fileId={fileId}
+          style={{ width: width / 2, height: height / 2 }}
+        />
+      ))}
+      {items.length < 4
+        ? Array.from({ length: 4 - items.length }).map((_, i) => (
+            <View
+              key={`empty-${i}`}
+              style={{ width: width / 2, height: height / 2, backgroundColor: "rgba(128,128,128,0.12)" }}
+            />
+          ))
+        : null}
+    </View>
+  );
+}
+
+const REORDER_ROW_HEIGHT = 54;
+
+function ReorderAlbumList({
+  albums,
+  theme,
+  onCommit,
+}: {
+  albums: AlbumWithCover[];
+  theme: ReturnType<typeof useTheme>;
+  onCommit: (ids: number[]) => void;
+}) {
+  const [items, setItems] = useState(albums);
+  useEffect(() => setItems(albums), [albums]);
+
+  const move = useCallback(
+    (from: number, to: number) => {
+      setItems((prev) => {
+        if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+        const next = [...prev];
+        const [item] = next.splice(from, 1);
+        next.splice(to, 0, item);
+        onCommit(next.map((a) => a.id));
+        return next;
+      });
+    },
+    [onCommit]
+  );
+
+  return (
+    <View style={{ marginHorizontal: 16 }}>
+      {items.map((album, index) => (
+        <ReorderRow
+          key={album.id}
+          index={index}
+          count={items.length}
+          label={album.name}
+          theme={theme}
+          onMove={move}
+        />
+      ))}
+      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginTop: 8 }}>
+        Drag a row by its handle to change the order.
+      </Text>
+    </View>
+  );
+}
+
+function ReorderRow({
+  index,
+  count,
+  label,
+  theme,
+  onMove,
+}: {
+  index: number;
+  count: number;
+  label: string;
+  theme: ReturnType<typeof useTheme>;
+  onMove: (from: number, to: number) => void;
+}) {
+  const translateY = useSharedValue(0);
+  const pan = Gesture.Pan()
+    .activateAfterLongPress(120)
+    .onUpdate((e) => {
+      translateY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      const delta = Math.round(e.translationY / REORDER_ROW_HEIGHT);
+      translateY.value = withSpring(0, { duration: 300, dampingRatio: 0.8 });
+      const target = Math.max(0, Math.min(count - 1, index + delta));
+      if (target !== index) runOnJS(onMove)(index, target);
+    });
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    zIndex: translateY.value === 0 ? 0 : 20,
+  }));
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        style={[
+          {
+            height: REORDER_ROW_HEIGHT,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            paddingHorizontal: 14,
+            marginBottom: 6,
+            borderRadius: 12,
+            backgroundColor: theme.colors.surface,
+          },
+          style,
+        ]}
+      >
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>☰</Text>
+        <Text style={{ color: theme.colors.onSurface, flex: 1 }} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>{index + 1}</Text>
+      </Animated.View>
+    </GestureDetector>
+  );
+}

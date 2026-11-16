@@ -2,13 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-} from "react-native";
+} from "../rn";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,13 +15,18 @@ import * as Sharing from "expo-sharing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { TelegramImage, resolvePhotoFull } from "../components/TelegramImage";
-import { CloudUploadIcon, DownloadIcon, HeartIcon, InfoIcon, ShareIcon, TrashIcon } from "../components/icons";
+import { ArrowLeftIcon, CloudUploadIcon, DownloadIcon, HeartIcon, InfoIcon, ShareIcon, TrashIcon } from "../components/icons";
 import { PhotoInfoSheet } from "../components/PhotoInfoSheet";
 import { savePhotoToDevice } from "../lib/restore";
+import { setSecureFlag } from "../../modules/share-intent";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto } from "../lib/destinations";
 import { isVideoMime } from "../lib/format";
+import { useResponsive } from "../lib/responsive";
+import { typography, touchTarget, overlay, fallback } from "../theme";
+import { hapticImpact, hapticSuccess } from "../lib/haptics";
 import type { PhotoRow } from "../lib/db";
 
 function CloudVideo({
@@ -34,8 +38,7 @@ function CloudVideo({
   mime: string | null;
   profileId?: string | null;
 }) {
-  const width = Dimensions.get("window").width;
-  const height = Dimensions.get("window").height;
+  const { width, height } = useResponsive();
   const style = { width, height: height * 0.92 };
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -63,14 +66,14 @@ function CloudVideo({
   if (failed) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: "#fff", fontSize: 13 }}>Could not download video. Tap Save to restore it.</Text>
+        <Text style={{ color: overlay.onMedia, fontSize: 13 }}>Could not download video. Tap Save to restore it.</Text>
       </View>
     );
   }
   if (!uri) {
     return (
       <View style={[style, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={overlay.onMedia} />
       </View>
     );
   }
@@ -93,6 +96,9 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
+  const autoHideChrome = useSettingsStore((s) => s.prefs.viewerAutoHideChrome);
+  const chromeDelaySec = useSettingsStore((s) => s.prefs.viewerChromeDelaySec);
+  const secureViewer = useSettingsStore((s) => s.prefs.secureViewer);
   const [saving, setSaving] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const zoomedRef = useRef(false);
@@ -104,11 +110,29 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
     (photo.remote_file_id || photo.preview_file_id || photo.thumb_file_id)
   );
 
+  // Screenshot / recents protection while a private photo is on screen.
+  useEffect(() => {
+    setSecureFlag(secureViewer);
+    return () => {
+      setSecureFlag(false);
+    };
+  }, [secureViewer]);
+
+  // Google Photos-style auto-hide: once the chrome is shown (or the photo
+  // changes), tuck it away again after the configured delay.
+  useEffect(() => {
+    if (!autoHideChrome || !chromeVisible || infoVisible) return;
+    const delay = Math.max(1, Math.min(15, chromeDelaySec || 3)) * 1000;
+    const timer = setTimeout(() => setChromeVisible(false), delay);
+    return () => clearTimeout(timer);
+  }, [autoHideChrome, chromeVisible, chromeDelaySec, infoVisible, index]);
+
   async function onSave() {
     if (!photo || saving) return;
     setSaving(true);
     try {
       await savePhotoToDevice(photo);
+      hapticSuccess();
       Alert.alert("Saved", "Photo saved to your device gallery.");
     } catch (e: any) {
       Alert.alert("Save failed", e?.message ?? "Could not download the photo.");
@@ -188,8 +212,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       }
     });
 
-  const width = Dimensions.get("window").width;
-  const height = Dimensions.get("window").height;
+  const { width, height } = useResponsive();
 
   const resolved = useMemo(
     () => (photo ? resolvePhotoFull(photo) : { fileId: null, localUri: null }),
@@ -197,7 +220,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
   );
 
   if (!photo) {
-    return <View style={[styles.container, { backgroundColor: "#000" }]} />;
+    return <View style={[styles.container, { backgroundColor: overlay.mediaCanvas }]} />;
   }
 
   return (
@@ -256,68 +279,110 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
       {chromeVisible ? (
         <>
           <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
-            <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
-              <Text style={[styles.iconText, { color: "#fff" }]}>←</Text>
+            <Pressable
+              onPress={() => navigation.goBack()}
+              style={styles.iconBtn}
+              accessibilityLabel="Back"
+              accessibilityRole="button"
+            >
+              <ArrowLeftIcon color={overlay.onMedia} size={22} />
             </Pressable>
-            <Text style={[styles.counter, { color: "#fff" }]}>
+            <Text
+              style={[styles.counter, { color: overlay.onMedia }]}
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={`Photo ${index + 1} of ${photos.length}`}
+            >
               {index + 1} / {photos.length}
             </Text>
-            <Pressable onPress={() => setInfoVisible(true)} style={styles.iconBtn}>
-              <Text style={[styles.iconText, { color: "#fff" }]}>ⓘ</Text>
+            <Pressable
+              onPress={() => setInfoVisible(true)}
+              style={styles.iconBtn}
+              accessibilityLabel="Photo info"
+              accessibilityRole="button"
+            >
+              <InfoIcon color={overlay.onMedia} size={22} />
             </Pressable>
           </View>
 
           <View
             style={[
               styles.bottomBar,
-              { backgroundColor: "rgba(0,0,0,0.55)", paddingBottom: insets.bottom + 10 },
+              { backgroundColor: overlay.mediaScrim, paddingBottom: insets.bottom + 10 },
             ]}
           >
-            <Pressable style={styles.actionBtn} onPress={() => void toggleFavorite(photo)}>
+            <Pressable
+              style={styles.actionBtn}
+              onPress={() => {
+                hapticImpact("light");
+                void toggleFavorite(photo);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={photo.favorite ? "Remove from favorites" : "Add to favorites"}
+              accessibilityState={{ selected: !!photo.favorite }}
+            >
               <HeartIcon
                 color={
                   photo.favorite
                     ? typeof theme.colors.favorite === "string"
                       ? theme.colors.favorite
-                      : "#FF8FA3"
-                    : "#fff"
+                      : fallback.favorite
+                    : overlay.onMedia
                 }
                 size={22}
                 filled={!!photo.favorite}
               />
-              <Text style={styles.actionLabel}>Favorite</Text>
+              <Text style={styles.actionLabel}>{photo.favorite ? "Favorited" : "Favorite"}</Text>
             </Pressable>
             {hasCloudCopy ? (
-              <Pressable style={styles.actionBtn} onPress={() => void onSave()}>
-                <DownloadIcon color="#fff" size={22} />
-                <Text style={styles.actionLabel}>Save</Text>
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => void onSave()}
+                accessibilityRole="button"
+                accessibilityLabel="Save to device"
+                accessibilityState={{ busy: saving }}
+              >
+                <DownloadIcon color={overlay.onMedia} size={22} />
+                <Text style={styles.actionLabel}>{saving ? "Saving…" : "Save"}</Text>
               </Pressable>
             ) : (
-              <Pressable style={styles.actionBtn} onPress={() => void onBackupNow()}>
-                <CloudUploadIcon
-                  color="#fff"
-                  size={22}
-                />
-                <Text style={styles.actionLabel}>
-                  {backingUp ? "Queued…" : "Back up"}
-                </Text>
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => void onBackupNow()}
+                accessibilityRole="button"
+                accessibilityLabel="Back up this photo"
+                accessibilityState={{ busy: backingUp }}
+              >
+                <CloudUploadIcon color={overlay.onMedia} size={22} />
+                <Text style={styles.actionLabel}>{backingUp ? "Queued…" : "Back up"}</Text>
               </Pressable>
             )}
             {isVideo && (photo.remote_file_id ?? photo.thumb_file_id) ? (
-              <Pressable style={styles.actionBtn} onPress={() => void onShareVideo()}>
-                <ShareIcon color="#fff" size={22} />
+              <Pressable
+                style={styles.actionBtn}
+                onPress={() => void onShareVideo()}
+                accessibilityRole="button"
+                accessibilityLabel="Share video"
+              >
+                <ShareIcon color={overlay.onMedia} size={22} />
                 <Text style={styles.actionLabel}>Share</Text>
               </Pressable>
             ) : null}
             <Pressable
               style={styles.actionBtn}
               onPress={() => trashPhotos([photo.id], false).then(() => navigation.goBack())}
+              accessibilityRole="button"
+              accessibilityLabel="Move to trash"
             >
-              <TrashIcon color="#fff" size={22} />
+              <TrashIcon color={overlay.onMedia} size={22} />
               <Text style={styles.actionLabel}>Trash</Text>
             </Pressable>
-            <Pressable style={styles.actionBtn} onPress={() => setInfoVisible(true)}>
-              <InfoIcon color="#fff" size={22} />
+            <Pressable
+              style={styles.actionBtn}
+              onPress={() => setInfoVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Photo info"
+            >
+              <InfoIcon color={overlay.onMedia} size={22} />
               <Text style={styles.actionLabel}>Info</Text>
             </Pressable>
           </View>
@@ -345,7 +410,7 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: overlay.mediaCanvas,
   },
   topBar: {
     position: "absolute",
@@ -358,8 +423,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   iconBtn: {
-    width: 44,
-    height: 44,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -367,8 +433,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   counter: {
-    fontSize: 14,
-    fontWeight: "600",
+    ...typography.bodyStrong,
   },
   bottomBar: {
     position: "absolute",
@@ -380,12 +445,13 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
+    minHeight: 52,
     alignItems: "center",
     justifyContent: "center",
   },
   actionLabel: {
-    color: "#fff",
-    fontSize: 11,
+    color: overlay.onMedia,
+    ...typography.caption,
     marginTop: 2,
   },
 });

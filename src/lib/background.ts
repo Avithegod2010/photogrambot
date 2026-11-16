@@ -45,8 +45,10 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
       prefs.lastFullSyncAt,
       Date.now() - prefs.autoSyncIntervalHours * 3600 * 1000
     );
-    const enqueued = await scanRecentAndEnqueue(since);
-    if (enqueued > 0) void processQueue();
+    await scanRecentAndEnqueue(since);
+    // Process even when the scan found nothing new: a queue left pending by a
+    // killed foreground session must resume on the next background wake-up.
+    void processQueue();
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     console.warn("Background sync task failed:", e);
@@ -122,8 +124,10 @@ TaskManager.defineTask(OVERNIGHT_CATCHUP_TASK, async () => {
       count += enqueued;
       await kvSet(NIGHT_DAY_KEY, today);
       await kvSet(NIGHT_COUNT_KEY, String(count));
-      void processQueue();
     }
+    // Same resume rule as the everyday task — an empty scan does not mean the
+    // pending queue is empty.
+    void processQueue();
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch (e) {
     console.warn("Overnight catch-up task failed:", e);

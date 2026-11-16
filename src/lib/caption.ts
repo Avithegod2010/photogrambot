@@ -1,4 +1,6 @@
-import { escapeHtml, formatDuration } from "./format";
+import { escapeHtml, formatDuration, formatTimestamp } from "./format";
+import { DEFAULT_CAPTION_FIELDS } from "./captionFields";
+import type { DateFormat } from "./settings";
 
 export interface CaptionMeta {
   filename: string;
@@ -30,11 +32,9 @@ export interface TechnicalExif {
   lens?: string | null;
 }
 
-function formatDate(ts: number | null | undefined): string {
+function formatDate(ts: number | null | undefined, format: DateFormat = "dmy"): string {
   if (!ts) return "";
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return formatTimestamp(ts, format);
 }
 
 function formatSize(bytes?: number | null): string {
@@ -49,31 +49,39 @@ function formatSize(bytes?: number | null): string {
   return `${size.toFixed(1)} ${units[i]}`;
 }
 
-export function buildCaption(meta: CaptionMeta): string {
-  const parts: string[] = [];
+export interface CaptionOptions {
+  /** Ordered field keys to include (see DEFAULT_CAPTION_FIELDS). */
+  fields?: string[];
+  dateFormat?: DateFormat;
+}
+
+export function buildCaption(meta: CaptionMeta, options: CaptionOptions = {}): string {
+  const format = options.dateFormat ?? "dmy";
+  const byKey: Record<string, string> = {};
+
   if (meta.versionTag && meta.versionTag > 1) {
-    parts.push(`✏️ <b>Edited version #v${meta.versionTag}</b> — replies to the previous upload`);
+    byKey.version = `✏️ <b>Edited version #v${meta.versionTag}</b> — replies to the previous upload`;
   }
-  parts.push(`📁 <b>File:</b> <code>${escapeHtml(meta.filename)}</code>`);
+  byKey.filename = `📁 <b>File:</b> <code>${escapeHtml(meta.filename)}</code>`;
   if (meta.path) {
-    parts.push(`📍 <b>Path:</b> <code>${escapeHtml(meta.path)}</code>`);
+    byKey.path = `📍 <b>Path:</b> <code>${escapeHtml(meta.path)}</code>`;
   }
   const sizeRes: string[] = [];
   const sizeStr = formatSize(meta.size ?? null);
   if (sizeStr) sizeRes.push(`💾 <b>Size: ${sizeStr}</b>`);
   if (meta.width && meta.height) sizeRes.push(`🖼 <b>Res: ${meta.width}×${meta.height}</b>`);
-  if (sizeRes.length) parts.push(sizeRes.join("  ·  "));
+  if (sizeRes.length) byKey.size = sizeRes.join("  ·  ");
   if (meta.duration && meta.duration > 0) {
-    parts.push(`⏱ <b>Duration:</b> ${formatDuration(meta.duration)}`);
+    byKey.duration = `⏱ <b>Duration:</b> ${formatDuration(meta.duration)}`;
   }
   if (meta.dateTaken) {
-    parts.push(`📅 <b>Date taken:</b> <code>${formatDate(meta.dateTaken)}</code>`);
+    byKey.dateTaken = `📅 <b>Date taken:</b> <code>${formatDate(meta.dateTaken, format)}</code>`;
   }
   if (meta.dateAdded) {
-    parts.push(`🕒 <b>Date added:</b> <code>${formatDate(meta.dateAdded)}</code>`);
+    byKey.dateAdded = `🕒 <b>Date added:</b> <code>${formatDate(meta.dateAdded, format)}</code>`;
   }
   if (meta.camera) {
-    parts.push(`📱 <b>Camera:</b> <i>${escapeHtml(meta.camera)}</i>`);
+    byKey.camera = `📱 <b>Camera:</b> <i>${escapeHtml(meta.camera)}</i>`;
   }
   if (meta.technical) {
     const tech: string[] = [];
@@ -81,27 +89,42 @@ export function buildCaption(meta: CaptionMeta): string {
     if (meta.technical.shutter) tech.push(`${meta.technical.shutter}s`);
     if (meta.technical.iso) tech.push(`ISO ${meta.technical.iso}`);
     if (meta.technical.focalLength) tech.push(`${meta.technical.focalLength}mm`);
-    if (tech.length) parts.push(`🎛 <b>Exposure:</b> ${tech.join(" · ")}`);
+    if (tech.length) byKey.exposure = `🎛 <b>Exposure:</b> ${tech.join(" · ")}`;
     if (meta.technical.lens) {
-      parts.push(`🔍 <b>Lens:</b> <i>${escapeHtml(meta.technical.lens)}</i>`);
+      byKey.lens = `🔍 <b>Lens:</b> <i>${escapeHtml(meta.technical.lens)}</i>`;
     }
   }
   if (meta.gps) {
-    parts.push(`🌍 <b>Coords:</b> <code>${meta.gps.lat.toFixed(6)}, ${meta.gps.lon.toFixed(6)}</code>`);
+    byKey.gps = `🌍 <b>Coords:</b> <code>${meta.gps.lat.toFixed(6)}, ${meta.gps.lon.toFixed(6)}</code>`;
   }
   if (meta.aiDescription) {
-    parts.push(`🤖 <i>${escapeHtml(meta.aiDescription)}</i>`);
+    byKey.ai = `🤖 <i>${escapeHtml(meta.aiDescription)}</i>`;
   }
   const tagLine: string[] = meta.tags.map((t) => `#${t}`);
   if (meta.device) {
     tagLine.push(`#device:${meta.device}`);
   }
   if (tagLine.length) {
-    parts.push(tagLine.join(" "));
+    byKey.tags = tagLine.join(" ");
   }
   if (meta.hash) {
-    parts.push(`#hash: ${meta.hash}`);
+    byKey.hash = `#hash: ${meta.hash}`;
   }
+
+  // The user-controlled order/filter. An empty/missing list means "all fields
+  // in the natural order" so older backups and fresh installs behave the same.
+  const requested = [
+    ...(options.fields && options.fields.length > 0 ? options.fields : DEFAULT_CAPTION_FIELDS),
+  ];
+  // The hash is the restore/dedupe key for multi-device ingest — never drop it
+  // even if the user hides it in the caption editor.
+  if (!requested.includes("hash")) requested.push("hash");
+  const parts: string[] = [];
+  for (const key of requested) {
+    const part = byKey[key];
+    if (part) parts.push(part);
+  }
+
   // Telegram caps captions at 1024 and rejects unbalanced HTML — assemble
   // greedily line-by-line instead of blind-slicing mid-tag.
   const out: string[] = [];

@@ -1,18 +1,34 @@
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isDecoyActive } from "./applock";
+import { DEFAULT_CAPTION_FIELDS } from "./captionFields";
+import type { VideoCompressionTarget } from "./videoCompress";
+import type { RemoteAdmin } from "./remoteAuth";
+
+export { DEFAULT_CAPTION_FIELDS, CAPTION_FIELD_LABELS } from "./captionFields";
 
 const TOKEN_KEY = "pb_bot_token";
 const CHANNEL_KEY = "pb_channel_id";
 const DEVICE_KEY = "pb_device_id";
 const AI_KEY = "pb_ai_api_key";
+const TAGGING_KEY = "pb_tag_api_key";
 const BACKUP_PASS_KEY = "pb_backup_pass";
+const DECOY_TOKEN_KEY = "pb_decoy_bot_token";
+const DECOY_CHANNEL_KEY = "pb_decoy_channel_id";
 
 export type UploadQuality = "document" | "photo";
-export type ThemeMode = "dark" | "amoled" | "light";
+export type ThemeMode = "dark" | "amoled" | "light" | "system";
+export type DateFormat = "locale" | "dmy" | "mdy" | "iso";
+export type TileAspect = "square" | "original";
+export type MapStyle = "standard" | "satellite" | "hybrid" | "terrain";
+export type AppIconVariant = string;
+export type InfoDensity = "compact" | "detailed";
 
 export const DEFAULT_AI_PROMPT =
   "Describe this photo in one concise, natural sentence (max 20 words). " +
   "Only state what is visible: subjects, setting, and notable objects.";
+
+
 
 export interface Prefs {
   uploadPreviews: boolean;
@@ -28,15 +44,64 @@ export interface Prefs {
   theme: ThemeMode;
   dynamicColor: boolean;
   staggeredGrid: boolean;
+  // Look & feel (customisation round).
+  themeSchedule: boolean;
+  themeScheduleStart: number;
+  themeScheduleEnd: number;
+  accentColor: string;
+  appDisplayName: string;
+  albumAccents: Record<string, string>;
+  gridColumns: number;
+  tileAspect: TileAspect;
+  compactGrid: boolean;
+  showCloudBadge: boolean;
+  showVideoBadge: boolean;
+  showFavoriteBadge: boolean;
+  showStatusBadge: boolean;
+  showDateCounts: boolean;
+  mapStyle: MapStyle;
+  viewerAutoHideChrome: boolean;
+  viewerChromeDelaySec: number;
+  slideshowIntervalSec: number;
+  slideshowShuffle: boolean;
+  infoSheetDensity: InfoDensity;
+  skeletonLoading: boolean;
+  haptics: boolean;
+  widgetShowDate: boolean;
+  widgetCompact: boolean;
+  fontScale: number;
+  fontFamily: "system" | "serif" | "sans-serif-condensed" | "monospace";
+  language: string;
+  dateFormat: DateFormat;
+  captionFields: string[];
+  appIconVariant: AppIconVariant;
+  splashAccent: boolean;
+  notificationAccent: boolean;
   appLock: boolean;
+  secureViewer: boolean;
+  autoLockTimeoutSec: number;
+  panicWipeEnabled: boolean;
+  decoyAlbumNames: string[];
   trashAutoPurgeDays: number;
   dbAutoBackup: boolean;
   aiCaptions: boolean;
   aiModel: string;
   aiPrompt: string;
+  mlModelUrls: Record<string, string>;
+  autoMlIndex: boolean;
+  notifyProgress: boolean;
+  notifyComplete: boolean;
+  notifyFailed: boolean;
+  notifyQuiet: boolean;
+  notifyQuietStart: number;
+  notifyQuietEnd: number;
+  searchHistory: string[];
+  albumRules: Record<string, { folder?: string; tag?: string; favorite?: boolean }>;
   includeVideos: boolean;
+  videoCompression: VideoCompressionTarget;
   dbBackupEncrypt: boolean;
   dbBackupIncludeToken: boolean;
+  dbEncryption: boolean;
   nearDupGuard: boolean;
   multiDestination: boolean;
   weeklyDigest: boolean;
@@ -46,6 +111,14 @@ export interface Prefs {
   mirrorEnabled: boolean;
   mirrorProfileId: string;
   widgetFavoritesOnly: boolean;
+  remoteAdmins: RemoteAdmin[];
+  webhookMode: boolean;
+  webhookRelayUrl: string;
+  webhookSecret: string;
+  publicReadOnly: boolean;
+  crashReporting: boolean;
+  crashEndpoint: string;
+  devicePaused: boolean;
   lastFullSyncAt: number;
   updatesOffset: number;
   deviceId: string;
@@ -66,15 +139,63 @@ export const defaultPrefs: Prefs = {
   theme: "dark",
   dynamicColor: false,
   staggeredGrid: false,
+  themeSchedule: false,
+  themeScheduleStart: 20 * 60,
+  themeScheduleEnd: 7 * 60,
+  accentColor: "default",
+  appDisplayName: "PhotogramBot",
+  albumAccents: {},
+  gridColumns: 3,
+  tileAspect: "square",
+  compactGrid: false,
+  showCloudBadge: true,
+  showVideoBadge: true,
+  showFavoriteBadge: true,
+  showStatusBadge: true,
+  showDateCounts: true,
+  mapStyle: "standard",
+  viewerAutoHideChrome: true,
+  viewerChromeDelaySec: 3,
+  slideshowIntervalSec: 5,
+  slideshowShuffle: false,
+  infoSheetDensity: "detailed",
+  skeletonLoading: true,
+  haptics: true,
+  widgetShowDate: true,
+  widgetCompact: false,
+  fontScale: 1,
+  fontFamily: "system",
+  language: "system",
+  dateFormat: "locale",
+  captionFields: [...DEFAULT_CAPTION_FIELDS],
+  appIconVariant: "default",
+  splashAccent: false,
+  notificationAccent: true,
   appLock: false,
+  secureViewer: true,
+  autoLockTimeoutSec: 0,
+  panicWipeEnabled: false,
+  decoyAlbumNames: [],
   trashAutoPurgeDays: 30,
   dbAutoBackup: true,
   aiCaptions: false,
   aiModel: "gemini-2.5-flash",
   aiPrompt: DEFAULT_AI_PROMPT,
+  mlModelUrls: {},
+  autoMlIndex: false,
+  notifyProgress: true,
+  notifyComplete: true,
+  notifyFailed: true,
+  notifyQuiet: false,
+  notifyQuietStart: 22 * 60,
+  notifyQuietEnd: 7 * 60,
+  searchHistory: [],
+  albumRules: {},
   includeVideos: false,
+  videoCompression: "off",
   dbBackupEncrypt: false,
   dbBackupIncludeToken: false,
+  dbEncryption: false,
   nearDupGuard: true,
   multiDestination: false,
   weeklyDigest: false,
@@ -84,14 +205,54 @@ export const defaultPrefs: Prefs = {
   mirrorEnabled: false,
   mirrorProfileId: "",
   widgetFavoritesOnly: false,
+  remoteAdmins: [],
+  webhookMode: false,
+  webhookRelayUrl: "",
+  webhookSecret: "",
+  publicReadOnly: false,
+  crashReporting: false,
+  crashEndpoint: "",
+  devicePaused: false,
   lastFullSyncAt: 0,
   updatesOffset: 0,
   deviceId: "",
   deviceName: "",
 };
 
+// A decoy session can be pointed at a separate bot/channel. Real credentials
+// are never returned while the decoy is active when a decoy pair is configured.
+export async function getDecoyBotToken(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(DECOY_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setDecoyBotToken(token: string | null): Promise<void> {
+  if (token === null) await SecureStore.deleteItemAsync(DECOY_TOKEN_KEY);
+  else await SecureStore.setItemAsync(DECOY_TOKEN_KEY, token);
+}
+
+export async function getDecoyChannelId(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(DECOY_CHANNEL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setDecoyChannelId(id: string | null): Promise<void> {
+  if (id === null) await SecureStore.deleteItemAsync(DECOY_CHANNEL_KEY);
+  else await SecureStore.setItemAsync(DECOY_CHANNEL_KEY, id);
+}
+
 export async function getBotToken(): Promise<string | null> {
   try {
+    if (isDecoyActive()) {
+      const decoy = await getDecoyBotToken();
+      if (decoy) return decoy;
+    }
     return await SecureStore.getItemAsync(TOKEN_KEY);
   } catch {
     return null;
@@ -108,6 +269,10 @@ export async function setBotToken(token: string | null): Promise<void> {
 
 export async function getChannelId(): Promise<string | null> {
   try {
+    if (isDecoyActive()) {
+      const decoy = await getDecoyChannelId();
+      if (decoy) return decoy;
+    }
     return await SecureStore.getItemAsync(CHANNEL_KEY);
   } catch {
     return null;
@@ -151,6 +316,27 @@ export async function setAiApiKey(key: string | null): Promise<void> {
   }
 }
 
+export async function getTaggingApiKey(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(TAGGING_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setTaggingApiKey(key: string | null): Promise<void> {
+  if (key === null || key.trim() === "") {
+    await SecureStore.deleteItemAsync(TAGGING_KEY);
+  } else {
+    await SecureStore.setItemAsync(TAGGING_KEY, key.trim());
+  }
+}
+
+/** Tagging uses its own key when set, otherwise the captioning key. */
+export async function getEffectiveTaggingKey(): Promise<string | null> {
+  return (await getTaggingApiKey()) ?? (await getAiApiKey());
+}
+
 export async function getBackupPassphrase(): Promise<string | null> {
   try {
     return await SecureStore.getItemAsync(BACKUP_PASS_KEY);
@@ -178,9 +364,19 @@ export async function loadPrefs(): Promise<Prefs> {
   }
 }
 
+// Serialize the read-modify-write. Two settings taps in the same tick used to
+// both read the old blob and the second write silently discarded the first
+// patch (e.g. toggling Auto sync and Wi-Fi-only quickly). The chain also keeps
+// going after a failed write; the caller still sees that write's rejection.
+let prefWriteChain: Promise<unknown> = Promise.resolve();
+
 export async function savePrefs(patch: Partial<Prefs>): Promise<Prefs> {
-  const current = await loadPrefs();
-  const next = { ...current, ...patch };
-  await AsyncStorage.setItem("pb_prefs", JSON.stringify(next));
-  return next;
+  const write = prefWriteChain.then(async () => {
+    const current = await loadPrefs();
+    const next = { ...current, ...patch };
+    await AsyncStorage.setItem("pb_prefs", JSON.stringify(next));
+    return next;
+  });
+  prefWriteChain = write.catch(() => undefined);
+  return write;
 }
