@@ -98,10 +98,66 @@ eas build -p android --profile production
 > step has nothing to do and can hang for many minutes on a slow disk. Set
 > `EAS_SKIP_AUTO_FINGERPRINT=1` before `eas build` to skip it.
 
-Local build (debug only — no `dl.google.com` needed because deps are cached):
+### Local build (no EAS quota needed) — **works, verified 2026-11-16**
 
-```bash
-set JAVA_HOME=<JDK 17>
+EAS cloud builds are quota-limited. A full local **release** build (JS embedded,
+runs standalone, behaves like the EAS preview) completes in about an hour on this
+8 GB box. Use it when the EAS quota is exhausted.
+
+```bat
+set JAVA_HOME=E:\Dev\jdk\jdk-17.0.20+8
+set ANDROID_HOME=E:\Dev\android-sdk
+set GRADLE_OPTS=-Xmx1536m -XX:MaxMetaspaceSize=512m
+cd android
+gradlew.bat :app:assembleRelease ^
+  -PreactNativeArchitectures=arm64-v8a ^
+  -Pandroid.enableMinifyInReleaseBuilds=false ^
+  -Pandroid.enableShrinkResourcesInReleaseBuilds=false ^
+  -Pkotlin.compiler.execution.strategy=in-process ^
+  -Dkotlin.compiler.execution.strategy=in-process ^
+  -Dorg.gradle.internal.repository.max.tentatives=5 ^
+  -Dorg.gradle.internal.http.connectionTimeout=120000 ^
+  -Dorg.gradle.internal.http.socketTimeout=180000 ^
+  --no-daemon --max-workers=2 --no-parallel
+```
+
+Output: `android/app/build/outputs/apk/release/app-release.apk`.
+
+**Do not add `--offline`.** It blocks the Kotlin JVM plugin that
+`expo-updates/expo-updates-gradle-plugin/build.gradle.kts` requires, and the
+resulting error is often swallowed by the client log (check
+`E:\Dev\.gradle\daemon\<ver>\daemon-*.log` when a build exits 1 with no output).
+
+**Do not build while the sibling project (`..\photogram`) is running Gradle.**
+Both share `E:\Dev\.gradle`, and concurrent builds deadlock on
+`Timeout waiting to lock file hash cache`. Check with
+`Get-CimInstance Win32_Process -Filter "Name='java.exe'"` first, or run this
+project with its own `GRADLE_USER_HOME`.
+
+R8/minify and resource shrinking are disabled above for speed and memory; the
+APK is larger but behaviour is identical to the EAS build.
+
+Signing: when `android/pb-release-signing.properties` points at a missing
+keystore, park it as `.disabled` so the release config falls back to
+`android/app/debug.keystore`. That makes the APK installable over the existing
+debug-signed install with `adb install -r` (data preserved). Restore the file
+afterwards.
+
+Verify the artifact before installing:
+
+```bat
+aapt2 dump badging app\build\outputs\apk\release\app-release.apk
+apksigner verify --print-certs app\build\outputs\apk\release\app-release.apk
+```
+
+Expected: `versionName` matching `android/version.properties`, and signer
+SHA-256 `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`
+(debug keystore) for a side-loadable build.
+
+Debug build (fastest loop, but needs Metro running):
+
+```bat
+set JAVA_HOME=E:\Dev\jdk\jdk-17.0.20+8
 cd android
 gradlew.bat assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
