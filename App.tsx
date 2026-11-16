@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, AppState, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
+import { markStartup, finishStartup } from "./src/lib/startup";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, Linking, Pressable, StyleSheet, Text, View } from "./src/rn";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useSetupStore } from "./src/store/useSetupStore";
 import { useSettingsStore, useDeviceStore } from "./src/store/useSettingsStore";
@@ -23,13 +24,41 @@ import {
   MonthsOfYearScreen,
   PeriodPhotosScreen,
 } from "./src/screens/PeriodScreens";
-import { MapScreen } from "./src/screens/MapScreen";
-import { MaintenanceScreen } from "./src/screens/MaintenanceScreen";
 import { UploadQueueScreen } from "./src/screens/UploadQueueScreen";
 import { FreeUpSpaceScreen } from "./src/screens/FreeUpSpaceScreen";
 import { DestinationsScreen } from "./src/screens/DestinationsScreen";
-import { SearchResultsScreen } from "./src/screens/SearchResultsScreen";
-import { SimilarScreen } from "./src/screens/SimilarScreen";
+import { SlideshowScreen } from "./src/screens/SlideshowScreen";
+import { CompareScreen } from "./src/screens/CompareScreen";
+
+// Heavy, less-frequently-opened screens are evaluated on first navigation.
+const LazyMapScreen = React.lazy(() =>
+  import("./src/screens/MapScreen").then((m) => ({ default: m.MapScreen }))
+);
+const LazyMaintenanceScreen = React.lazy(() =>
+  import("./src/screens/MaintenanceScreen").then((m) => ({ default: m.MaintenanceScreen }))
+);
+const LazySearchResultsScreen = React.lazy(() =>
+  import("./src/screens/SearchResultsScreen").then((m) => ({ default: m.SearchResultsScreen }))
+);
+const LazySimilarScreen = React.lazy(() =>
+  import("./src/screens/SimilarScreen").then((m) => ({ default: m.SimilarScreen }))
+);
+const LazyPeopleScreen = React.lazy(() =>
+  import("./src/screens/PeopleScreen").then((m) => ({ default: m.PeopleScreen }))
+);
+const LazyAskScreen = React.lazy(() =>
+  import("./src/screens/AskScreen").then((m) => ({ default: m.AskScreen }))
+);
+const LazyBestOfScreen = React.lazy(() =>
+  import("./src/screens/BestOfScreen").then((m) => ({ default: m.BestOfScreen }))
+);
+const LazyRemoteScreen = React.lazy(() =>
+  import("./src/screens/RemoteScreen").then((m) => ({ default: m.RemoteScreen }))
+);
+const LazySyncScreen = React.lazy(() =>
+  import("./src/screens/SyncScreen").then((m) => ({ default: m.SyncScreen }))
+);
+markStartup("app-module");
 import { pollUpdates } from "./src/lib/updates";
 import { canAutoSyncNow, scanRecentAndEnqueue } from "./src/lib/sync";
 import { startCameraWatch, stopCameraWatch } from "./src/lib/watcher";
@@ -49,13 +78,44 @@ import { processQueue } from "./src/lib/uploader";
 import { purgeExpiredTrash, kvGet, kvSet } from "./src/lib/db";
 import { uploadBackupToChannel } from "./src/lib/backup";
 import { isHexColor, readableOn } from "./src/lib/appearance";
+import { fallback, motion } from "./src/theme";
+import { useReducedMotion } from "./src/useReducedMotion";
+import Reanimated, {
+  Easing as REasing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { hapticSelection } from "./src/lib/haptics";
+import { installCrashHandler } from "./src/lib/crashlog";
+import { installCrashReporter, startStallWatchdog, flushCrashReports } from "./src/lib/crashReport";
+import { t, isRTLLanguage, resolveLanguage } from "./src/lib/i18n";
+import { I18nManager } from "./src/rn";
+import { ErrorBoundary } from "./src/components/ErrorBoundary";
+
+// Record uncaught JS errors in the on-device diagnostics log and queue them
+// for the opt-in crash reporter. The stall watchdog approximates ANR detection.
+installCrashHandler();
+installCrashReporter();
+startStallWatchdog();
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const navigationRef = createNavigationContainerRef<any>();
 
 async function openPhotoFromUrl(url: string | null): Promise<void> {
-  if (!url || !url.startsWith("photogrambot://photo/")) return;
+  if (!url) return;
+  if (url.startsWith("photogrambot://capture")) {
+    if (!isDecoyActive()) void captureFromWidget();
+    return;
+  }
+  if (url.startsWith("photogrambot://slideshow")) {
+    if (!isDecoyActive() && navigationRef.isReady()) {
+      navigationRef.navigate("Slideshow", { title: "Slideshow" });
+    }
+    return;
+  }
+  if (!url.startsWith("photogrambot://photo/")) return;
   if (isDecoyActive()) return;
   const id = url.replace("photogrambot://photo/", "").split("?")[0];
   if (!id) return;
@@ -66,6 +126,48 @@ async function openPhotoFromUrl(url: string | null): Promise<void> {
       navigationRef.navigate("Viewer", { photos: [photo], index: 0 });
     }
   } catch {}
+}
+
+/** Quick-capture widget: camera -> cache copy -> normal upload queue. */
+async function captureFromWidget(): Promise<void> {
+  try {
+    const ImagePicker = await import("expo-image-picker");
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Camera permission", "Allow camera access to use quick capture.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const { File, Paths } = await import("expo-file-system");
+    const name = asset.fileName ?? `capture_${Date.now()}.jpg`;
+    const dest = new File(Paths.cache, `pb_capture_${Date.now()}_${name}`);
+    await new File(asset.uri).copy(dest);
+    const { enqueueUploads, processQueue } = await import("./src/lib/uploader");
+    const n = await enqueueUploads(
+      [
+        {
+          local_id: `capture_${dest.uri}`,
+          local_uri: dest.uri,
+          filename: name,
+          folder: "Camera",
+          size: dest.size || null,
+          width: asset.width ?? null,
+          height: asset.height ?? null,
+          taken_at: Date.now(),
+          added_at: Date.now(),
+        },
+      ],
+      "manual"
+    );
+    if (n > 0) {
+      void processQueue();
+      Alert.alert("Captured", "The photo was queued for backup to your channel.");
+    }
+  } catch (e: any) {
+    Alert.alert("Quick capture failed", e?.message ?? "Could not open the camera.");
+  }
 }
 
 // Notification tap-actions (#10): a failed-uploads notification carries
@@ -88,11 +190,12 @@ function navigateToNotificationScreen(screen: string): void {
 }
 
 function CloudTab(props: any) {
-  // Telephoto-style Cloud tab — reuses LibraryScreen's uploaded-photo grid.
+  // Telephoto-style Cloud tab - reuses LibraryScreen's uploaded-photo grid.
+  const language = useSettingsStore((s) => s.prefs.language);
   return (
     <LibraryScreen
       {...props}
-      route={{ ...props.route, params: { filter: "cloud", title: "Cloud", tab: true } }}
+      route={{ ...props.route, params: { filter: "cloud", title: t("tabs.cloud", language), tab: true } }}
     />
   );
 }
@@ -103,48 +206,127 @@ function SettingsTabPlaceholder() {
   return null;
 }
 
+/** Material 3 navigation-bar item: an animated pill behind the active icon. */
+function TabIcon({
+  focused,
+  activeBackground,
+  children,
+}: {
+  focused: boolean;
+  activeBackground: any;
+  children: React.ReactNode;
+}) {
+  const reduce = useReducedMotion();
+  const p = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    p.value = withTiming(focused ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: REasing.bezier(...motion.easing),
+    });
+  }, [focused, reduce, p]);
+  const pillStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 0.9 + p.value * 0.1 }],
+    opacity: 0.72 + p.value * 0.28,
+  }));
+  return (
+    <Reanimated.View
+      style={[
+        styles.tabPill,
+        focused && { backgroundColor: activeBackground },
+        pillStyle,
+      ]}
+    >
+      {children}
+    </Reanimated.View>
+  );
+}
+
 function Tabs() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const language = useSettingsStore((s) => s.prefs.language);
   return (
     <Tab.Navigator
+      screenListeners={{
+        tabPress: () => hapticSelection(),
+      }}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor:
           typeof theme.colors.primary === "string"
             ? (theme.colors.primary as string)
-            : "#A8C7FA",
+            : fallback.primary,
         tabBarInactiveTintColor:
           typeof theme.colors.onSurfaceVariant === "string"
             ? (theme.colors.onSurfaceVariant as string)
-            : "#C4C6D0",
+            : fallback.onSurfaceVariant,
         tabBarStyle: {
           backgroundColor: theme.colors.surfaceContainer,
           borderTopColor: theme.colors.outlineVariant,
+          // Material 3 navigation bar: 32 dp active indicator + label. The
+          // gesture bar sits inside the system inset; reserve it so the labels
+          // never collide with the home indicator (some devices report 0).
+          height: 64 + Math.max(insets.bottom, 24),
+          paddingTop: 4,
+          paddingBottom: Math.max(insets.bottom, 24),
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarLabel: ({ color, children }) => (
+          <Text
+            maxFontSizeMultiplier={1.6}
+            numberOfLines={1}
+            style={{ fontSize: 11, fontWeight: "600", color }}
+          >
+            {children}
+          </Text>
+        ),
       }}
     >
       <Tab.Screen
         name="GalleryTab"
         component={GalleryScreen}
-        options={{ title: "Gallery", tabBarIcon: ({ color }) => <PhotoFrameIcon color={color} /> }}
+        options={{
+          title: t("tabs.gallery", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <PhotoFrameIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="CloudTab"
         component={CloudTab}
-        options={{ title: "Cloud", tabBarIcon: ({ color }) => <CloudIcon color={color} /> }}
+        options={{
+          title: t("tabs.cloud", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <CloudIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="CollectionsTab"
         component={CollectionsScreen}
-        options={{ title: "Collections", tabBarIcon: ({ color }) => <SearchIcon color={color} /> }}
+        options={{
+          title: t("tabs.collections", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <SearchIcon color={color} />
+            </TabIcon>
+          ),
+        }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsTabPlaceholder}
         options={{
-          title: "Settings",
-          tabBarIcon: ({ color }) => <GearIcon color={color} />,
+          title: t("tabs.settings", language),
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} activeBackground={theme.colors.secondaryContainer}>
+              <GearIcon color={color} />
+            </TabIcon>
+          ),
           tabBarButton: (props) => (
             <Pressable
               {...(props as any)}
@@ -152,6 +334,7 @@ function Tabs() {
               accessibilityLabel="Settings"
               onPress={() => {
                 // A decoy session must not expose the real settings entry.
+                hapticSelection();
                 if (!isDecoyActive()) navigationRef.navigate("Settings");
               }}
             />
@@ -173,12 +356,39 @@ function Splash() {
   return (
     <View style={[styles.splash, { backgroundColor: bg }]}>
       <Image source={require("./assets/icon.png")} style={styles.splashLogo} />
-      <ActivityIndicator color={useAccent ? fg : "#A8C7FA"} />
+      <ActivityIndicator color={useAccent ? fg : fallback.primary} />
       <Text style={[styles.splashText, { color: fg }]}>
         Starting {appDisplayName || "PhotogramBot"}…
       </Text>
     </View>
   );
+}
+
+function ThemeFade({ children }: { children: React.ReactNode }) {
+  const resolvedTheme = useSettingsStore((s) => s.resolvedTheme);
+  const accentColor = useSettingsStore((s) => s.prefs.accentColor);
+  const reduce = useReducedMotion();
+  const opacity = useRef(new Animated.Value(1)).current;
+  const keyRef = useRef(`${resolvedTheme}:${accentColor}`);
+  useEffect(() => {
+    const next = `${resolvedTheme}:${accentColor}`;
+    if (next === keyRef.current) return;
+    keyRef.current = next;
+    // Reduced motion: swap instantly. The colour change still explains
+    // itself; only the fade is movement.
+    if (reduce) {
+      opacity.setValue(1);
+      return;
+    }
+    opacity.setValue(0.35);
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: motion.slow,
+      easing: Easing.bezier(...motion.easing),
+      useNativeDriver: true,
+    }).start();
+  }, [resolvedTheme, accentColor, opacity, reduce]);
+  return <Animated.View style={{ flex: 1, opacity }}>{children}</Animated.View>;
 }
 
 function Root({ locked, initialized }: { locked: boolean; initialized: boolean }) {
@@ -192,6 +402,8 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
+          markStartup("nav");
+          void finishStartup();
           void Linking.getInitialURL().then(openPhotoFromUrl);
           if (pendingNotificationScreen) {
             const screen = pendingNotificationScreen;
@@ -200,6 +412,7 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           }
         }}
       >
+        <React.Suspense fallback={<Splash />}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Main" component={Tabs} />
           <Stack.Screen
@@ -209,17 +422,33 @@ function Root({ locked, initialized }: { locked: boolean; initialized: boolean }
           />
           <Stack.Screen name="Album" component={AlbumScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="Remote" component={LazyRemoteScreen} />
+          <Stack.Screen name="Sync" component={LazySyncScreen} />
           <Stack.Screen name="FolderSync" component={FolderSyncScreen} />
-          <Stack.Screen name="Map" component={MapScreen} options={{ presentation: "fullScreenModal" }} />
+          <Stack.Screen name="Map" component={LazyMapScreen} options={{ presentation: "fullScreenModal" }} />
           <Stack.Screen name="MonthsOfYear" component={MonthsOfYearScreen} />
           <Stack.Screen name="PeriodPhotos" component={PeriodPhotosScreen} />
-          <Stack.Screen name="Maintenance" component={MaintenanceScreen} />
+          <Stack.Screen name="Maintenance" component={LazyMaintenanceScreen} />
           <Stack.Screen name="UploadQueue" component={UploadQueueScreen} />
           <Stack.Screen name="FreeUpSpace" component={FreeUpSpaceScreen} />
           <Stack.Screen name="Destinations" component={DestinationsScreen} />
-          <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
-          <Stack.Screen name="Similar" component={SimilarScreen} />
+          <Stack.Screen name="SearchResults" component={LazySearchResultsScreen} />
+          <Stack.Screen name="Similar" component={LazySimilarScreen} />
+          <Stack.Screen name="People" component={LazyPeopleScreen} />
+          <Stack.Screen name="Ask" component={LazyAskScreen} />
+          <Stack.Screen name="BestOf" component={LazyBestOfScreen} />
+          <Stack.Screen
+            name="Slideshow"
+            component={SlideshowScreen}
+            options={{ presentation: "fullScreenModal", animation: "fade" }}
+          />
+          <Stack.Screen
+            name="Compare"
+            component={CompareScreen}
+            options={{ presentation: "fullScreenModal", animation: "fade" }}
+          />
         </Stack.Navigator>
+        </React.Suspense>
       </NavigationContainer>
     );
   }
@@ -289,8 +518,18 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await loadSettings();
+      markStartup("settings");
+      // Opt-in crash reports from the previous session, best-effort.
+      void flushCrashReports();
+      // Apply the persisted language direction. Android only re-lays out on
+      // the next launch, which is why Settings asks for a restart.
+      I18nManager.allowRTL(true);
+      const lang = useSettingsStore.getState().prefs.language;
+      const rtl = isRTLLanguage(resolveLanguage(lang));
+      if (I18nManager.isRTL !== rtl) I18nManager.forceRTL(rtl);
       await ensureDeviceId();
       await initialize();
+      markStartup("db");
       // Resolve the lock state from freshly loaded prefs BEFORE the first
       // non-splash paint, or an app-locked device flashes the gallery a frame.
       setLocked(useSettingsStore.getState().prefs.appLock);
@@ -333,11 +572,30 @@ export default function App() {
     };
   }, [step, locked]);
 
+  const backgroundedAt = useRef<number | null>(null);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "background" && useSettingsStore.getState().prefs.appLock) {
-        setDecoyActive(false);
-        setLocked(true);
+      const prefs = useSettingsStore.getState().prefs;
+      if (!prefs.appLock) return;
+      if (state === "background") {
+        backgroundedAt.current = Date.now();
+        // Timeout 0 = immediate (the historical behavior). Longer timeouts
+        // leave the app unlocked in the background and lock on return if the
+        // elapsed time crossed the threshold.
+        if ((prefs.autoLockTimeoutSec ?? 0) <= 0) {
+          setDecoyActive(false);
+          setLocked(true);
+        }
+        return;
+      }
+      if (state === "active") {
+        const at = backgroundedAt.current;
+        backgroundedAt.current = null;
+        const timeout = prefs.autoLockTimeoutSec ?? 0;
+        if (at && timeout > 0 && Date.now() - at >= timeout * 1000) {
+          setDecoyActive(false);
+          setLocked(true);
+        }
       }
     });
     return () => sub.remove();
@@ -374,7 +632,11 @@ export default function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar style="light" />
-        <Root locked={locked} initialized={initialized} />
+        <ThemeFade>
+          <ErrorBoundary>
+            <Root locked={locked} initialized={initialized} />
+          </ErrorBoundary>
+        </ThemeFade>
         {sharedUris.length > 0 ? (
           <ShareTargetSheet uris={sharedUris} onClose={() => setSharedUris([])} />
         ) : null}
@@ -421,6 +683,9 @@ async function bootstrapBackgroundTasks(): Promise<void> {
         // Resume whatever is already pending too — a cold start with a large
         // backlog must not sit idle just because nothing new was scanned.
         void processQueue();
+        if (prefs.autoMlIndex) {
+          void import("./src/lib/mlAuto").then(({ runAutoMlIndex }) => runAutoMlIndex(10));
+        }
       }
       void startCameraWatch();
       void registerBackgroundSync();
@@ -467,5 +732,12 @@ const styles = StyleSheet.create({
   },
   splashText: {
     fontSize: 13,
+  },
+  tabPill: {
+    width: 56,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

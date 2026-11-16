@@ -44,6 +44,28 @@ build on `npm audit --audit-level=critical`. There are no criticals, so CI
 stays green even though 18 non-critical advisories remain. This is intentional:
 the only way to clear them is the SDK 58 migration above.
 
+## Expo patch refresh (done) + SDK 58 plan
+
+The SDK 57 patch-level refresh is now in `package.json`/`package-lock.json`
+(`expo` 57.0.32, `expo-notifications`/`expo-sharing` 57.0.25, etc.). Those are
+the versions the next build will install; the currently published APK was built
+from the previous patch pins.
+
+The SDK 58 major upgrade is **planned, not executed** — it needs a native build
+window and careful porting of the committed `android/` manifest changes. See
+`docs/SDK58_MIGRATION.md` for the ordered checklist, risks and rollback.
+
+## Expo patch drift (superseded)
+
+`npx expo install --check` currently reports eleven packages one patch behind
+the SDK 57 recommendation (`expo` 57.0.30 → ~57.0.32, `expo-notifications`
+57.0.23 → ~57.0.25, etc.). Those exact locked versions are what the published
+`v1.1.0-preview.1` APK was built from, so bumping them mid-release would make
+the source diverge from the artifact. The CI step is therefore
+`continue-on-error: true` — it stays visible in the log but does not fail the
+build. Bundle the patch refresh into the next deliberate dependency/release
+round.
+
 ## `eas-cli` (build tooling, repo-external)
 
 `eas-cli` is **not** a dependency of this repo — it is used via `npx` / a global

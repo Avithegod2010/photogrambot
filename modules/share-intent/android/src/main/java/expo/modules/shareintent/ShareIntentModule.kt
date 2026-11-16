@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -102,11 +103,21 @@ class ShareIntentModule : Module() {
     Function("setAppIcon") { variant: String ->
       val context = appContext.reactContext ?: return@Function false
       val pkg = context.packageName
-      val names = mapOf(
+      // Colour × shape variants generated into the manifest (see
+      // scripts + app.config notes). Legacy "accent"/"mono" keys stay valid.
+      val names = mutableMapOf(
         "default" to "$pkg.IconDefault",
         "accent" to "$pkg.IconAccent",
         "mono" to "$pkg.IconMono"
       )
+      val colors = listOf("default", "blue", "teal", "orange", "green", "violet", "rose")
+      val shapes = listOf("default", "round", "squircle", "circle")
+      for (color in colors) {
+        for (shape in shapes) {
+          if (color == "default" && shape == "default") continue
+          names["$color-$shape"] = "$pkg.Icon_${color}_${shape}"
+        }
+      }
       // Normalise unknown values to "default": skipping a key that is not in
       // the map would otherwise disable every alias and remove the launcher
       // icon entirely.
@@ -131,6 +142,20 @@ class ShareIntentModule : Module() {
       } catch (e: Exception) {
         false
       }
+    }
+
+    // Screenshot / recents protection. Applied only while the viewer or the
+    // lock screen is mounted, then cleared when it unmounts.
+    Function("setSecureFlag") { enabled: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function false
+      activity.runOnUiThread {
+        if (enabled) {
+          activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+          activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+      }
+      true
     }
 
     Function("openInstallSettings") {

@@ -7,12 +7,14 @@
     // Internal debug build for on-device testing via EAS (JVM-TLS workaround).
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "channel": "development"
     },
     // Installable APK for testing — the profile used to unblock the local
     // assembleRelease TLS failure (cloud Gradle downloads dl.google.com fine).
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "android": {
         "buildType": "apk"
       }
@@ -21,6 +23,7 @@
     // of truth — bump per release artifact.
     "production": {
       "autoIncrement": false,
+      "channel": "production",
       "android": {
         "buildType": "app-bundle"
       }
