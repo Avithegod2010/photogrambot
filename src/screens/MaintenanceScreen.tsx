@@ -3,7 +3,7 @@ import { Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { useLibraryStore } from "../store/useLibraryStore";
-import { Button, Card, SectionLabel, Dialog } from "../components/ui";
+import { Button, Card, SectionLabel, Dialog, AppBar, EmptyState } from "../components/ui";
 import {
   findDuplicateGroups,
   checkIntegrity,
@@ -42,6 +42,9 @@ import { deleteMessage } from "../lib/telegram";
 import { tokenForPhoto } from "../lib/destinations";
 import { embedIndexBackfill } from "../lib/semsearch";
 import { getDiagLog, clearDiagLog, type DiagEvent } from "../lib/diaglog";
+import { tagScenesOnDevice, tagScenesWithGemini } from "../lib/sceneTag";
+import { buildPeopleIndex } from "../lib/faceEngine";
+import { sortByBest } from "../lib/bestOf";
 import { getEmbeddingCoverage } from "../lib/db";
 import type { EmbedBackfillProgress } from "../lib/semsearch";
 
@@ -55,6 +58,12 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [integrityRunning, setIntegrityRunning] = useState(false);
   const [integrity, setIntegrity] = useState<IntegrityProgress | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [brokenIds, setBrokenIds] = useState<string[]>([]);
+  const [nearDupConfirm, setNearDupConfirm] = useState<{
+    group: NearDupGroup;
+    rest: PhotoRow[];
+  } | null>(null);
   const [verifyRunning, setVerifyRunning] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<VerificationProgress | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerificationResult | null>(null);
@@ -68,6 +77,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrNote, setOcrNote] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [mlBusy, setMlBusy] = useState<"scene-device" | "scene-gemini" | "people" | null>(null);
+  const [mlNote, setMlNote] = useState<string | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
   const [motionBusy, setMotionBusy] = useState(false);
   const [motionProgress, setMotionProgress] = useState<{ done: number; total: number } | null>(null);
   const [motionNote, setMotionNote] = useState<string | null>(null);
@@ -95,14 +107,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const [tagError, setTagError] = useState<string | null>(null);
 
   function confirmRestore() {
-    Alert.alert(
-      "Restore originals to this device?",
-      `Downloads up to ${stats.uploaded} backed-up photo(s) from your channel into this device's gallery. Photos already on the device are skipped. Keep the app open while it runs.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Restore", onPress: () => void runRestore() },
-      ]
-    );
+    setRestoreConfirm(true);
   }
 
   async function runRestore() {
@@ -124,7 +129,9 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   async function scanDuplicates() {
     setScanningDupes(true);
     try {
-      setDupes(await findDuplicateGroups());
+      setDupes(
+        (await findDuplicateGroups()).map((g) => ({ ...g, photos: sortByBest(g.photos) }))
+      );
     } finally {
       setScanningDupes(false);
     }
@@ -190,21 +197,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
         `Checked ${result.checked} photos — ${result.brokenIds.length} broken`
       );
       if (result.brokenIds.length > 0) {
-        Alert.alert(
-          `${result.brokenIds.length} broken photo${result.brokenIds.length === 1 ? "" : "s"}`,
-          "These photos could not be reached in your Telegram channel (file may have been deleted). Remove them from the index?",
-          [
-            { text: "Keep", style: "cancel" },
-            {
-              text: "Remove",
-              style: "destructive",
-              onPress: async () => {
-                await removeBrokenPhotos(result.brokenIds);
-                await refreshMeta();
-              },
-            },
-          ]
-        );
+        setBrokenIds(result.brokenIds);
       }
     } finally {
       setIntegrityRunning(false);
@@ -224,7 +217,10 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
     setNearProgress({ decoded: 0, cached: 0, total: 0, skipped: 0, currentFile: null, done: false });
     try {
       const result = await scanNearDuplicates(setNearProgress);
-      setNearDups(result.groups);
+      // Keep the BEST copy at index 0 (favorite → resolution → size), so the
+      // existing "keep first" cleanup action keeps the best shot, not just the
+      // first row the scan happened to return.
+      setNearDups(result.groups.map((g) => ({ ...g, photos: sortByBest(g.photos) })));
       const bits: string[] = [`${result.groups.length} near-duplicate group${result.groups.length === 1 ? "" : "s"}`];
       if (result.skipped > 0) bits.push(`${result.skipped} skipped (no local copy or > 25 MB)`);
       if (result.decodeFailed > 0) bits.push(`${result.decodeFailed} undecodable (non-baseline JPEG)`);
@@ -299,41 +295,31 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
       ).then(() => setNearDups((prev) => prev.filter((g) => g !== group)));
       return;
     }
-    Alert.alert(
-      `Delete ${rest.length} duplicate copies from the channel too?`,
-      "This permanently removes their messages from Telegram (including for other devices) and moves them to the app's trash so they never re-upload. The newest copy is kept.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete for good",
-          style: "destructive",
-          onPress: () => void (async () => {
-            try {
-              const channelId = await getChannelId();
-              for (const p of rest) {
-                if (channelId && p.message_id) {
-                  const token = await tokenForPhoto(p);
-                  await deleteMessage(channelId, p.message_id, token ?? undefined);
-                  if (p.preview_message_id) {
-                    await deleteMessage(channelId, p.preview_message_id, token ?? undefined);
-                  }
-                }
-                // Trash (not hard-delete): the row must survive so auto-sync
-                // keeps skipping the local file — a hard delete would let the
-                // next scan re-upload the duplicate we just removed.
-                await addToTrash(p.id);
-                await markTrashRemoteDeleted(p.id);
-              }
-              await refreshMeta();
-              setNearDups((prev) => prev.filter((g) => g !== group));
-            } catch (e: any) {
-              Alert.alert("Delete failed", e?.message ?? "Could not delete the duplicates.");
-            }
-          })(),
-        },
-      ],
-      { cancelable: true }
-    );
+    setNearDupConfirm({ group, rest });
+  }
+
+  async function deleteNearGroupFromChannel(group: NearDupGroup, rest: PhotoRow[]) {
+    try {
+      const channelId = await getChannelId();
+      for (const p of rest) {
+        if (channelId && p.message_id) {
+          const token = await tokenForPhoto(p);
+          await deleteMessage(channelId, p.message_id, token ?? undefined);
+          if (p.preview_message_id) {
+            await deleteMessage(channelId, p.preview_message_id, token ?? undefined);
+          }
+        }
+        // Trash (not hard-delete): the row must survive so auto-sync
+        // keeps skipping the local file — a hard delete would let the
+        // next scan re-upload the duplicate we just removed.
+        await addToTrash(p.id);
+        await markTrashRemoteDeleted(p.id);
+      }
+      await refreshMeta();
+      setNearDups((prev) => prev.filter((g) => g !== group));
+    } catch (e: any) {
+      Alert.alert("Delete failed", e?.message ?? "Could not delete the duplicates.");
+    }
   }
 
   useEffect(() => {
@@ -368,6 +354,61 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   async function openDiagLog() {
     setDiagEvents(await getDiagLog());
     setDiagVisible(true);
+  }
+
+  async function runSceneOnDevice() {
+    if (mlBusy) return;
+    setMlBusy("scene-device");
+    setMlError(null);
+    setMlNote("Tagging scenes on-device…");
+    try {
+      const r = await tagScenesOnDevice(50, (p) =>
+        setMlNote(`Tagging ${p.done}/${p.total} — ${p.tagged} tagged`)
+      );
+      setMlNote(`Scene tags: ${r.tagged} tagged, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(
+        `${e?.message ?? "Scene tagging failed"}. Download the models in Settings → On-device AI first.`
+      );
+    } finally {
+      setMlBusy(null);
+    }
+  }
+
+  async function runSceneGemini() {
+    if (mlBusy) return;
+    setMlBusy("scene-gemini");
+    setMlError(null);
+    setMlNote("Tagging scenes with Gemini…");
+    try {
+      const r = await tagScenesWithGemini(50, (p) =>
+        setMlNote(`Tagging ${p.done}/${p.total} — ${p.tagged} tagged`)
+      );
+      setMlNote(`Gemini tags: ${r.tagged} tagged, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(e?.message ?? "Gemini tagging failed");
+    } finally {
+      setMlBusy(null);
+    }
+  }
+
+  async function runPeopleIndex() {
+    if (mlBusy) return;
+    setMlBusy("people");
+    setMlError(null);
+    setMlNote("Indexing faces…");
+    try {
+      const r = await buildPeopleIndex(25, (p) =>
+        setMlNote(`Faces ${p.done}/${p.total} — ${p.faces} found`)
+      );
+      setMlNote(`People index: ${r.faces} faces, ${r.people} clusters, ${r.failed} failed.`);
+    } catch (e: any) {
+      setMlError(
+        `${e?.message ?? "People indexing failed"}. Download the face models in Settings → On-device AI first.`
+      );
+    } finally {
+      setMlBusy(null);
+    }
   }
 
   async function runOcrBackfill() {
@@ -465,13 +506,8 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Maintenance</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Maintenance" onBack={() => navigation.goBack()} theme={theme} borderless />
 
       <FlatList
         data={[
@@ -700,6 +736,51 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               {ocrError ? (
                 <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
                   {ocrError}
+                </Text>
+              ) : null}
+            </Card>
+
+            <SectionLabel text="On-device AI" theme={theme} />
+            <Card theme={theme}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13, lineHeight: 19 }}>
+                Scene tags (MobileNetV3) and people clusters (BlazeFace + MobileFaceNet) run
+                locally. Models are downloaded in Settings → On-device AI (~17 MB total) and are
+                never bundled in the APK. Gemini tagging is opt-in and uses your own key.
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                <Button
+                  title="Tag scenes (on-device)"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "scene-device"}
+                  disabled={!!mlBusy && mlBusy !== "scene-device"}
+                  onPress={() => void runSceneOnDevice()}
+                />
+                <Button
+                  title="Tag scenes (Gemini)"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "scene-gemini"}
+                  disabled={!!mlBusy && mlBusy !== "scene-gemini"}
+                  onPress={() => void runSceneGemini()}
+                />
+                <Button
+                  title="Build people index"
+                  variant="outlined"
+                  theme={theme}
+                  busy={mlBusy === "people"}
+                  disabled={!!mlBusy && mlBusy !== "people"}
+                  onPress={() => void runPeopleIndex()}
+                />
+              </View>
+              {mlNote ? (
+                <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 10, fontSize: 12.5 }}>
+                  {mlNote}
+                </Text>
+              ) : null}
+              {mlError ? (
+                <Text style={{ color: theme.colors.error, fontSize: 12.5, marginTop: 10, fontWeight: "600" }}>
+                  {mlError}
                 </Text>
               ) : null}
             </Card>
@@ -958,7 +1039,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               ))}
               <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 8 }}>
                 <Button
-                  title="Keep newest, trash rest"
+                  title="Keep best, trash rest"
                   variant="danger"
                   theme={theme}
                   onPress={() => keepOldest(item.exact)}
@@ -991,7 +1072,7 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
               ))}
               <View style={{ flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
                 <Button
-                  title="Keep newest, trash rest"
+                  title="Keep best, trash rest"
                   variant="danger"
                   theme={theme}
                   onPress={() => removeNearGroupExceptFirst(item.near, false)}
@@ -1051,6 +1132,65 @@ export function MaintenanceScreen({ navigation }: { navigation: any }) {
           </View>
         )}
       </Dialog>
+
+      <Dialog
+        visible={restoreConfirm}
+        theme={theme}
+        title="Restore originals to this device?"
+        message={`Downloads up to ${stats.uploaded} backed-up photos from your channel into this device's gallery. Photos already on the device are skipped. Keep the app open while it runs.`}
+        onClose={() => setRestoreConfirm(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setRestoreConfirm(false), variant: "text" },
+          {
+            label: "Restore",
+            variant: "tonal",
+            onPress: () => {
+              setRestoreConfirm(false);
+              void runRestore();
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={brokenIds.length > 0}
+        theme={theme}
+        title={`${brokenIds.length} broken photo${brokenIds.length === 1 ? "" : "s"}`}
+        message="These photos could not be reached in your Telegram channel (the file may have been deleted). Remove them from the index?"
+        onClose={() => setBrokenIds([])}
+        actions={[
+          { label: "Keep", onPress: () => setBrokenIds([]), variant: "text" },
+          {
+            label: "Remove from index",
+            variant: "danger",
+            onPress: () => {
+              const ids = brokenIds;
+              setBrokenIds([]);
+              void removeBrokenPhotos(ids).then(() => refreshMeta());
+            },
+          },
+        ]}
+      />
+
+      <Dialog
+        visible={!!nearDupConfirm}
+        theme={theme}
+        title={`Delete ${nearDupConfirm?.rest.length ?? 0} duplicate cop${(nearDupConfirm?.rest.length ?? 0) === 1 ? "y" : "ies"} from the channel too?`}
+        message="This permanently removes their messages from Telegram (including for other devices) and moves them to the app's trash so they never re-upload. The best copy is kept."
+        onClose={() => setNearDupConfirm(null)}
+        actions={[
+          { label: "Cancel", onPress: () => setNearDupConfirm(null), variant: "text" },
+          {
+            label: "Delete for good",
+            variant: "danger",
+            onPress: () => {
+              const pending = nearDupConfirm;
+              setNearDupConfirm(null);
+              if (pending) void deleteNearGroupFromChannel(pending.group, pending.rest);
+            },
+          },
+        ]}
+      />
     </View>
   );
 }

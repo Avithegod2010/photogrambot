@@ -8,6 +8,8 @@
 export interface City {
   name: string;
   country: string;
+  /** Optional state/province, shown instead of the country for Indian cities. */
+  region?: string;
   lat: number;
   lon: number;
 }
@@ -204,6 +206,81 @@ export const CITIES: City[] = [
   C("Wellington", "New Zealand", -41.2866, 174.7756),
 ];
 
+// State/region labels for the Indian cities (the owner's "Kochi, Kerala"
+// example). Other cities fall back to their country.
+const INDIAN_REGIONS: Record<string, string> = {
+  Delhi: "Delhi",
+  Mumbai: "Maharashtra",
+  Bengaluru: "Karnataka",
+  Hyderabad: "Telangana",
+  Chennai: "Tamil Nadu",
+  Kolkata: "West Bengal",
+  Pune: "Maharashtra",
+  Ahmedabad: "Gujarat",
+  Jaipur: "Rajasthan",
+  Kochi: "Kerala",
+  Thiruvananthapuram: "Kerala",
+  Kozhikode: "Kerala",
+  Thrissur: "Kerala",
+  Coimbatore: "Tamil Nadu",
+  Madurai: "Tamil Nadu",
+  Mysuru: "Karnataka",
+  Panaji: "Goa",
+  Mangaluru: "Karnataka",
+  Visakhapatnam: "Andhra Pradesh",
+  Bhubaneswar: "Odisha",
+  Patna: "Bihar",
+  Lucknow: "Uttar Pradesh",
+  Varanasi: "Uttar Pradesh",
+  Kanpur: "Uttar Pradesh",
+  Nagpur: "Maharashtra",
+  Indore: "Madhya Pradesh",
+  Bhopal: "Madhya Pradesh",
+  Surat: "Gujarat",
+  Vadodara: "Gujarat",
+  Rajkot: "Gujarat",
+  Udaipur: "Rajasthan",
+  Jodhpur: "Rajasthan",
+  Amritsar: "Punjab",
+  Chandigarh: "Chandigarh",
+  Dehradun: "Uttarakhand",
+  Shimla: "Himachal Pradesh",
+  Srinagar: "Jammu & Kashmir",
+  Leh: "Ladakh",
+  Guwahati: "Assam",
+  Shillong: "Meghalaya",
+  Imphal: "Manipur",
+  Agartala: "Tripura",
+  Ranchi: "Jharkhand",
+  Raipur: "Chhattisgarh",
+  Nashik: "Maharashtra",
+  Aurangabad: "Maharashtra",
+  Kolhapur: "Maharashtra",
+  Vijayawada: "Andhra Pradesh",
+  Tirupati: "Andhra Pradesh",
+  Puducherry: "Puducherry",
+  Kanyakumari: "Tamil Nadu",
+  Rishikesh: "Uttarakhand",
+  Haridwar: "Uttarakhand",
+  Ajmer: "Rajasthan",
+  Kota: "Rajasthan",
+  Gwalior: "Madhya Pradesh",
+  Jabalpur: "Madhya Pradesh",
+  Prayagraj: "Uttar Pradesh",
+  Gorakhpur: "Uttar Pradesh",
+  Siliguri: "West Bengal",
+  Darjeeling: "West Bengal",
+  Gangtok: "Sikkim",
+  Itanagar: "Arunachal Pradesh",
+  Kohima: "Nagaland",
+  Aizawl: "Mizoram",
+};
+
+for (const city of CITIES) {
+  const region = INDIAN_REGIONS[city.name];
+  if (region) city.region = region;
+}
+
 const EARTH_KM = 6371;
 
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -229,8 +306,9 @@ export function nearestCity(
   return best && best.km <= maxKm ? best : null;
 }
 
-/** "Kochi, India" within 75 km, else null (caller falls back to coordinates). */
+/** "Kochi, Kerala" (or "Paris, France") within 75 km, else null. */
 export function placeLabel(lat: number, lon: number, maxKm = 75): string | null {
   const hit = nearestCity(lat, lon, maxKm);
-  return hit ? `${hit.city.name}, ${hit.city.country}` : null;
+  if (!hit) return null;
+  return `${hit.city.name}, ${hit.city.region ?? hit.city.country}`;
 }

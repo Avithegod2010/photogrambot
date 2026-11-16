@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Dimensions, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "../rn";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
 import { getAllPhashPairs, getJpegRowsForPhash, type PhotoRow } from "../lib/db";
@@ -8,6 +8,9 @@ import { hammingHex } from "../lib/phash";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
 import { EmptySearchArt } from "../components/illustrations";
+import { AppBar, EmptyState } from "../components/ui";
+import { useResponsive } from "../lib/responsive";
+import { spacing } from "../theme";
 
 const HASH_RE = /^[0-9a-f]{16}$/i;
 const SIMILAR_THRESHOLD = 12;
@@ -70,42 +73,45 @@ export function SimilarScreen({ route, navigation }: { route: any; navigation: a
   }, [photo]);
 
   const allPhotos = photo ? [photo, ...(similar ?? [])] : [];
-  const tile = Math.floor((Dimensions.get("window").width - 8) / 3);
+  const { width } = useResponsive();
+  const columns = width >= 1000 ? 6 : width >= 720 ? 5 : 3;
+  const tile = Math.floor((width - spacing.seam * (columns - 1)) / columns);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
-          Similar photos
-        </Text>
-        {similar ? <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{similar.length}</Text> : null}
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar
+        title="Similar photos"
+        subtitle={similar ? `${similar.length} match${similar.length === 1 ? "" : "es"}` : undefined}
+        onBack={() => navigation.goBack()}
+        theme={theme}
+        borderless
+      />
       {similar === null ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
       ) : message && similar.length === 0 ? (
-        <View style={{ alignItems: "center", padding: 24 }}>
-          <EmptySearchArt
-            color={theme.colors.onSurfaceVariant}
-            accent={theme.colors.primary}
-            size={104}
-          />
-          <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>{message}</Text>
-        </View>
+        <EmptyState
+          theme={theme}
+          art={<EmptySearchArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={104} />}
+          title="No similar photos"
+          message={message}
+          actionLabel="Back to photo"
+          onAction={() => navigation.goBack()}
+        />
       ) : (
         <FlatList
           data={similar}
-          numColumns={3}
+          numColumns={columns}
+          key={columns}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 2, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: 40 }}
           renderItem={({ item, index }) => {
             const thumb = resolvePhotoThumb(item);
             return (
               <Pressable
-                style={{ width: tile, height: tile, padding: 1 }}
+                style={{ width: tile, height: tile, padding: spacing.seam / 2 }}
                 onPress={() => navigation.navigate("Viewer", { photos: allPhotos, index: index + 1 })}
+                accessibilityRole="button"
+                accessibilityLabel={item.filename}
               >
                 <TelegramImage
                   fileId={thumb.fileId}

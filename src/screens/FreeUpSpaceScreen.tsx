@@ -21,6 +21,7 @@ import {
 import { formatBytes } from "../lib/format";
 import { loadPrefs } from "../lib/settings";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
+import { AppBar, Dialog, EmptyState } from "../components/ui";
 
 const DELETE_CHUNK = 200;
 const VERIFY_SPACING_MS = 60;
@@ -53,6 +54,9 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [sunsetIds, setSunsetIds] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<"idle" | "verifying" | "deleting">("idle");
+  const [deleteConfirm, setDeleteConfirm] = useState<
+    (Candidate & { remote_file_id: string })[] | null
+  >(null);
   const [progressLine, setProgressLine] = useState<string | null>(null);
   const [resultLine, setResultLine] = useState<string | null>(null);
 
@@ -169,15 +173,7 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
       );
       return;
     }
-    Alert.alert(
-      `Delete ${withRemote.length} local copies?`,
-      `Your originals stay safe in your Telegram channel. Android will show a confirmation dialog before anything is deleted.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void runFreeUp(withRemote) },
-      ],
-      { cancelable: true }
-    );
+    setDeleteConfirm(withRemote);
   }
 
   async function runFreeUp(
@@ -263,13 +259,8 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
   const busy = phase !== "idle";
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>Free up space</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title="Free up space" onBack={() => navigation.goBack()} theme={theme} borderless />
       <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
         Local photos whose originals are already in your channel. Deleting them keeps the cloud copy — the photo stays in Cloud and Collections.
       </Text>
@@ -284,11 +275,13 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
           ) : null}
         </View>
       ) : candidates.length === 0 ? (
-        <View style={styles.centerCol}>
-          <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: "center", paddingHorizontal: 32, lineHeight: 20 }}>
-            Nothing to free — every local photo either isn't backed up yet or has no size recorded.
-          </Text>
-        </View>
+        <EmptyState
+          theme={theme}
+          title="Nothing to free"
+          message="Every local photo either isn't backed up yet or has no size recorded. Once a backup finishes, its local copy can be removed here."
+          actionLabel="Back to maintenance"
+          onAction={() => navigation.goBack()}
+        />
       ) : (
         <>
           <View style={[styles.summary, { backgroundColor: theme.colors.surface }]}>
@@ -309,6 +302,8 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
                 )
               }
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={selection.size === candidates.length ? "Clear selection" : "Select all candidates"}
             >
               <Text style={{ color: theme.colors.primary, fontWeight: "600", fontSize: 13 }}>
                 {selection.size === candidates.length ? "Clear" : "All"}
@@ -326,7 +321,7 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
                   {formatBytes(sunsetBytes)} of old screenshots. Clear these first — the originals stay in your channel.
                 </Text>
               </View>
-              <Pressable onPress={() => setSelection(new Set(sunsetCandidates.map((c) => c.id)))} hitSlop={6} disabled={busy}>
+              <Pressable onPress={() => setSelection(new Set(sunsetCandidates.map((c) => c.id)))} hitSlop={6} disabled={busy} accessibilityRole="button" accessibilityLabel="Select all old screenshots">
                 <Text style={{ color: theme.colors.primary, fontWeight: "600", fontSize: 13 }}>Select</Text>
               </Pressable>
             </View>
@@ -364,6 +359,9 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
                       ]}
                       onPress={() => !busy && toggle(c.id)}
                       disabled={busy}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked, disabled: busy }}
+                      accessibilityLabel={`${c.filename}, ${formatBytes(c.size ?? 0)}`}
                     >
                       <View
                         style={[
@@ -415,6 +413,9 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
               ]}
               disabled={selection.size === 0 || busy}
               onPress={() => void freeUp()}
+              accessibilityRole="button"
+              accessibilityLabel="Delete selected local copies"
+              accessibilityState={{ disabled: selection.size === 0 || busy, busy }}
             >
               <Text
                 style={{
@@ -431,6 +432,26 @@ export function FreeUpSpaceScreen({ navigation }: { navigation: any }) {
           </View>
         </>
       )}
+
+      <Dialog
+        visible={!!deleteConfirm}
+        theme={theme}
+        title={`Delete ${deleteConfirm?.length ?? 0} local cop${(deleteConfirm?.length ?? 0) === 1 ? "y" : "ies"}?`}
+        message="Your originals stay safe in your Telegram channel. Android will show a confirmation dialog before anything is deleted."
+        onClose={() => setDeleteConfirm(null)}
+        actions={[
+          { label: "Cancel", onPress: () => setDeleteConfirm(null), variant: "text" },
+          {
+            label: "Delete",
+            variant: "danger",
+            onPress: () => {
+              const targets = deleteConfirm ?? [];
+              setDeleteConfirm(null);
+              void runFreeUp(targets);
+            },
+          },
+        ]}
+      />
     </View>
   );
 }
