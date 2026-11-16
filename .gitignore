@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+node_modules.broken/
 
 # Expo
 .expo/
@@ -73,3 +74,12 @@ latest.json
 # Release artifacts (attach to a GitHub Release, never commit)
 *.apk
 *.aab
+eas-build*.json
+eas-build*.log
+
+# Metro / dev-server logs
+metro*.log
+
+# Local screenshots / signing sidecars
+.tmp-*
+*.idsig

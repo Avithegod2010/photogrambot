@@ -11,14 +11,23 @@ import { useSettingsStore } from "../store/useSettingsStore";
  */
 export const Text = React.forwardRef<any, TextProps>(function ScaledText(props, ref) {
   const scale = useSettingsStore((s) => s.prefs.fontScale);
+  const family = useSettingsStore((s) => s.prefs.fontFamily);
   const factor = typeof scale === "number" && scale > 0 ? scale : 1;
-  if (factor === 1) return <RNText {...props} ref={ref} />;
-
   const flat = StyleSheet.flatten(props.style) as
-    | { fontSize?: number; lineHeight?: number }
+    | { fontSize?: number; lineHeight?: number; fontFamily?: string }
     | undefined;
-  const override: { fontSize?: number; lineHeight?: number } = {};
+  const familyOverride =
+    family && family !== "system" && !flat?.fontFamily ? { fontFamily: family } : undefined;
+  if (factor === 1 && !familyOverride) return <RNText {...props} ref={ref} />;
+
+  const override: { fontSize?: number; lineHeight?: number; fontFamily?: string } = {};
   if (typeof flat?.fontSize === "number") override.fontSize = flat.fontSize * factor;
   if (typeof flat?.lineHeight === "number") override.lineHeight = flat.lineHeight * factor;
-  return <RNText {...props} ref={ref} style={[props.style, override]} />;
+  return (
+    <RNText
+      {...props}
+      ref={ref}
+      style={[props.style, override, familyOverride]}
+    />
+  );
 });

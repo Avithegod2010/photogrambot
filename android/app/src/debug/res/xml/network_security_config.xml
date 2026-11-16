@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds allow cleartext so the Metro/dev-client connection over
+     localhost or a LAN IP keeps working. Release builds use the strict
+     main/res/xml/network_security_config.xml (pinned hosts, cleartext off). -->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

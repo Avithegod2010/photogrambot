@@ -18,6 +18,23 @@ can be produced and tested.
 - The release keystore decision is settled (see `docs/RELEASE.md`).
 - No concurrent feature work on `android/` (the native diff is the risky part).
 
+## Target versions (from expo@58.0.23 bundledNativeModules)
+
+| Package | SDK 58 |
+| --- | --- |
+| expo | 58.0.23 |
+| react | 19.3.0 |
+| react-native | 0.88.1 |
+| react-native-reanimated | 4.7.1 |
+| react-native-worklets | 0.13.0 |
+| react-native-gesture-handler | 3.3.0 |
+| react-native-screens | 4.30.1 |
+| react-native-safe-area-context | 5.11.1 |
+| react-native-svg | 15.16.0 |
+| react-native-maps | 1.29.11 |
+| expo-sqlite | 58.0.15 |
+| expo-updates | 58.0.21 |
+
 ## Ordered steps
 
 1. **Branch and snapshot**
@@ -48,6 +65,13 @@ can be produced and tested.
    Recommended: run `npx expo prebuild -p android` in a **temporary worktree**
    and diff the generated `android/` against the committed one, porting only the
    real SDK changes. Do not `--clean` the live tree.
+
+   Before any `--clean`, port the hand-maintained pieces into config plugins:
+   `plugins/withCertificatePinning.js` (network config), the widget plugin in
+   `app.config.ts`, the icon colour/shape aliases and drawables (currently
+   committed only), the OpenSSL `implementation` dependency in
+   `android/app/build.gradle`, and `android/version.properties`. Without those,
+   a clean prebuild loses them.
 5. **Typecheck and tests**
    ```bash
    npm run check

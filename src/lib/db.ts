@@ -1,5 +1,8 @@
 import * as SQLite from "expo-sqlite";
+import { File } from "expo-file-system";
 import { sanitizeQueueBackupRows } from "./backupQueue";
+import { applyDbKey, sqlCipherAvailable } from "./dbCrypto";
+import { lwwWins } from "./syncMath";
 
 export type PhotoStatus =
   | "local"
@@ -100,12 +103,28 @@ export interface QueueRow {
   reply_to_message_id: number | null;
 }
 
+const DB_NAME = "photogrambot.db";
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
-      const d = await SQLite.openDatabaseAsync("photogrambot.db");
+      const d = await SQLite.openDatabaseAsync(DB_NAME);
+      // SQLCipher: the key must be applied before ANY other statement.
+      try {
+        const { loadPrefs } = await import("./settings");
+        const prefs = await loadPrefs();
+        if (prefs.dbEncryption) await applyDbKey(d);
+      } catch (e: any) {
+        // A wrong/missing key means the file cannot be read. Surface a clear
+        // message instead of the raw "file is not a database".
+        if (String(e?.message ?? "").includes("not a database")) {
+          throw new Error(
+            "The local database is encrypted but its key is unavailable. Restore the index from the channel backup."
+          );
+        }
+        throw e;
+      }
       await d.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
       await migrate(d);
       return d;
@@ -115,6 +134,69 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     });
   }
   return dbPromise;
+}
+
+/** Closes the cached handle (panic wipe / database encryption swap). */
+export async function closeDb(): Promise<void> {
+  const pending = dbPromise;
+  dbPromise = null;
+  if (!pending) return;
+  try {
+    const d = await pending;
+    await d.closeAsync();
+  } catch {}
+}
+
+/** Deletes the local index file entirely. Used only by panic wipe. */
+export async function deleteLocalDatabase(): Promise<void> {
+  await SQLite.deleteDatabaseAsync(DB_NAME);
+}
+
+/**
+ * Re-encrypt the current plaintext database in place with SQLCipher, using a
+ * key held in SecureStore. Requires a native build with `useSQLCipher`.
+ * The caller should restart the app afterwards (the swap closes the handle).
+ */
+export async function enableDatabaseEncryption(): Promise<void> {
+  const d = await getDb();
+  if (!(await sqlCipherAvailable(d))) {
+    throw new Error(
+      "This build does not include SQLCipher. Install the next native build, then try again."
+    );
+  }
+  const { loadPrefs, savePrefs } = await import("./settings");
+  if ((await loadPrefs()).dbEncryption) return;
+  const { getOrCreateDbKey } = await import("./dbCrypto");
+  const key = await getOrCreateDbKey();
+
+  const dir = SQLite.defaultDatabaseDirectory;
+  const src = new File(dir, DB_NAME);
+  const enc = new File(dir, `${DB_NAME}.enc`);
+  for (const f of [enc, new File(dir, `${DB_NAME}.enc-wal`), new File(dir, `${DB_NAME}.enc-shm`)]) {
+    if (f.exists) f.delete();
+  }
+  await d.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
+  // The URI may contain single quotes; the key is hex-only by construction.
+  const uri = enc.uri.replace(/'/g, "''");
+  await d.execAsync(`ATTACH DATABASE '${uri}' AS encrypted KEY "x'${key}'";`);
+  try {
+    await d.execAsync("SELECT sqlcipher_export('encrypted');");
+  } finally {
+    await d.execAsync("DETACH DATABASE encrypted;").catch(() => {});
+  }
+  await d.closeAsync();
+  dbPromise = null;
+
+  // Swap the encrypted file into place and drop the plaintext WAL/SHM.
+  for (const f of [src, new File(dir, `${DB_NAME}-wal`), new File(dir, `${DB_NAME}-shm`)]) {
+    if (f.exists) f.delete();
+  }
+  await enc.move(src, { overwrite: true });
+  await savePrefs({ dbEncryption: true });
+
+  // Reopen once to prove the key works before the UI says "restart".
+  const check = await getDb();
+  await check.getFirstAsync("SELECT COUNT(*) AS n FROM photos");
 }
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -222,6 +304,38 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       photo_id UNINDEXED, filename, folder, tags, device, camera, mime, ai_caption, ocr_text
     );
   `);
+  // Multi-device index sync: a compact op log with Lamport clocks. Only
+  // favorites, tags, album membership/name and covers are synced; photos
+  // themselves are immutable channel records.
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS sync_ops (
+      op_id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      value TEXT,
+      lamport INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      sent INTEGER NOT NULL DEFAULT 0,
+      applied INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_ops_field
+      ON sync_ops(entity, entity_id, field, lamport DESC);
+    CREATE INDEX IF NOT EXISTS idx_sync_ops_sent ON sync_ops(sent);
+    CREATE TABLE IF NOT EXISTS sync_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      local_value TEXT,
+      remote_value TEXT,
+      remote_device TEXT,
+      created_at INTEGER NOT NULL,
+      resolved INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved, created_at DESC);
+  `);
   await addColumnsIfMissing(db, "photos", [
     ["latitude", "REAL"],
     ["longitude", "REAL"],
@@ -264,6 +378,7 @@ export async function getScreenshotOcrPending(limit = 200): Promise<PhotoRow[]> 
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC
      LIMIT ?`,
     [limit]
@@ -301,7 +416,8 @@ export async function getScreenshotOcrCount(): Promise<number> {
      WHERE status = 'uploaded' AND ocr_text IS NULL
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
-       AND id NOT IN (SELECT photo_id FROM trash)`
+       AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`
   );
   return row?.n ?? 0;
 }
@@ -363,6 +479,8 @@ async function migrateRest(db: SQLite.SQLiteDatabase): Promise<void> {
     // Curated album cover (F11): when set and still a member, this photo is
     // preferred over the newest-taken default. NULL = automatic.
     ["cover_photo_id", "TEXT"],
+    // Manual album order (drag-to-reorder). 0 = never ordered.
+    ["sort_order", "INTEGER NOT NULL DEFAULT 0"],
   ]);
   await migrateFtsSchema(db);
   await db.execAsync(`
@@ -425,6 +543,236 @@ export async function kvSet(key: string, value: string): Promise<void> {
     "INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
     [key, value]
   );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-device sync (LWW registers with Lamport clocks)
+// ---------------------------------------------------------------------------
+
+export type SyncEntity = "photo" | "album";
+export type SyncField = "favorite" | "tags" | "membership" | "album_name" | "cover";
+
+export interface SyncOp {
+  op_id: string;
+  device_id: string;
+  entity: SyncEntity;
+  entity_id: string;
+  field: SyncField;
+  value: string | null;
+  lamport: number;
+  created_at: number;
+  sent: number;
+  applied: number;
+}
+
+export interface SyncConflict {
+  id: number;
+  entity: SyncEntity;
+  entity_id: string;
+  field: SyncField;
+  local_value: string | null;
+  remote_value: string | null;
+  remote_device: string | null;
+  created_at: number;
+}
+
+const SYNC_FIELDS: SyncField[] = ["favorite", "tags", "membership", "album_name", "cover"];
+
+/** Records a local change and bumps the Lamport clock. */
+export async function recordSyncOp(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField,
+  value: string | null
+): Promise<void> {
+  try {
+    const d = await getDb();
+    const raw = await kvGet("sync_lamport");
+    const lamport = (parseInt(raw ?? "0", 10) || 0) + 1;
+    await kvSet("sync_lamport", String(lamport));
+    const { getDeviceId } = await import("./settings");
+    const device = await getDeviceId();
+    const opId = `${device}:${lamport}:${Math.random().toString(36).slice(2, 8)}`;
+    await d.runAsync(
+      `INSERT OR IGNORE INTO sync_ops
+        (op_id, device_id, entity, entity_id, field, value, lamport, created_at, sent, applied)
+       VALUES (?,?,?,?,?,?,?,?,0,1)`,
+      [opId, device, entity, entityId, field, value, lamport, Date.now()]
+    );
+  } catch {
+    // Sync bookkeeping must never break the primary mutation.
+  }
+}
+
+export async function pendingSyncOpCount(): Promise<number> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM sync_ops WHERE sent = 0"
+  );
+  return row?.n ?? 0;
+}
+
+export async function exportSyncOps(limit = 500): Promise<SyncOp[]> {
+  const d = await getDb();
+  return d.getAllAsync<SyncOp>(
+    "SELECT * FROM sync_ops WHERE sent = 0 ORDER BY lamport ASC LIMIT ?",
+    [limit]
+  );
+}
+
+export async function markSyncOpsSent(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const d = await getDb();
+  const ph = ids.map(() => "?").join(",");
+  await d.runAsync(`UPDATE sync_ops SET sent = 1 WHERE op_id IN (${ph})`, ids);
+}
+
+async function latestOp(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField
+): Promise<SyncOp | null> {
+  const d = await getDb();
+  return d.getFirstAsync<SyncOp>(
+    `SELECT * FROM sync_ops
+      WHERE entity = ? AND entity_id = ? AND field = ?
+      ORDER BY lamport DESC, device_id DESC LIMIT 1`,
+    [entity, entityId, field]
+  );
+}
+
+async function applySyncValue(
+  entity: SyncEntity,
+  entityId: string,
+  field: SyncField,
+  value: string | null
+): Promise<void> {
+  const d = await getDb();
+  if (entity === "photo") {
+    if (field === "favorite") {
+      await d.runAsync("UPDATE photos SET favorite = ? WHERE id = ?", [
+        value === "1" ? 1 : 0,
+        entityId,
+      ]);
+    } else if (field === "tags") {
+      await d.runAsync("UPDATE photos SET tags = ? WHERE id = ?", [value, entityId]);
+      try {
+        const row = await getPhoto(entityId);
+        if (row) await ftsIndexPhoto({ ...row, tags: value });
+      } catch {}
+    }
+    return;
+  }
+  if (field === "album_name") {
+    await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [value ?? "", Number(entityId)]);
+  } else if (field === "cover") {
+    await d.runAsync("UPDATE albums SET cover_photo_id = ? WHERE id = ?", [
+      value || null,
+      Number(entityId),
+    ]);
+  } else if (field === "membership") {
+    try {
+      const parsed = JSON.parse(value ?? "{}") as { albumId?: number; member?: boolean };
+      const albumId = Number(parsed.albumId);
+      if (!Number.isFinite(albumId)) return;
+      if (parsed.member) {
+        await d.runAsync(
+          "INSERT OR IGNORE INTO album_photos (album_id, photo_id, added_at) VALUES (?,?,?)",
+          [albumId, entityId, Date.now()]
+        );
+      } else {
+        await d.runAsync("DELETE FROM album_photos WHERE album_id = ? AND photo_id = ?", [
+          albumId,
+          entityId,
+        ]);
+      }
+    } catch {}
+  }
+}
+
+/** Merges remote ops with last-write-wins; records disagreements for review. */
+export async function applyRemoteOps(
+  ops: SyncOp[]
+): Promise<{ applied: number; conflicts: number }> {
+  let applied = 0;
+  let conflicts = 0;
+  const d = await getDb();
+  for (const op of ops) {
+    if (!op || !SYNC_FIELDS.includes(op.field)) continue;
+    if (op.entity !== "photo" && op.entity !== "album") continue;
+    const lamport = Number(op.lamport);
+    if (!Number.isFinite(lamport) || lamport <= 0) continue;
+    if (typeof op.entity_id !== "string" || !op.entity_id) continue;
+    const local = await latestOp(op.entity, op.entity_id, op.field);
+    const remoteWins = lwwWins(
+      lamport,
+      String(op.device_id ?? ""),
+      local ? local.lamport : null,
+      local ? local.device_id : null
+    );
+    if (local && local.value !== op.value) {
+      conflicts++;
+      await d.runAsync(
+        `INSERT INTO sync_conflicts
+          (entity, entity_id, field, local_value, remote_value, remote_device, created_at, resolved)
+         VALUES (?,?,?,?,?,?,?,0)`,
+        [
+          op.entity,
+          op.entity_id,
+          op.field,
+          local.value,
+          op.value,
+          op.device_id,
+          Date.now(),
+        ]
+      );
+    }
+    if (remoteWins) {
+      await applySyncValue(op.entity, op.entity_id, op.field, op.value);
+      applied++;
+    }
+    await d.runAsync(
+      `INSERT OR IGNORE INTO sync_ops
+        (op_id, device_id, entity, entity_id, field, value, lamport, created_at, sent, applied)
+       VALUES (?,?,?,?,?,?,?,?,1,?)`,
+      [
+        String(op.op_id ?? `${op.device_id}:${lamport}:${Math.random().toString(36).slice(2, 8)}`),
+        String(op.device_id ?? "unknown"),
+        op.entity,
+        op.entity_id,
+        op.field,
+        op.value ?? null,
+        lamport,
+        Number(op.created_at) || Date.now(),
+        remoteWins ? 1 : 0,
+      ]
+    );
+  }
+  return { applied, conflicts };
+}
+
+export async function getSyncConflicts(limit = 50): Promise<SyncConflict[]> {
+  const d = await getDb();
+  return d.getAllAsync<SyncConflict>(
+    "SELECT * FROM sync_conflicts WHERE resolved = 0 ORDER BY created_at DESC LIMIT ?",
+    [limit]
+  );
+}
+
+export async function resolveSyncConflict(
+  id: number,
+  keep: "local" | "remote"
+): Promise<void> {
+  const d = await getDb();
+  const row = await d.getFirstAsync<SyncConflict>("SELECT * FROM sync_conflicts WHERE id = ?", [id]);
+  if (!row) return;
+  const value = keep === "local" ? row.local_value : row.remote_value;
+  if (keep === "remote") {
+    await applySyncValue(row.entity, row.entity_id, row.field, row.remote_value);
+  }
+  // Recording the choice as a fresh local op propagates it to other devices.
+  await recordSyncOp(row.entity, row.entity_id, row.field, value);
+  await d.runAsync("UPDATE sync_conflicts SET resolved = 1 WHERE id = ?", [id]);
 }
 
 function rowToPhoto(r: any): PhotoRow {
@@ -682,6 +1030,7 @@ export async function getEmbeddingCoverage(): Promise<{ embedded: number; missin
        (SELECT COUNT(*) FROM photos
           WHERE status = 'uploaded'
             AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
             AND id NOT IN (SELECT photo_id FROM photo_embeddings)) AS missing`
   );
   return { embedded: row?.embedded ?? 0, missing: row?.missing ?? 0 };
@@ -727,7 +1076,8 @@ export async function getPhotosByIds(ids: string[]): Promise<PhotoRow[]> {
     if (chunk.length === 0) continue;
     const placeholders = chunk.map(() => "?").join(",");
     const rows = await d.getAllAsync<any>(
-      `SELECT * FROM photos WHERE id IN (${placeholders}) AND id NOT IN (SELECT photo_id FROM trash)`,
+      `SELECT * FROM photos WHERE id IN (${placeholders}) AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`,
       chunk
     );
     for (const r of rows) found.set(r.id as string, rowToPhoto(r));
@@ -775,7 +1125,8 @@ export async function getGalleryPage(
   const d = await getDb();
   let sql = `SELECT * FROM photos
              WHERE status IN ('uploaded', 'local', 'failed')
-             AND id NOT IN (SELECT photo_id FROM trash)`;
+             AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`;
   const params: any[] = [];
   if (before) {
     sql += " AND (taken_at < ? OR (taken_at = ? AND id < ?))";
@@ -816,13 +1167,20 @@ export async function getPeriodCountedLocalIds(): Promise<Set<string>> {
     `SELECT DISTINCT local_id FROM photos
      WHERE local_id IS NOT NULL
      AND status IN ('uploaded','local','failed')
-     AND id NOT IN (SELECT photo_id FROM trash)`
+     AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`
   );
   return new Set(rows.map((r) => r.local_id));
 }
 
 export interface SearchFilters {
   takenWithinDays?: number | null;
+  /** Inclusive lower bound (epoch ms) for taken_at. */
+  takenAfter?: number | null;
+  /** Exclusive upper bound (epoch ms) for taken_at. */
+  takenBefore?: number | null;
+  /** Case-insensitive substring match on the folder name. */
+  folder?: string | null;
   hasGps?: boolean;
   camera?: string | null;
   notBackedUp?: boolean;
@@ -847,6 +1205,16 @@ export function normalizeSearchFilters(value: unknown): SearchFilters | null {
   if (typeof input.takenWithinDays === "number" && Number.isFinite(input.takenWithinDays)) {
     const days = Math.round(input.takenWithinDays);
     if (days > 0) out.takenWithinDays = Math.min(days, 365);
+  }
+  if (typeof input.takenAfter === "number" && Number.isFinite(input.takenAfter) && input.takenAfter > 0) {
+    out.takenAfter = Math.round(input.takenAfter);
+  }
+  if (typeof input.takenBefore === "number" && Number.isFinite(input.takenBefore) && input.takenBefore > 0) {
+    out.takenBefore = Math.round(input.takenBefore);
+  }
+  if (typeof input.folder === "string") {
+    const folder = input.folder.trim().slice(0, 200);
+    if (folder) out.folder = folder;
   }
   if (input.hasGps === true) out.hasGps = true;
   if (typeof input.camera === "string") {
@@ -881,11 +1249,27 @@ export async function searchPhotos(
   const d = await getDb();
   const safeFilters = normalizeSearchFilters(filters);
   const cleaned = query.trim();
-  const conds: string[] = ["p.id NOT IN (SELECT photo_id FROM trash)"];
+  const conds: string[] = [
+    "p.id NOT IN (SELECT photo_id FROM trash)",
+    // Photos inside a locked album must not leak through search/memories/map.
+    "p.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)",
+  ];
   const params: any[] = [];
   if (safeFilters?.takenWithinDays && safeFilters.takenWithinDays > 0) {
     conds.push("p.taken_at >= ?");
     params.push(Date.now() - safeFilters.takenWithinDays * 86400000);
+  }
+  if (safeFilters?.takenAfter) {
+    conds.push("p.taken_at >= ?");
+    params.push(safeFilters.takenAfter);
+  }
+  if (safeFilters?.takenBefore) {
+    conds.push("p.taken_at < ?");
+    params.push(safeFilters.takenBefore);
+  }
+  if (safeFilters?.folder) {
+    conds.push("LOWER(p.folder) LIKE ?");
+    params.push(`%${safeFilters.folder.toLowerCase()}%`);
   }
   if (safeFilters?.hasGps) {
     conds.push("p.latitude IS NOT NULL AND p.longitude IS NOT NULL");
@@ -961,6 +1345,7 @@ export async function getLargestUploaded(n = 3): Promise<PhotoRow[]> {
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos
      WHERE status = 'uploaded' AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY COALESCE(size, 0) DESC LIMIT ?`,
     [n]
   );
@@ -1069,13 +1454,15 @@ export async function deletePhoto(id: string): Promise<void> {
 
 export async function setFavorite(id: string, fav: boolean): Promise<void> {
   await updatePhoto(id, { favorite: fav ? 1 : 0 });
+  await recordSyncOp("photo", id, "favorite", fav ? "1" : "0");
 }
 
 export async function getFavorites(): Promise<PhotoRow[]> {
   const d = await getDb();
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos WHERE favorite = 1 AND status IN ('uploaded','local','failed')
-     AND id NOT IN (SELECT photo_id FROM trash) ORDER BY taken_at DESC`
+     AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1) ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
 }
@@ -1134,7 +1521,7 @@ export async function getTrashPendingRemoteDelete(): Promise<{ photo_id: string;
 export async function createAlbum(name: string): Promise<number> {
   const d = await getDb();
   const res = await d.runAsync(
-    "INSERT OR IGNORE INTO albums (name, created_at) VALUES (?, ?)",
+    "INSERT OR IGNORE INTO albums (name, created_at, sort_order) VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM albums))",
     [name, Date.now()]
   );
   if (res.changes === 0) {
@@ -1203,6 +1590,12 @@ export async function getPeopleClusters(): Promise<PersonClusterSummary[]> {
   }));
 }
 
+export async function setPersonName(personId: number, name: string | null): Promise<void> {
+  const d = await getDb();
+  const clean = name?.trim().slice(0, 60) || null;
+  await d.runAsync("UPDATE people SET name = ? WHERE id = ?", [clean, personId]);
+}
+
 export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
   const d = await getDb();
   return d.getAllAsync<PhotoRow>(
@@ -1210,6 +1603,7 @@ export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
        JOIN face_embeddings fe ON fe.photo_id = ph.id
       WHERE fe.person_id = ?
         AND ph.id NOT IN (SELECT photo_id FROM trash)
+        AND ph.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
       GROUP BY ph.id
       ORDER BY ph.taken_at DESC`,
     [personId]
@@ -1224,15 +1618,155 @@ export async function getFaceEmbeddingCount(): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** Appends new auto-tags and refreshes the FTS row. */
+export async function addPhotoTags(photoId: string, newTags: string[]): Promise<void> {
+  const row = await getPhoto(photoId);
+  if (!row) return;
+  const set = new Set(
+    (row.tags ?? "")
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+  );
+  for (const raw of newTags) {
+    const clean = raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_:-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    if (clean) set.add(clean);
+  }
+  const tags = [...set].join(" ");
+  await updatePhoto(photoId, { tags });
+  await ftsIndexPhoto({ ...row, tags });
+  await recordSyncOp("photo", photoId, "tags", tags);
+}
+
+export async function getPhotosMissingSceneTags(limit = 50): Promise<PhotoRow[]> {
+  const d = await getDb();
+  return d.getAllAsync<PhotoRow>(
+    `SELECT * FROM photos
+      WHERE status IN ('uploaded','local')
+        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
+        AND (tags IS NULL OR tags NOT LIKE '%scene:%')
+        AND (preview_file_id IS NOT NULL OR thumb_file_id IS NOT NULL OR local_uri IS NOT NULL)
+      ORDER BY taken_at DESC
+      LIMIT ?`,
+    [limit]
+  );
+}
+
+export async function getPhotosMissingFaceIndex(limit = 25): Promise<PhotoRow[]> {
+  const d = await getDb();
+  return d.getAllAsync<PhotoRow>(
+    `SELECT p.* FROM photos p
+      WHERE p.status IN ('uploaded','local')
+        AND p.id NOT IN (SELECT photo_id FROM trash)
+        AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.photo_id = p.id)
+        AND (p.preview_file_id IS NOT NULL OR p.thumb_file_id IS NOT NULL OR p.local_uri IS NOT NULL)
+      ORDER BY p.taken_at DESC
+      LIMIT ?`,
+    [limit]
+  );
+}
+
+export interface FaceWrite {
+  box: [number, number, number, number]; // x, y, w, h in source pixels
+  embedding: number[];
+}
+
+export async function replaceFacesForPhoto(
+  photoId: string,
+  faces: FaceWrite[],
+  model = "mobilefacenet"
+): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    await d.runAsync("DELETE FROM face_embeddings WHERE photo_id = ?", [photoId]);
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      const vec = new Uint8Array(new Float32Array(f.embedding).buffer);
+      await d.runAsync(
+        `INSERT INTO face_embeddings
+          (photo_id, face_index, person_id, dim, vec, model, created_at)
+         VALUES (?,?,?,?,?,?,?)`,
+        [photoId, i, null, f.embedding.length, vec, model, Date.now()]
+      );
+    }
+  });
+}
+
+export interface StoredFace {
+  photoId: string;
+  faceIndex: number;
+  embedding: number[];
+}
+
+export async function getAllFaceSamples(): Promise<StoredFace[]> {
+  const d = await getDb();
+  const rows = await d.getAllAsync<any>(
+    "SELECT photo_id, face_index, vec FROM face_embeddings"
+  );
+  const out: StoredFace[] = [];
+  for (const r of rows) {
+    try {
+      const bytes: Uint8Array =
+        r.vec instanceof Uint8Array ? r.vec : new Uint8Array(r.vec);
+      const copy = bytes.slice();
+      const floats = new Float32Array(copy.buffer, 0, Math.floor(copy.byteLength / 4));
+      out.push({
+        photoId: String(r.photo_id),
+        faceIndex: Number(r.face_index),
+        embedding: Array.from(floats),
+      });
+    } catch {}
+  }
+  return out;
+}
+
+/** Replaces all people rows and assigns each face to its cluster. */
+export async function savePeopleClusters(
+  clusters: {
+    faceKeys: string[]; // "photoId|faceIndex"
+    coverPhotoId: string | null;
+    name?: string | null;
+  }[]
+): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    await d.runAsync("DELETE FROM people");
+    await d.runAsync("UPDATE face_embeddings SET person_id = NULL");
+    for (const c of clusters) {
+      const res = await d.runAsync(
+        "INSERT INTO people (name, cover_photo_id, created_at) VALUES (?,?,?)",
+        [c.name ?? null, c.coverPhotoId, Date.now()]
+      );
+      const personId = res.lastInsertRowId ?? 0;
+      for (const key of c.faceKeys) {
+        const [photoId, idx] = key.split("|");
+        await d.runAsync(
+          "UPDATE face_embeddings SET person_id = ? WHERE photo_id = ? AND face_index = ?",
+          [personId, photoId, Number(idx)]
+        );
+      }
+    }
+  });
+}
+
 export async function renameAlbum(id: number, name: string): Promise<void> {
   const d = await getDb();
   await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [name, id]);
+  await recordSyncOp("album", String(id), "album_name", name);
 }
 
 export interface AlbumWithCover extends AlbumRow {
   count: number;
   cover_file_id: string | null;
   cover_preview_id: string | null;
+  /** Up to four newest member previews for the 2x2 cover mosaic. */
+  covers: string[];
 }
 
 export async function getAlbums(): Promise<AlbumWithCover[]> {
@@ -1243,7 +1777,7 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     `SELECT a.*, COUNT(ap.photo_id) as count
      FROM albums a
      LEFT JOIN album_photos ap ON ap.album_id = a.id
-     GROUP BY a.id ORDER BY a.created_at DESC`
+     GROUP BY a.id ORDER BY a.sort_order ASC, a.created_at DESC`
   );
   // Automatic cover: newest-taken non-trashed member of each album.
   const newest = await d.getAllAsync<any>(
@@ -1275,6 +1809,23 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
     if (!coverByAlbum.has(c.album_id)) coverByAlbum.set(c.album_id, c);
   }
   for (const c of curated) coverByAlbum.set(c.album_id, c);
+  // 2x2 mosaic inputs: up to four newest non-trashed member previews per
+  // album, resolved in one query and grouped in JS (no correlated subqueries).
+  const mosaicRows = await d.getAllAsync<any>(
+    `SELECT ap.album_id AS album_id, p.preview_file_id, p.remote_file_id
+     FROM album_photos ap
+     JOIN photos p ON p.id = ap.photo_id
+     WHERE p.id NOT IN (SELECT photo_id FROM trash)
+     ORDER BY ap.album_id ASC, p.taken_at DESC`
+  );
+  const mosaicByAlbum = new Map<number, string[]>();
+  for (const m of mosaicRows) {
+    const list = mosaicByAlbum.get(m.album_id) ?? [];
+    if (list.length >= 4) continue;
+    const fileId = m.preview_file_id ?? m.remote_file_id;
+    if (fileId) list.push(fileId);
+    mosaicByAlbum.set(m.album_id, list);
+  }
   return rows.map((r) => {
     const c = coverByAlbum.get(r.id);
     return {
@@ -1287,7 +1838,18 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
       count: r.count,
       cover_file_id: c?.remote_file_id ?? null,
       cover_preview_id: c?.preview_file_id ?? null,
+      covers: mosaicByAlbum.get(r.id) ?? [],
     };
+  });
+}
+
+/** Persist the manual album order (ids in display order). */
+export async function reorderAlbums(ids: number[]): Promise<void> {
+  const d = await getDb();
+  await d.withTransactionAsync(async () => {
+    for (let i = 0; i < ids.length; i++) {
+      await d.runAsync("UPDATE albums SET sort_order = ? WHERE id = ?", [i + 1, ids[i]]);
+    }
   });
 }
 
@@ -1296,6 +1858,7 @@ export async function getAlbums(): Promise<AlbumWithCover[]> {
 export async function setAlbumCover(albumId: number, photoId: string | null): Promise<void> {
   const d = await getDb();
   await d.runAsync("UPDATE albums SET cover_photo_id = ? WHERE id = ?", [photoId, albumId]);
+  await recordSyncOp("album", String(albumId), "cover", photoId);
 }
 
 export async function getAlbumPhotos(albumId: number): Promise<PhotoRow[]> {
@@ -1368,6 +1931,7 @@ export async function syncTripAlbums(): Promise<number> {
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`
   );
   const clusters = clusterTrips(rows.map(rowToPhoto));
@@ -1460,6 +2024,12 @@ export async function addToAlbum(albumId: number, photoIds: string[]): Promise<v
       "INSERT OR IGNORE INTO album_photos (album_id, photo_id, added_at) VALUES (?,?,?)",
       [albumId, pid, Date.now()]
     );
+    await recordSyncOp(
+      "photo",
+      pid,
+      "membership",
+      JSON.stringify({ albumId, member: true })
+    );
   }
 }
 
@@ -1467,6 +2037,12 @@ export async function removeFromAlbum(albumId: number, photoIds: string[]): Prom
   const d = await getDb();
   for (const pid of photoIds) {
     await d.runAsync("DELETE FROM album_photos WHERE album_id = ? AND photo_id = ?", [albumId, pid]);
+    await recordSyncOp(
+      "photo",
+      pid,
+      "membership",
+      JSON.stringify({ albumId, member: false })
+    );
   }
 }
 
@@ -1757,6 +2333,7 @@ export async function getDuplicateHashGroups(): Promise<PhotoRow[][]> {
     `SELECT content_hash FROM photos
      WHERE content_hash IS NOT NULL AND message_id IS NOT NULL
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY content_hash
      HAVING COUNT(*) > 1
      LIMIT 200`
@@ -1767,6 +2344,7 @@ export async function getDuplicateHashGroups(): Promise<PhotoRow[][]> {
       `SELECT * FROM photos
        WHERE content_hash = ? AND message_id IS NOT NULL
          AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        ORDER BY uploaded_at DESC`,
       [h.content_hash]
     );
@@ -1830,6 +2408,7 @@ export async function getPhotosByUploadStatus(
   const rows = await d.getAllAsync<any>(
     `SELECT * FROM photos
      WHERE ${cond} AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
@@ -1850,6 +2429,7 @@ export async function getUploadedPhotosInMonth(
        AND remote_file_id IS NOT NULL
        AND taken_at >= ? AND taken_at < ?
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`,
     [start, end]
   );
@@ -1867,6 +2447,7 @@ export async function getFreeUpCandidates(): Promise<PhotoRow[]> {
        AND local_id IS NOT NULL
        AND size IS NOT NULL AND size > 0
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   return rows.map(rowToPhoto);
@@ -1891,6 +2472,7 @@ export async function getScreenshotSunsetCandidates(days: number): Promise<Photo
        AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
             OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at ASC`
   , [cutoff]);
   return rows.map(rowToPhoto);
@@ -1965,6 +2547,7 @@ export async function getStorageSummary(): Promise<StorageSummary> {
      WHERE COALESCE(uploaded_at, taken_at) >= ?
        AND status = 'uploaded'
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY ym`,
     [since.getTime()]
   );
@@ -2003,6 +2586,7 @@ export async function getMonthlyBuckets(monthsBack = 6): Promise<MonthBucket[]> 
             COALESCE(SUM(COALESCE(size, 0)), 0) AS bytes
      FROM photos
      WHERE taken_at >= ? AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY ym`,
     [since.getTime()]
   );
@@ -2043,6 +2627,7 @@ export async function getYearGroups(): Promise<PeriodGroup[]> {
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY key ORDER BY key DESC`
   );
   const covers = await d.getAllAsync<any>(
@@ -2051,6 +2636,7 @@ export async function getYearGroups(): Promise<PeriodGroup[]> {
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC`
   );
   const coverByKey = new Map<string, any>();
@@ -2085,6 +2671,7 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ${yearFilter}
      GROUP BY key ORDER BY key DESC`,
     params
@@ -2095,6 +2682,7 @@ export async function getMonthGroups(year: number | null): Promise<PeriodGroup[]
      FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ${yearFilter}
      ORDER BY taken_at DESC`,
     params
@@ -2124,6 +2712,7 @@ export async function getPhotosInRange(startMs: number, endMs: number): Promise<
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+     AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      AND taken_at >= ? AND taken_at <= ?
      ORDER BY taken_at DESC`,
     [startMs, endMs]
@@ -2163,6 +2752,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
         (SELECT p2.preview_file_id FROM photos p2
           WHERE p2.status IN ('uploaded','local','failed')
           AND p2.id NOT IN (SELECT photo_id FROM trash)
+          AND p2.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
           AND CAST(strftime('%Y', p2.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
           AND strftime('%m-%d', p2.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
@@ -2170,6 +2760,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
         (SELECT p3.remote_file_id FROM photos p3
           WHERE p3.status IN ('uploaded','local','failed')
           AND p3.id NOT IN (SELECT photo_id FROM trash)
+          AND p3.id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
           AND CAST(strftime('%Y', p3.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) =
               CAST(strftime('%Y', p.taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER)
           AND strftime('%m-%d', p3.taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
@@ -2177,6 +2768,7 @@ export async function getMemories(windowDays = 2): Promise<MemoryGroup[]> {
       FROM photos p
       WHERE status IN ('uploaded','local','failed')
       AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
       AND CAST(strftime('%Y', taken_at / 1000, 'unixepoch', 'localtime') AS INTEGER) < ?
       AND strftime('%m-%d', taken_at / 1000, 'unixepoch', 'localtime') IN (${ph})
       GROUP BY year ORDER BY year DESC`,
@@ -2211,6 +2803,7 @@ export async function getGeotagged(limit = 800): Promise<GeotaggedPhoto[]> {
      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
      AND status IN ('uploaded','local','failed')
      AND id NOT IN (SELECT photo_id FROM trash)
+     AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      ORDER BY taken_at DESC LIMIT ?`,
     [limit]
   );
@@ -2229,6 +2822,7 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
     `SELECT content_hash, COUNT(*) as n FROM photos
      WHERE content_hash IS NOT NULL
      AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
      GROUP BY content_hash HAVING n > 1
      ORDER BY n DESC`
   );
@@ -2236,6 +2830,7 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
   for (const h of hashes) {
     const rows = await d.getAllAsync<any>(
       `SELECT * FROM photos WHERE content_hash = ? AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        ORDER BY CASE WHEN status = 'uploaded' THEN 0 ELSE 1 END, taken_at DESC`,
       [h.content_hash]
     );
@@ -2314,6 +2909,7 @@ export async function getJpegRowsForPhash(): Promise<PhotoRow[]> {
     `SELECT * FROM photos
      WHERE status IN ('uploaded','local','failed')
        AND id NOT IN (SELECT photo_id FROM trash)
+      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)
        AND (mime = 'image/jpeg'
             OR LOWER(filename) LIKE '%.jpg'
             OR LOWER(filename) LIKE '%.jpeg')
@@ -2384,6 +2980,10 @@ export async function importAllData(json: string, replace: boolean): Promise<num
       // exist — Maintenance can rebuild them.
       await d.runAsync("DELETE FROM upload_queue");
       await d.runAsync("DELETE FROM photo_embeddings");
+      // The restored index has different photo ids; old sync ops/conflicts
+      // would point at rows that no longer exist.
+      await d.runAsync("DELETE FROM sync_ops");
+      await d.runAsync("DELETE FROM sync_conflicts");
     }
     for (const p of data.photos ?? []) {
       const res = await d.runAsync(
@@ -2460,7 +3060,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
     }
     for (const a of data.albums ?? []) {
       await d.runAsync(
-        "INSERT OR IGNORE INTO albums (id, name, created_at, locked, query, cover_photo_id) VALUES (?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO albums (id, name, created_at, locked, query, cover_photo_id, sort_order) VALUES (?,?,?,?,?,?,?)",
         [
           a.id,
           a.name,
@@ -2468,6 +3068,7 @@ export async function importAllData(json: string, replace: boolean): Promise<num
           a.locked ?? null,
           typeof a.query === "string" ? a.query.slice(0, 100_000) : null,
           typeof a.cover_photo_id === "string" ? a.cover_photo_id : null,
+          Number.isFinite(a.sort_order) ? a.sort_order : 0,
         ]
       );
     }

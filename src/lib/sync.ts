@@ -39,6 +39,11 @@ export async function canAutoSyncNow(prefs?: Prefs): Promise<boolean> {
   // /pause from the channel (remote.ts) is the cheapest gate — check it first
   // so a paused device never even touches the network/battery probes.
   if (await isRemotePaused()) return false;
+  // Per-device stop: /revoke or /pause <thisDeviceId>.
+  try {
+    const { thisDeviceBlocked } = await import("./devices");
+    if (await thisDeviceBlocked()) return false;
+  } catch {}
   // Low-storage guard (storage.ts): automatic work stops below the critical
   // threshold — a full disk turns uploads/preview writes into silent failures.
   // Manual syncs never hit this path.
@@ -231,8 +236,25 @@ export async function scanRecentAndEnqueue(sinceMs: number): Promise<number> {
 export async function runSyncNow(
   onProgress?: (scanned: number, enqueued: number) => void
 ): Promise<ScanResult> {
+  // /revoke is a hard stop for this device, including manual scans.
+  try {
+    const { isDeviceRevoked } = await import("./devices");
+    if (await isDeviceRevoked()) {
+      return { scanned: 0, enqueued: 0 };
+    }
+  } catch {}
   const result = await scanAndEnqueueAll(onProgress);
   void processQueue();
+  // Auto-add album rules run after a scan; idempotent, best-effort.
+  void import("./albumRulesApply").then(({ applyAlbumRules }) => applyAlbumRules());
+  // Optional automatic ML pass (only when the user enabled it and models exist).
+  void import("./settings").then(async ({ loadPrefs }) => {
+    const prefs = await loadPrefs();
+    if (prefs.autoMlIndex) {
+      const { runAutoMlIndex } = await import("./mlAuto");
+      void runAutoMlIndex(10);
+    }
+  });
   return result;
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Dimensions, FlatList, Image, Pressable, StyleSheet, Text, View } from "../rn";
+import { FlatList, Image, Pressable, StyleSheet, Text, View } from "../rn";
 import * as MediaLibrary from "expo-media-library";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../useTheme";
@@ -7,6 +7,9 @@ import { getMonthGroups, type PeriodGroup } from "../lib/db";
 import { getLocalPeriodBuckets, monthLabel } from "../lib/localPeriods";
 import { isDecoyActive } from "../lib/applock";
 import { TelegramImage } from "../components/TelegramImage";
+import { AppBar, EmptyState } from "../components/ui";
+import { useResponsive } from "../lib/responsive";
+import { spacing } from "../theme";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -69,22 +72,22 @@ export function MonthsOfYearScreen({
     })();
   }, [year]);
 
-  const tileW = (Dimensions.get("window").width - 32 - 12) / 2;
+  const { width: periodWidth } = useResponsive();
+  const periodColumns = periodWidth >= 1000 ? 4 : periodWidth >= 720 ? 3 : 2;
+  const tileW = Math.floor(
+    (periodWidth - spacing.lg * 2 - spacing.md * (periodColumns - 1)) / periodColumns
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>{year}</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar title={String(year)} onBack={() => navigation.goBack()} theme={theme} borderless />
       <FlatList
         data={groups}
         keyExtractor={(g) => g.key}
-        numColumns={2}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
-        columnWrapperStyle={{ gap: 12 }}
+        numColumns={periodColumns}
+        key={periodColumns}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
+        columnWrapperStyle={{ gap: spacing.md }}
         renderItem={({ item }) => (
           <Pressable
             style={[styles.card, { width: tileW, backgroundColor: theme.colors.surface }]}
@@ -95,6 +98,8 @@ export function MonthsOfYearScreen({
                 endMs: item.endMs,
               })
             }
+            accessibilityRole="button"
+            accessibilityLabel={`${item.label}, ${item.count} photo${item.count === 1 ? "" : "s"}`}
           >
             <View style={[styles.cover, { width: tileW, height: tileW * 0.72 }]}>
             {item.cover_preview_id ?? item.cover_file_id ? (
@@ -125,9 +130,7 @@ export function MonthsOfYearScreen({
           </Pressable>
         )}
         ListEmptyComponent={
-          <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
-            No photos in {year}.
-          </Text>
+          <EmptyState theme={theme} title={`No photos in ${year}`} message="Photos taken this year will appear here once they are backed up." compact />
         }
       />
     </View>
@@ -172,16 +175,14 @@ export function PeriodPhotosScreen({ route, navigation }: { route: any; navigati
   }, [startMs, endMs]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Back" accessibilityRole="button">
-          <Text style={{ color: theme.colors.onSurface, fontSize: 20 }}>←</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
-          {title}
-        </Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{photos.length}</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <AppBar
+        title={title}
+        subtitle={`${photos.length} photo${photos.length === 1 ? "" : "s"}`}
+        onBack={() => navigation.goBack()}
+        theme={theme}
+        borderless
+      />
       {loading ? null : (
         <MonthGrid
           photos={photos}
@@ -225,15 +226,23 @@ export function MonthGrid({
 }) {
   const defaultTheme = useTheme();
   const t = theme ?? defaultTheme;
-  const tile = (Dimensions.get("window").width - 4) / 3;
+  const { width: gridWidth } = useResponsive();
+  const gridColumns = gridWidth >= 1000 ? 6 : gridWidth >= 720 ? 5 : 3;
+  const tile = Math.floor((gridWidth - spacing.seam * (gridColumns - 1)) / gridColumns);
   return (
     <FlatList
       data={photos}
       keyExtractor={(p) => p.id}
-      numColumns={3}
-      contentContainerStyle={{ padding: 2 }}
+      numColumns={gridColumns}
+      key={gridColumns}
+      contentContainerStyle={{ paddingBottom: 8 }}
       renderItem={({ item }) => (
-        <Pressable style={{ width: tile, height: tile, padding: 1 }} onPress={() => onPress(item)}>
+        <Pressable
+          style={{ width: tile, height: tile, padding: spacing.seam / 2 }}
+          onPress={() => onPress(item)}
+          accessibilityRole="button"
+          accessibilityLabel={item.filename ?? "Photo"}
+        >
           {item.local_id && !item.remote_file_id && !item.preview_file_id && !item.thumb_file_id ? (
             <LocalAssetThumb assetId={item.local_id} style={{ width: "100%", height: "100%" }} />
           ) : (
@@ -246,11 +255,7 @@ export function MonthGrid({
           )}
         </Pressable>
       )}
-      ListEmptyComponent={
-        <Text style={[styles.empty, { color: t.colors.onSurfaceVariant, padding: 24 }]}>
-          No photos.
-        </Text>
-      }
+      ListEmptyComponent={<EmptyState theme={t} title="No photos" compact />}
     />
   );
 }

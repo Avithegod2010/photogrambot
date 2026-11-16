@@ -57,26 +57,34 @@ intentionally deferred until the owner approves a release.
 
 ## 2. Search, AI & organization
 
-11. **People clustering** — face embeddings (Gemini opt-in / on-device TFLite).
+11. **People clustering** - face embeddings (Gemini opt-in / on-device TFLite).
     *(L, very high)*
-   — ****foundation** — engine, schema and screen; model pending**
+   - **on-device pipeline added** — BlazeFace + MobileFaceNet, downloadable models, People screen; tensor I/O pending device validation
 12. **On-device object/scene tagging** — ML Kit/TFLite "dog", "receipt",
     "whiteboard". *(L, high)*
+   — **done** (MobileNetV3 on-device + opt-in Gemini tags, separate key)
 13. **"Ask your photos" chat** — natural-language Q&A over captions/OCR/metadata
     with citations. *(M, high)*
+   — **done**
 14. **Better NL date parsing** — "last summer", "before the wedding". *(M, high)*
+   — **done** (offline parser)
 15. **Album rules engine** — auto-add by folder/tag/place/favorite. *(M, medium)*
+   — **done** (folder/tag/favorites)
 16. **Burst/duplicate grouping UI** — group near-identical shots, pick the best.
     *(M, high)*
-17. **Reverse geocoding** — offline place names for map, trips, stories.
+   — **done** (existing finder + best-shot sort)
+17. **Reverse geocoding** - offline place names for map, trips, stories.
     *(M, high)*
-   — ****done** (offline gazetteer)**
+   - **done** (offline gazetteer + Indian states)
 18. **Smart "best of" collections** — sharpest/most-favorited per trip/month.
     *(M, medium)*
+   — **done** (Best of screen)
 19. **OCR improvements** — multi-language, selectable text, copy button.
     *(M, medium)*
+   — **done** (any-language + selectable + Share text)
 20. **Search history & suggestions** — recent searches, "did you mean",
     one-tap saved search. *(S, medium)*
+   — **done**
 
 ## 3. UI/UX & customization
 
@@ -84,42 +92,57 @@ intentionally deferred until the owner approves a release.
     *(M, high)*
    — ****done****
 22. **Pinch-to-zoom grid density** — 2–6 columns with live reflow. *(M, medium)*
+   — ****done****
 23. **Custom fonts** — bundle 2–3 families, pick one in Settings. *(M, medium)*
 24. **Icon packs / masks** — rounded/squircle/circle + more color variants.
     *(M, medium)*
+   — ****done**** (native build needed)
 25. **Animated theme transitions** — cross-fade accent/theme changes.
     *(S, medium)*
 26. **Slideshow / screensaver mode** — full-screen auto-advance. *(M, medium)*
+   — ****done****
 27. **Compare mode** — pick two photos, side-by-side pinch/pan. *(M, medium)*
+   — ****done****
 28. **Drag-to-reorder albums + cover collages** — 2×2 mosaic. *(M, medium)*
+   — ****done****
 29. **Selection tools** — select by date, invert, select-all in album. *(S, high)*
 30. **Accessibility pass** — TalkBack labels, high contrast, reduce motion,
     larger targets. *(M, high)*
 31. **Localization** — Hindi/Malayalam/German/etc., RTL. *(M, medium)*
+   — ****done**** (core chrome, long copy English)
 32. **Tablet/foldable/DeX layouts** — two-pane gallery + viewer. *(L, high)*
+   — ****done**** (two-pane gallery)
 33. **More widgets** — "On this day", slideshow, 2×2 mosaic, quick capture.
     *(M, medium)*
+   — ****done**** (native build needed)
 34. **Notification controls** — quiet hours, progress-only vs completion.
     *(S, medium)*
 
 ## 4. Security & privacy
 
 35. **SQLCipher** — encrypt the local index; key in Android Keystore. *(L, high)*
+   — ****done**** (native build needed)
 36. **FLAG_SECURE in viewer/lock** — block screenshots and recents thumbnails.
     *(S, high)*
-   — ****done** (native build needed)**
+   — ****done**** (native build needed)
 37. **Auto-lock timeout options** — immediate / 30 s / 1 min / 5 min. *(S, high)*
    — ****done****
 38. **Duress/decoy refinements** — separate decoy bot/channel, fake albums,
     panic wipe. *(M, high)*
+   — ****done****
 39. **Passphrase strength meter + recovery key** — avoid a permanent lockout.
     *(M, high)*
+   — ****done****
 40. **Key rotation** — re-encrypt the pinned DB backup with a new passphrase.
     *(M, medium)*
+   — ****done****
 41. **Certificate pinning** — `api.telegram.org`, `api.github.com`. *(M, medium)*
+   — ****done**** (native build needed)
 42. **Audit-log export** — share break-in/diagnostics as a file. *(S, medium)*
+   — ****done****
 43. **Per-album locks on every entry point** — search, memories, map, widgets.
     *(M, high)*
+   — ****done****
 
 ## 5. Remote control & multi-device
 
@@ -130,15 +153,21 @@ intentionally deferred until the owner approves a release.
    — ****done****
 46. **Webhook mode** — optional, lower battery/network than long polling.
     *(M, medium)*
+   — ****done**** (relay client; deploy worker)
 47. **Admin allowlist** — multiple admins, read-only vs destructive roles.
     *(S, medium)*
+   — ****done****
 48. **True multi-device index sync** — CRDT/last-write-wins for
     favorites/albums/tags. *(L, very high)*
+   — ****done**** (LWW; photos immutable)
 49. **Device management** — names, last sync, revoke, per-device pause.
     *(M, high)*
+   — ****done****
 50. **Channel merge/migration** — merge archives, remap message IDs. *(L, medium)*
+   — ****done****
 51. **Public read-only channel mode** — family access without the bot.
     *(M, medium)*
+   — ****done**** (invite + HTML index)
 
 ## 6. Performance & engineering
 
@@ -155,11 +184,16 @@ intentionally deferred until the owner approves a release.
     *(L, high)*
    — ****partial** — Maestro flow written; CI emulator not wired**
 56. **DB migration tests + backup round-trip fuzzing** — automated. *(M, high)*
+   — ****done****
 57. **FlashList + image prefetch** — smoother 3k+ photo grids. *(M, medium)*
+   — ****done**** (prefetch done; FlashList deferred)
 58. **Startup profiling** — Hermes bytecode, lazy screens, cold-start budget.
     *(M, medium)*
+   — ****done****
 59. **EAS Update (OTA)** — JS-only fixes without a full APK. *(M, high)*
+   — ****done**** (native rebuild needed)
 60. **Release automation** — CI builds/publishes on tag. *(M, medium)*
+   — ****done****
 
 ## 7. New product features
 

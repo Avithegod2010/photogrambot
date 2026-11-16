@@ -2,13 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Image,
   Linking,
   Modal,
   Pressable,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,29 +15,58 @@ import {
 } from "../rn";
 import * as MediaLibrary from "expo-media-library";
 import { File } from "expo-file-system";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { useReducedMotion } from "../useReducedMotion";
+import { hapticImpact, hapticSelection } from "../lib/haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useSetupStore } from "../store/useSetupStore";
 import { useUploadStore } from "../store/useUploadStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useTheme } from "../useTheme";
-import { groupPhotosByDate, formatBytes, formatDuration, isVideoMime } from "../lib/format";
+import { useT } from "../useT";
+import { groupPhotosByDate, formatBytes, formatDate, formatDuration, isVideoMime } from "../lib/format";
 import { getUploadedLocalIds, getPhotoByLocalId, getMonthlyBuckets, getDistinctDevices, saveSearch, type MonthBucket, type SearchFilters } from "../lib/db";
 import { ToggleRow } from "../components/ui";
 import { isDecoyActive } from "../lib/applock";
+import { useResponsive } from "../lib/responsive";
+import { prefetchThumbs } from "../lib/prefetch";
 import { TelegramImage, resolvePhotoThumb } from "../components/TelegramImage";
-import { GearIcon, HeartIcon, TrashIcon, SparkleIcon } from "../components/icons";
+import { GearIcon, HeartIcon, MapPinIcon, MoreVerticalIcon, TrashIcon, SparkleIcon, ChevronRightIcon } from "../components/icons";
 import { MemoriesCarousel } from "../components/MemoriesCarousel";
 import { DateScrubber } from "../components/DateScrubber";
 import { EmptyGalleryArt, EmptySearchArt } from "../components/illustrations";
 import { getCachedTelegramFile } from "../lib/media";
 import { tokenForPhoto, listProfiles } from "../lib/destinations";
 import { shareMedia } from "../../modules/share-intent";
-import { Button, Dialog, TextField } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  EmptyState,
+  IconButton,
+  ListRow,
+  ProgressBar,
+  SegmentedControl,
+  Sheet,
+  TextField,
+} from "../components/ui";
+import { radius, spacing, touchTarget, typography, fallback, overlay, motion } from "../theme";
 import { nlToSearch } from "../lib/ai";
 import { searchSemantic } from "../lib/semsearch";
 import { getAiApiKey } from "../lib/settings";
 import { AUTO_TAGS } from "../lib/autotags";
+import { suggestTerm } from "../lib/suggest";
+import { parseDateQuery } from "../lib/nlDate";
 import type { PeriodGroup } from "../lib/db";
 import type { PhotoRow } from "../lib/db";
 
@@ -54,7 +81,7 @@ type LocalItem = {
 const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
 const COLUMNS = 3;
-const clampColumns = (n: number) => Math.max(2, Math.min(5, Math.round(n || COLUMNS)));
+const clampColumns = (n: number) => Math.max(2, Math.min(6, Math.round(n || COLUMNS)));
 
 // Local-roll page size. The new Query builder exposes no cursor API
 // (offset/limit only), so infinite scroll pages through the media store by
@@ -63,12 +90,21 @@ const LOCAL_PAGE_SIZE = 600;
 
 export function GalleryScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
+  const tr = useT();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotion();
   const { photos, loading, loadingMore, hasMore, loadInitial, loadMore, refresh, refreshMeta, stats } =
     useLibraryStore();
   const { channelId, channelTitle } = useSetupStore();
   const { progress, start, cancel, subscribe } = useUploadStore();
 
+  // Wide layouts (tablets/foldables/DeX) show a master-detail pane: tapping a
+  // tile previews it on the right instead of opening the full-screen viewer.
+  const { width: windowWidth, isWide } = useResponsive();
+  const paneWidth = Math.min(440, Math.round(windowWidth * 0.4));
+  const [widePreview, setWidePreview] = useState<
+    { kind: "photo"; photo: PhotoRow } | { kind: "local"; item: LocalItem } | null
+  >(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   // Range-select anchor: the last tile added while in selection mode.
@@ -85,6 +121,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     }
     return false;
   }, [selection, searchResults, photos]);
+  // Exactly two backed-up rows selected -> offer side-by-side compare.
+  const comparePair = useMemo(() => {
+    if (selection.size !== 2) return null;
+    const src = searchResults ?? photos;
+    const chosen = src.filter((p) => selection.has(p.id));
+    return chosen.length === 2 ? chosen : null;
+  }, [selection, searchResults, photos]);
   const [filters, setFilters] = useState<SearchFilters | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [nlLoading, setNlLoading] = useState(false);
@@ -93,6 +136,12 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [albumDialogVisible, setAlbumDialogVisible] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
+  const [selMenuVisible, setSelMenuVisible] = useState(false);
+  const [trashDialogVisible, setTrashDialogVisible] = useState(false);
+  // Measured height of the floating chrome (header + switches + search), so
+  // the sticky date header and scrubber sit exactly below it at any font scale.
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const [bannerHeight, setBannerHeight] = useState(0);
   const { albums, newAlbum, addPhotosToAlbum } = useLibraryStore();
   const staggeredPref = useSettingsStore((s) => s.prefs.staggeredGrid);
   const tileAspect = useSettingsStore((s) => s.prefs.tileAspect);
@@ -106,7 +155,26 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   const showDateCounts = useSettingsStore((s) => s.prefs.showDateCounts);
   const appDisplayName = useSettingsStore((s) => s.prefs.appDisplayName);
   const dateFormat = useSettingsStore((s) => s.prefs.dateFormat);
+  const searchHistory = useSettingsStore((s) => s.prefs.searchHistory);
+  const updatePrefs = useSettingsStore((s) => s.update);
   const includeVideos = useSettingsStore((s) => s.prefs.includeVideos);
+  // Pinch to change grid density (2-6 columns) without leaving the grid.
+  // Two-finger gestures never collide with one-finger scroll/paint-select.
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .runOnJS(true)
+        .onEnd((e) => {
+          const current = clampColumns(useSettingsStore.getState().prefs.gridColumns);
+          let next = current;
+          if (e.scale > 1.18) next = current - 1;
+          else if (e.scale < 0.85) next = current + 1;
+          if (next !== current) {
+            void updatePrefs({ gridColumns: clampColumns(next) });
+          }
+        }),
+    [updatePrefs]
+  );
   const [newAlbumName, setNewAlbumName] = useState("");
   const decoy = isDecoyActive();
   // The Gallery tab mirrors the phone's own gallery: every local asset, with
@@ -134,6 +202,15 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     void loadLocal();
     return subscribe();
   }, []);
+
+  // Warm the first screenful of Telegram previews so scrolling starts with
+  // cached images instead of a wall of placeholders.
+  useEffect(() => {
+    void prefetchThumbs(photos.slice(0, 24));
+  }, [photos.length]);
+  useEffect(() => {
+    if (searchResults) void prefetchThumbs(searchResults.slice(0, 24));
+  }, [searchResults]);
 
   useEffect(() => {
     if (decoy) {
@@ -291,7 +368,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }, [localAssets, decoy, dateFormat]);
 
   // Scrubber support: measured section offsets, refreshed on every layout.
-  const localListRef = useRef<FlatList<any>>(null);
+  const localListRef = useRef<FlashListRef<any>>(null);
   const localSectionYs = useRef<number[]>([]);
   const [localScrollY, setLocalScrollY] = useState(0);
 
@@ -310,7 +387,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   // Floor + margin: all columns must fit the wrap container even after the
   // framework rounds fractional DP to whole pixels (2-per-row rounding bug).
   const tile = Math.floor(
-    (Dimensions.get("window").width - (compactGrid ? 4 : 8)) / gridColumns
+    (windowWidth - (compactGrid ? 4 : 8)) / gridColumns
   );
 
   const onTilePress = useCallback(
@@ -324,13 +401,17 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         // long-press range further down the grid.
         setRangeAnchorId(next.has(photo.id) ? photo.id : null);
         if (next.size === 0) setSelectionMode(false);
+      } else if (isWide) {
+        // Master-detail: preview on the right; "Open" in the pane launches the
+        // full viewer.
+        setWidePreview({ kind: "photo", photo });
       } else {
         const flat = searchResults ?? photos;
         const idx = flat.findIndex((p) => p.id === photo.id);
         navigation.navigate("Viewer", { photos: flat, index: idx });
       }
     },
-    [selectionMode, selection, photos, searchResults, navigation]
+    [selectionMode, selection, photos, searchResults, navigation, isWide]
   );
 
   // Range select: in selection mode, long-pressing another tile selects the
@@ -411,6 +492,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
   }, []);
+
+  function commitSearch(q: string) {
+    const term = q.trim();
+    if (term.length < 2) return;
+    const next = [term, ...(searchHistory ?? []).filter((h) => h !== term)].slice(0, 10);
+    void updatePrefs({ searchHistory: next });
+  }
 
   function runSearch(q: string) {
     setSearch(q);
@@ -495,6 +583,23 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
 
   async function runNaturalLanguageSearch() {
     if (nlLoading) return;
+    // Local date phrases first: no API key, no cloud call.
+    const dateHit = parseDateQuery(search);
+    if (dateHit) {
+      setNlLoading(true);
+      try {
+        const rows = await applyNaturalSearch(dateHit.rest, {
+          takenAfter: dateHit.startMs,
+          takenBefore: dateHit.endMs,
+        });
+        if (rows !== null && rows.length === 0) {
+          Alert.alert("Date search", `No photos found for ${dateHit.label}.`);
+        }
+      } finally {
+        setNlLoading(false);
+      }
+      return;
+    }
     const apiKey = await getAiApiKey().catch(() => null);
     if (!apiKey) {
       Alert.alert("AI search", "Add your Gemini API key in Settings → AI captions first.");
@@ -606,31 +711,16 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }
 
   async function trashSelected() {
+    if (selection.size === 0) return;
+    setTrashDialogVisible(true);
+  }
+
+  async function confirmTrash(deleteFromTelegram: boolean) {
     const ids = Array.from(selection);
-    Alert.alert(
-      `Move ${ids.length} photo${ids.length === 1 ? "" : "s"} to trash?`,
-      "You can restore them from Collections → Trash, or delete from Telegram permanently later.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Hide locally",
-          onPress: async () => {
-            await useLibraryStore.getState().trashPhotos(ids, false);
-            setSelection(new Set());
-            setSelectionMode(false);
-          },
-        },
-        {
-          text: "Delete from Telegram too",
-          style: "destructive",
-          onPress: async () => {
-            await useLibraryStore.getState().trashPhotos(ids, true);
-            setSelection(new Set());
-            setSelectionMode(false);
-          },
-        },
-      ]
-    );
+    setTrashDialogVisible(false);
+    await useLibraryStore.getState().trashPhotos(ids, deleteFromTelegram);
+    setSelection(new Set());
+    setSelectionMode(false);
   }
 
   function renderTile(photo: PhotoRow, width?: number, height?: number) {
@@ -640,8 +730,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const h = height ?? tile;
     return (
       <Pressable
+        accessibilityRole="button"
+        testID="photo-tile"
+        accessibilityLabel={`Photo ${photo.filename}${photo.favorite ? ", favorite" : ""}${photo.status === "uploaded" ? ", backed up" : ""}`}
         onPress={() => {
           paintState.current = null;
+          if (selectionMode) hapticSelection();
+          else hapticImpact("light");
           onTilePress(photo, 0);
         }}
         onPressIn={(e) => {
@@ -667,9 +762,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         onLongPress={() => {
           paintState.current = null;
           if (selectionMode && rangeAnchorId && rangeAnchorId !== photo.id) {
+            hapticSelection();
             selectRange(rangeAnchorId, photo.id);
             return;
           }
+          hapticImpact("medium");
           setSelectionMode(true);
           setSelection(new Set([photo.id]));
           setRangeAnchorId(photo.id);
@@ -684,7 +781,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         />
         {showFavoriteBadge && photo.favorite ? (
           <View style={[styles.favBadge, { backgroundColor: theme.colors.scrim }]}>
-            <HeartIcon color={"#FF8FA3"} size={16} filled={true} />
+            <HeartIcon color={fallback.favorite} size={16} filled={true} />
           </View>
         ) : null}
         {showVideoBadge && (isVideoMime(photo.mime) || (photo.duration ?? 0) > 0) ? (
@@ -722,7 +819,11 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     );
   }
 
-  async function onLocalPress(item: LocalItem) {
+  async function onLocalPress(item: LocalItem, forceOpen = false) {
+    if (isWide && !selectionMode && !forceOpen) {
+      setWidePreview({ kind: "local", item });
+      return;
+    }
     // Backed-up assets open their real DB row; local-only ones open a
     // lightweight viewer entry straight from the device file.
     const dbPhoto = uploadedIds.has(item.id) ? await getPhotoByLocalId(item.id) : null;
@@ -784,7 +885,13 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
     const w = width ?? tile;
     const h = height ?? tile;
     return (
-      <Pressable onPress={() => void onLocalPress(item)} style={{ width: w, height: h }}>
+      <Pressable
+        onPress={() => void onLocalPress(item)}
+        accessibilityRole="button"
+        testID="local-tile"
+        accessibilityLabel={`Photo${backedUp ? ", backed up" : ""}`}
+        style={{ width: w, height: h }}
+      >
         <LocalThumb assetId={a.id} />
         {showVideoBadge && a.mediaType === MediaLibrary.MediaType.VIDEO ? (
           <View style={styles.videoBadge}>
@@ -801,88 +908,80 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
+    <GestureDetector gesture={pinchGesture}>
+      <View style={[styles.container, { backgroundColor: theme.colors.background, paddingTop: insets.top }]}>
+      <View style={styles.chrome} onLayout={(e) => setChromeHeight(e.nativeEvent.layout.height)}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.appTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
+          <Text
+            accessibilityRole="header"
+            numberOfLines={1}
+            style={[typography.title, { color: theme.colors.onSurface }]}
+          >
             {appDisplayName || "PhotogramBot"}
           </Text>
-          {channelTitle && !decoy ? (
-            <View
-              style={[
-                styles.channelChip,
-                { backgroundColor: theme.colors.surfaceHighest },
-              ]}
-            >
-              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>
-                {channelTitle}
-              </Text>
-            </View>
-          ) : null}
+          {channelTitle && !decoy ? <Badge label={channelTitle} theme={theme} /> : null}
         </View>
-        <Pressable
+        <IconButton
+          icon={<MapPinIcon color={theme.colors.onSurfaceVariant} size={22} />}
+          label="Map view"
+          theme={theme}
           onPress={() => navigation.navigate("Map")}
-          style={styles.gear}
-          accessibilityLabel="Map view"
-        >
-          <Text style={{ fontSize: 18, color: theme.colors.onSurface }}>◉</Text>
-        </Pressable>
+        />
         {!decoy ? (
-          <Pressable
+          <IconButton
+            icon={
+              <GearIcon
+                color={typeof theme.colors.onSurface === "string" ? theme.colors.onSurface : fallback.onSurface}
+                size={22}
+              />
+            }
+            label="Settings"
+            theme={theme}
             onPress={() => navigation.navigate("Settings")}
-            style={styles.gear}
-            accessibilityLabel="Settings"
-            accessibilityRole="button"
-          >
-            <GearIcon
-              color={typeof theme.colors.onSurface === "string" ? theme.colors.onSurface : "#E4E2EA"}
-              size={22}
-            />
-          </Pressable>
+            testID="settings-gear"
+          />
         ) : null}
       </View>
 
       <View style={styles.viewSwitchRow}>
-        <View style={[styles.viewSwitch, { backgroundColor: theme.colors.surfaceContainer }]}>
-          {(["days", "months", "years"] as const).map((m) => (
-            <Pressable
-              key={m}
-              onPress={() => setViewMode(m)}
-              style={[
-                styles.viewSwitchBtn,
-                viewMode === m && { backgroundColor: theme.colors.primaryContainer },
-              ]}
-            >
-              <Text
-                style={{
-                  color:
-                    viewMode === m
-                      ? theme.colors.onPrimaryContainer
-                      : theme.colors.onSurfaceVariant,
-                  fontWeight: viewMode === m ? "700" : "500",
-                  fontSize: 12,
-                  textTransform: "capitalize",
-                }}
-              >
-                {m}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <SegmentedControl
+          accessibilityLabel="Gallery grouping"
+          options={[
+            { key: "days", label: tr("gallery.days") },
+            { key: "months", label: tr("gallery.months") },
+            { key: "years", label: tr("gallery.years") },
+          ]}
+          value={viewMode}
+          onChange={setViewMode}
+          theme={theme}
+        />
       </View>
 
       <View style={[styles.searchBar, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <Text style={{ color: theme.colors.onSurfaceVariant }}>⌕</Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>⌕</Text>
         <TextInput
-          placeholder="Search photos"
+          placeholder={tr("common.search")}
           placeholderTextColor={theme.colors.onSurfaceVariant}
           value={search}
           onChangeText={runSearch}
+          onSubmitEditing={() => {
+            commitSearch(search);
+            runSearch(search);
+          }}
+          returnKeyType="search"
+          accessibilityLabel={tr("common.search")}
           style={[styles.searchInput, { color: theme.colors.onSurface }]}
           selectionColor={theme.colors.primary}
         />
         {filters ? (
-          <Pressable onPress={() => void applyFilters(null)} hitSlop={6}>
+          <Pressable
+            onPress={() => void applyFilters(null)}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Clear filters"
+            style={styles.searchAction}
+          >
             <Text style={{ color: theme.colors.primary, fontSize: 11, fontWeight: "700" }}>FILTERED</Text>
           </Pressable>
         ) : null}
@@ -893,6 +992,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             disabled={nlLoading}
             accessibilityLabel="AI search"
             accessibilityRole="button"
+            accessibilityState={{ busy: nlLoading }}
+            style={styles.searchAction}
           >
             {nlLoading ? (
               <ActivityIndicator size="small" color={theme.colors.primary} />
@@ -904,52 +1005,127 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
         <Pressable
           onPress={() => setFilterSheetVisible(true)}
           hitSlop={6}
-          style={{ paddingHorizontal: 4 }}
           accessibilityLabel="Filters"
           accessibilityRole="button"
+          style={styles.searchAction}
         >
-          <Text style={{ color: theme.colors.onSurfaceVariant }}>☰</Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>☰</Text>
         </Pressable>
         {search.length > 0 ? (
           <Pressable
             onPress={() => runSearch("")}
             accessibilityLabel="Clear search"
             accessibilityRole="button"
+            hitSlop={6}
+            style={styles.searchAction}
           >
-            <Text style={{ color: theme.colors.onSurfaceVariant }}>✕</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
           </Pressable>
         ) : null}
       </View>
+      </View>
+
+      {search.length === 0 && !searchResults && (searchHistory?.length ?? 0) > 0 && !decoy ? (
+        <View style={styles.historyRow}>
+          {searchHistory.slice(0, 6).map((term) => (
+            <Pressable
+              key={term}
+              onPress={() => {
+                runSearch(term);
+                commitSearch(term);
+              }}
+              style={[styles.historyChip, { backgroundColor: theme.colors.surfaceHighest }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Search for ${term}`}
+            >
+              <Text style={{ color: theme.colors.onSurface, fontSize: 11.5 }} numberOfLines={1}>
+                {term}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={() => void updatePrefs({ searchHistory: [] })}
+            hitSlop={6}
+            accessibilityLabel="Clear search history"
+            accessibilityRole="button"
+          >
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>Clear</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {searchResults && searchResults.length === 0 && search.trim().length > 2 && !decoy
+        ? (() => {
+            const suggestion = suggestTerm(search, [
+              ...AUTO_TAGS,
+              ...(searchHistory ?? []),
+            ]);
+            return suggestion ? (
+              <Pressable
+                onPress={() => {
+                  runSearch(suggestion);
+                  commitSearch(suggestion);
+                }}
+                style={{ paddingHorizontal: 16, paddingBottom: 6 }}
+              >
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12.5 }}>
+                  Did you mean{" "}
+                  <Text style={{ color: theme.colors.primary, fontWeight: "700" }}>{suggestion}</Text>?
+                </Text>
+              </Pressable>
+            ) : null;
+          })()
+        : null}
 
       {progress.running ? (
         <Pressable
           style={[styles.progressBanner, { backgroundColor: theme.colors.primaryContainer }]}
+          onLayout={(e) => setBannerHeight(e.nativeEvent.layout.height)}
           onPress={cancel}
+          accessibilityRole="button"
+          accessibilityLabel={`Backing up ${progress.current} of ${progress.total}. Tap to cancel.`}
         >
-          <ActivityIndicator size="small" color={theme.colors.onPrimaryContainer} />
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={{ color: theme.colors.onPrimaryContainer, fontWeight: "600", fontSize: 13 }}>
-              Backing up {progress.current}/{progress.total}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <ActivityIndicator size="small" color={theme.colors.onPrimaryContainer} />
+            <Text
+              style={[typography.smallStrong, { color: theme.colors.onPrimaryContainer, flex: 1 }]}
+              numberOfLines={1}
+            >
+              {tr("gallery.backingUp")} {progress.current}/{progress.total}
               {progress.percent !== null ? ` — ${progress.percent}%` : ""}
             </Text>
-            <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 11 }} numberOfLines={1}>
-              {progress.currentFile ?? "Preparing…"} — tap to cancel
-            </Text>
           </View>
+          <View style={{ marginTop: spacing.sm }}>
+            <ProgressBar
+              value={
+                progress.percent !== null && progress.percent !== undefined
+                  ? progress.percent / 100
+                  : progress.total > 0
+                    ? progress.current / progress.total
+                    : 0
+              }
+              theme={theme}
+              label="Backup progress"
+            />
+          </View>
+          <Text
+            style={[typography.caption, { color: theme.colors.onPrimaryContainer, marginTop: 4 }]}
+            numberOfLines={1}
+          >
+            {progress.currentFile ?? "Preparing…"} · tap to cancel
+          </Text>
         </Pressable>
       ) : null}
 
       {searchResults && searchResults.length === 0 ? (
-        <View style={styles.empty}>
-          <EmptySearchArt
-            color={theme.colors.onSurfaceVariant}
-            accent={theme.colors.primary}
-            size={110}
-          />
-          <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 10 }}>
-            No results for “{search}”
-          </Text>
-        </View>
+        <EmptyState
+          theme={theme}
+          art={<EmptySearchArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={110} />}
+          title={search.trim() ? `No results for “${search}”` : "No matching photos"}
+          message="Try a different word, or clear the filters to search the whole library."
+          actionLabel="Clear search"
+          onAction={() => runSearch("")}
+        />
       ) : searchResults ? (
         <View
           ref={paintListRef}
@@ -974,8 +1150,9 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             paintState.current = null;
           }}
         >
-        <FlatList
+        <FlashList
           data={sections}
+          style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
           // Size-sorted results interleave dates, so the same label can head
           // multiple sections — key by index+label like the local roll below.
           keyExtractor={(s, i) => `${i}:${s.label}`}
@@ -987,9 +1164,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           onScroll={(e) => {
             paintScrollY.current = e.nativeEvent.contentOffset.y;
           }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
-          }
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           contentContainerStyle={{ paddingBottom: 120 }}
           ListHeaderComponent={
             !searchResults && !decoy ? (
@@ -1011,7 +1187,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             >
               <View style={styles.dateHeaderRow}>
                 <View style={{ flexDirection: "row", alignItems: "baseline", flex: 1 }}>
-                  <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                  <Text accessibilityRole="header" style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
                     {item.label}
                   </Text>
                   {showDateCounts ? (
@@ -1033,6 +1209,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
                       setSelection(new Set([...selection, ...item.data.map((p) => p.id)]))
                     }
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select all photos in ${item.label}`}
                   >
                     <Text style={{ color: theme.colors.primary, fontSize: 12, fontWeight: "600" }}>
                       Select all
@@ -1067,19 +1245,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             loading ? (
               <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
             ) : (
-              <View style={styles.empty}>
-                <EmptyGalleryArt
-                  color={theme.colors.onSurfaceVariant}
-                  accent={theme.colors.primary}
-                  size={120}
-                />
-                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
-                  No photos yet
-                </Text>
-                <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-                  Nothing backed up yet. New photos back up automatically when Auto sync is on in Settings, or share photos to {appDisplayName || "PhotogramBot"} from any app.
-                </Text>
-              </View>
+              <EmptyState
+                theme={theme}
+                art={<EmptyGalleryArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={120} />}
+                title={tr("gallery.noPhotos")}
+                message={tr("gallery.emptyBody", { app: appDisplayName || "PhotogramBot" })}
+                actionLabel={decoy ? undefined : tr("gallery.openBackupSettings")}
+                onAction={decoy ? undefined : () => navigation.navigate("Settings")}
+              />
             )
           }
           ListFooterComponent={
@@ -1092,9 +1265,10 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : viewMode !== "days" ? (
         <PeriodJumpList mode={viewMode} navigation={navigation} theme={theme} />
       ) : (
-        <FlatList
+        <FlashList
           ref={localListRef}
           data={localSections}
+          style={isWide && widePreview ? { marginRight: paneWidth } : undefined}
           // Offset shifts from media added/deleted mid-scroll can leave two
           // sections with the same date label; the index keeps keys unique.
           keyExtractor={(s, i) => `${i}:${s.label}`}
@@ -1102,9 +1276,8 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           scrollEventThrottle={32}
           onEndReached={loadMoreLocal}
           onEndReachedThreshold={0.6}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
-          }
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           contentContainerStyle={{ paddingBottom: 120 }}
           ListHeaderComponent={
             !decoy ? (
@@ -1122,7 +1295,7 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             >
               <View style={styles.dateHeaderRow}>
                 <View style={{ flexDirection: "row", alignItems: "baseline", flex: 1 }}>
-                  <Text style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
+                  <Text accessibilityRole="header" style={[styles.dateHeader, { color: theme.colors.onSurfaceVariant }]}>
                     {item.label}
                   </Text>
                   {showDateCounts ? (
@@ -1146,19 +1319,14 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             localLoading ? (
               <ActivityIndicator style={{ marginTop: 60 }} color={theme.colors.primary} />
             ) : (
-              <View style={styles.empty}>
-                <EmptyGalleryArt
-                  color={theme.colors.onSurfaceVariant}
-                  accent={theme.colors.primary}
-                  size={120}
-                />
-                <Text style={[styles.emptyTitle, { color: theme.colors.onSurface, marginTop: 10 }]}>
-                  Nothing here yet
-                </Text>
-                <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-                  Photos from this device appear here. New photos back up automatically when Auto sync is on in Settings.
-                </Text>
-              </View>
+              <EmptyState
+                theme={theme}
+                art={<EmptyGalleryArt color={theme.colors.onSurfaceVariant} accent={theme.colors.primary} size={120} />}
+                title={tr("gallery.nothingHere")}
+                message={tr("gallery.emptyLocalBody")}
+                actionLabel={decoy ? undefined : tr("gallery.openBackupSettings")}
+                onAction={decoy ? undefined : () => navigation.navigate("Settings")}
+              />
             )
           }
           ListFooterComponent={
@@ -1179,18 +1347,22 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
             })
           }
           theme={theme}
-          top={insets.top + 150}
+          top={insets.top + chromeHeight + spacing.sm}
           bottom={insets.bottom + 150}
         />
       ) : null}
 
-      {viewMode === "days" && !searchResults && !decoy && localSections.length > 0 ? (
+      {viewMode === "days" &&
+      !searchResults &&
+      !decoy &&
+      localSections.length > 0 &&
+      localScrollY > (localSectionYs.current[0] ?? Number.MAX_SAFE_INTEGER) ? (
         <Pressable
           onPress={() => localListRef.current?.scrollToOffset({ offset: 0, animated: true })}
           style={[
             styles.stickyDateHeader,
             {
-              top: insets.top + (progress.running ? 218 : 160),
+              top: insets.top + chromeHeight + (progress.running ? bannerHeight + spacing.sm : 0),
               backgroundColor: theme.colors.background,
               borderBottomColor: theme.colors.outlineVariant,
             },
@@ -1221,47 +1393,119 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
       ) : null}
 
       {selectionMode ? (
-        <View
+        <Animated.View
+          entering={reduceMotion ? undefined : FadeInDown.duration(motion.base)}
+          exiting={reduceMotion ? undefined : FadeOutDown.duration(motion.fast)}
           style={[
             styles.selectionBar,
-            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + 8 },
+            { backgroundColor: theme.colors.surfaceContainer, paddingBottom: insets.bottom + spacing.sm },
           ]}
         >
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }}>
-            {selection.size} selected
-            {selection.size > 0 ? "  ·  long-press another photo for a range" : ""}
+          <Text
+            style={[typography.smallStrong, { color: theme.colors.onSurface, flex: 1 }]}
+            numberOfLines={1}
+            accessibilityLiveRegion="polite"
+          >
+            {tr("common.selected", { n: String(selection.size) })}
           </Text>
           <Pressable
             onPress={() => setSelection(new Set((searchResults ?? photos).map((p) => p.id)))}
             style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel={tr("common.selectAll")}
           >
-            <Text style={{ color: theme.colors.primary }}>All</Text>
-          </Pressable>
-          <Pressable onPress={() => void shareSelected()} style={styles.selAction}>
-            <Text style={{ color: theme.colors.primary }}>Share</Text>
-          </Pressable>
-          {hasBackable ? (
-            <Pressable onPress={() => void backUpSelected()} style={styles.selAction}>
-              <Text style={{ color: theme.colors.primary }}>Back up</Text>
-            </Pressable>
-          ) : null}
-          <Pressable onPress={() => setAlbumDialogVisible(true)} style={styles.selAction}>
-            <Text style={{ color: theme.colors.primary }}>Album</Text>
-          </Pressable>
-          <Pressable onPress={trashSelected} style={styles.selAction}>
-            <Text style={{ color: theme.colors.error }}>Trash</Text>
+            <Text style={{ color: theme.colors.primary }}>{tr("common.all")}</Text>
           </Pressable>
           <Pressable
+            onPress={() => void shareSelected()}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Share selected"
+          >
+            <Text style={{ color: theme.colors.primary }}>{tr("common.share")}</Text>
+          </Pressable>
+          <Pressable
+            onPress={trashSelected}
+            style={styles.selAction}
+            accessibilityRole="button"
+            accessibilityLabel="Move selected to trash"
+          >
+            <Text style={{ color: theme.colors.error }}>{tr("common.trash")}</Text>
+          </Pressable>
+          <IconButton
+            icon={<MoreVerticalIcon color={theme.colors.onSurfaceVariant} size={20} />}
+            label="More selection actions"
+            theme={theme}
+            onPress={() => setSelMenuVisible(true)}
+            style={styles.selAction}
+          />
+          <IconButton
+            icon={<Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>}
+            label="Cancel selection"
+            theme={theme}
             onPress={() => {
               setSelection(new Set());
               setSelectionMode(false);
             }}
-            style={styles.selAction}
-          >
-            <Text style={{ color: theme.colors.onSurfaceVariant }}>Cancel</Text>
-          </Pressable>
-        </View>
+          />
+        </Animated.View>
       ) : null}
+
+      <Sheet
+        visible={selMenuVisible}
+        theme={theme}
+        title={`${selection.size} selected`}
+        subtitle="Long-press a second photo to select a range"
+        onClose={() => setSelMenuVisible(false)}
+      >
+        <ListRow
+          title="Invert selection"
+          theme={theme}
+          showChevron
+          onPress={() => {
+            const src = searchResults ?? photos;
+            const next = new Set<string>();
+            for (const p of src) if (!selection.has(p.id)) next.add(p.id);
+            setSelection(next);
+            setSelMenuVisible(false);
+          }}
+        />
+        <ListRow
+          title="Add to album"
+          theme={theme}
+          showChevron
+          onPress={() => {
+            setSelMenuVisible(false);
+            setAlbumDialogVisible(true);
+          }}
+        />
+        {hasBackable ? (
+          <ListRow
+            title="Back up selected"
+            subtitle="Queue the local-only photos in your selection"
+            theme={theme}
+            showChevron
+            onPress={() => {
+              setSelMenuVisible(false);
+              void backUpSelected();
+            }}
+          />
+        ) : null}
+        {comparePair ? (
+          <ListRow
+            title="Compare two photos"
+            theme={theme}
+            showChevron
+            onPress={() => {
+              setSelMenuVisible(false);
+              navigation.navigate("Compare", {
+                left: comparePair[0],
+                right: comparePair[1],
+              });
+            }}
+          />
+        ) : null}
+      </Sheet>
 
       <FilterSheet
         visible={filterSheetVisible}
@@ -1333,8 +1577,122 @@ export function GalleryScreen({ navigation }: { navigation: any }) {
           />
         </View>
       </Dialog>
-    </View>
+
+      <Dialog
+        visible={trashDialogVisible}
+        theme={theme}
+        title={`Move ${selection.size} photo${selection.size === 1 ? "" : "s"} to trash?`}
+        message="You can restore them from Collections → Trash. Deleting from Telegram removes the channel copy as well and cannot be undone."
+        onClose={() => setTrashDialogVisible(false)}
+        actions={[
+          { label: "Cancel", onPress: () => setTrashDialogVisible(false), variant: "text" },
+          { label: "Hide locally", onPress: () => void confirmTrash(false), variant: "tonal" },
+          { label: "Delete from Telegram too", onPress: () => void confirmTrash(true), variant: "danger" },
+        ]}
+      />
+
+      {isWide && widePreview ? (
+        <View
+          style={{
+            position: "absolute",
+            top: insets.top,
+            right: 0,
+            bottom: 0,
+            width: paneWidth,
+            backgroundColor: theme.colors.surface,
+            borderLeftWidth: 1,
+            borderLeftColor: theme.colors.outlineVariant,
+            paddingTop: 8,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 14,
+              gap: 10,
+            }}
+          >
+            <Text
+              style={{ color: theme.colors.onSurface, fontWeight: "600", flex: 1 }}
+              numberOfLines={1}
+            >
+              {widePreview.kind === "photo"
+                ? widePreview.photo.filename
+                : widePreview.item.asset.filename ?? "Photo"}
+            </Text>
+            <Pressable onPress={() => setWidePreview(null)} hitSlop={10}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
+            </Pressable>
+          </View>
+          <View
+            style={{
+              flex: 1,
+              margin: 12,
+              borderRadius: 14,
+              overflow: "hidden",
+              backgroundColor: theme.colors.surfaceContainer,
+            }}
+          >
+            {widePreview.kind === "photo" ? (
+              <TelegramImage
+                fileId={widePreview.photo.remote_file_id ?? widePreview.photo.preview_file_id}
+                localUri={widePreview.photo.local_uri}
+                style={{ flex: 1 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <WideLocalImage assetId={widePreview.item.id} />
+            )}
+          </View>
+          <View style={{ paddingHorizontal: 14, paddingBottom: 16, gap: 8 }}>
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
+              {formatDate(
+                widePreview.kind === "photo"
+                  ? widePreview.photo.taken_at
+                  : widePreview.item.taken_at
+              )}
+            </Text>
+            <Button
+              title="Open"
+              theme={theme}
+              onPress={() => {
+                if (widePreview.kind === "photo") {
+                  const flat = searchResults ?? photos;
+                  const idx = flat.findIndex((p) => p.id === widePreview.photo.id);
+                  navigation.navigate("Viewer", {
+                    photos: flat,
+                    index: idx < 0 ? 0 : idx,
+                  });
+                } else {
+                  void onLocalPress(widePreview.item, true);
+                }
+              }}
+            />
+          </View>
+        </View>
+      ) : null}
+      </View>
+    </GestureDetector>
   );
+}
+
+function WideLocalImage({ assetId }: { assetId: string }) {
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void new MediaLibrary.Asset(assetId)
+      .getUri()
+      .then((u) => {
+        if (alive) setUri(u);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [assetId]);
+  if (!uri) return <ActivityIndicator style={{ marginTop: 40 }} />;
+  return <Image source={{ uri }} style={{ flex: 1 }} resizeMode="contain" />;
 }
 
 function OverviewCard({
@@ -1344,7 +1702,18 @@ function OverviewCard({
   theme: ReturnType<typeof useTheme>;
   stats: { total: number; uploaded: number; pending: number; failed: number; totalBytes: number };
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const reduce = useReducedMotion();
+  const rot = useSharedValue(0);
+  useEffect(() => {
+    rot.value = withTiming(open ? 1 : 0, {
+      duration: reduce ? 0 : motion.base,
+      easing: Easing.bezier(...motion.easing),
+    });
+  }, [open, reduce, rot]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rot.value * 90}deg` }],
+  }));
   const [buckets, setBuckets] = useState<MonthBucket[]>([]);
   useEffect(() => {
     void getMonthlyBuckets(6).then(setBuckets);
@@ -1356,18 +1725,29 @@ function OverviewCard({
     { label: "Size", value: formatBytes(stats.totalBytes) },
   ];
   const maxBytes = Math.max(1, ...buckets.map((b) => b.bytes));
+  const percent = stats.total > 0 ? Math.round((stats.uploaded / stats.total) * 100) : 0;
   return (
     <View style={[styles.overviewCard, { backgroundColor: theme.colors.surfaceContainer }]}>
-      <Pressable style={styles.overviewHeader} onPress={() => setOpen((v) => !v)}>
+      {/* Collapsed by default: photos are the interface, the numbers are a
+          tap away. Default-closed also returns ~420 dp of grid above the fold. */}
+      <Pressable
+        style={styles.overviewHeader}
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`Library overview. ${stats.uploaded} of ${stats.total} backed up. ${open ? "Hide statistics" : "Show statistics"}`}
+      >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", fontSize: 15 }}>
-            Library overview
+          <Text style={[typography.bodyStrong, { color: theme.colors.onSurface }]} numberOfLines={1}>
+            {stats.uploaded.toLocaleString()} of {stats.total.toLocaleString()} backed up
           </Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, marginTop: 1 }}>
-            {stats.uploaded} of {stats.total} backed up to your channel
+          <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant, marginTop: 1 }]}>
+            {stats.pending + stats.failed} pending · {formatBytes(stats.totalBytes)} · {percent}%
           </Text>
         </View>
-        <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>{open ? "⌃" : "⌄"}</Text>
+        <Animated.View style={chevronStyle}>
+          <ChevronRightIcon color={theme.colors.onSurfaceVariant} size={20} />
+        </Animated.View>
       </Pressable>
       {open ? (
         <View>
@@ -1377,16 +1757,18 @@ function OverviewCard({
                 key={t.label}
                 style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest }]}
               >
-                <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 16 }} numberOfLines={1}>
+                <Text style={[typography.section, { color: theme.colors.onSurface }]} numberOfLines={1}>
                   {t.value}
                 </Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5 }}>{t.label}</Text>
+                <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant }]}>
+                  {t.label}
+                </Text>
               </View>
             ))}
           </View>
           {buckets.some((b) => b.count > 0) ? (
-            <View style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest, marginTop: 8 }]}>
-              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11.5, marginBottom: 6 }}>
+            <View style={[styles.overviewTile, { backgroundColor: theme.colors.surfaceHighest, marginTop: spacing.sm }]}>
+              <Text style={[typography.caption, { color: theme.colors.onSurfaceVariant, marginBottom: spacing.xs }]}>
                 Last 6 months
               </Text>
               <View style={styles.chartRow}>
@@ -1403,7 +1785,9 @@ function OverviewCard({
                         ]}
                       />
                     </View>
-                    <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 9.5 }}>{b.label}</Text>
+                    <Text style={[typography.badge, { color: theme.colors.onSurfaceVariant, fontWeight: "500" }]}>
+                      {b.label}
+                    </Text>
                   </View>
                 ))}
               </View>
@@ -1429,6 +1813,9 @@ function hasAnyFilter(f: SearchFilters | null | undefined): boolean {
   return (
     !!f &&
     (!!(f.takenWithinDays && f.takenWithinDays > 0) ||
+      !!f.takenAfter ||
+      !!f.takenBefore ||
+      !!(f.folder && f.folder.trim()) ||
       !!f.hasGps ||
       !!(f.camera && f.camera.trim()) ||
       !!f.notBackedUp ||
@@ -1456,6 +1843,7 @@ function FilterSheet({
   onSaveSearch: (name: string, filters: SearchFilters | null, searchText: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { height: windowHeight } = useResponsive();
   const [days, setDays] = useState<number | null>(initial?.takenWithinDays ?? null);
   const [hasGps, setHasGps] = useState(!!initial?.hasGps);
   const [camera, setCamera] = useState(initial?.camera ?? "");
@@ -1550,7 +1938,7 @@ function FilterSheet({
               camera field's keyboard is open (matches the pre-ScrollView
               behavior of Pressables outside a scroll container). */}
           <ScrollView
-            style={{ maxHeight: Math.round(Dimensions.get("window").height * 0.7) }}
+            style={{ maxHeight: Math.round(windowHeight * 0.7) }}
             keyboardShouldPersistTaps="always"
           >
             <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 17, marginBottom: 12 }}>
@@ -1813,6 +2201,7 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
 }) {
   const columnsPref = clampColumns(useSettingsStore((s) => s.prefs.gridColumns));
   const compact = useSettingsStore((s) => s.prefs.compactGrid);
+  const { width: gridViewportWidth } = useResponsive();
   const gap = compact ? 1 : 2;
   if (!staggered) {
     return (
@@ -1840,7 +2229,7 @@ function SectionGrid<T extends { id: string; width?: number | null; height?: num
     );
   }
   const colW = Math.floor(
-    (Dimensions.get("window").width - (compact ? 4 : 8)) / columnsPref
+    (gridViewportWidth - (compact ? 4 : 8)) / columnsPref
   );
   const heights = photos.map((p) => {
     const aspect =
@@ -2018,45 +2407,47 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  chrome: {
+    // Groups the floating header, view switch and search so their measured
+    // height can position the sticky date header exactly.
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
   },
   headerLeft: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
+    paddingStart: spacing.sm,
   },
   appTitle: {
-    fontSize: 20,
-    fontWeight: "800",
+    ...typography.title,
   },
   channelChip: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
   gear: {
-    padding: 6,
+    width: touchTarget,
+    height: touchTarget,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
   viewSwitchRow: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  viewSwitch: {
-    flexDirection: "row",
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    padding: 3,
-    gap: 2,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
   },
   viewSwitchBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   periodCard: {
     flex: 1,
@@ -2069,29 +2460,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 8,
   },
+  historyRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  historyChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    maxWidth: 150,
+  },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    height: 42,
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    minHeight: touchTarget,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
+    ...typography.body,
     padding: 0,
   },
-  progressBanner: {
-    flexDirection: "row",
+  searchAction: {
+    minWidth: 32,
+    minHeight: touchTarget,
     alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    justifyContent: "center",
+    paddingHorizontal: spacing.xs,
+  },
+  progressBanner: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: radius.card,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   dateHeader: {
     fontSize: 13,
@@ -2157,7 +2567,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.65)",
   },
   videoBadgeText: {
-    color: "#fff",
+    color: overlay.onMedia,
     fontSize: 10,
     fontWeight: "700",
   },
@@ -2230,7 +2640,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   favIcon: {
-    color: "#FF8FA3",
+    color: fallback.favorite,
     fontSize: 12,
   },
   selectedOverlay: {
@@ -2259,8 +2669,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   selAction: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    minHeight: touchTarget,
+    paddingHorizontal: spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
   fab: {
     position: "absolute",

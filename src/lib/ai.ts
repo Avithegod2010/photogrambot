@@ -77,7 +77,8 @@ export async function ocrImageWithGemini(opts: {
               {
                 text:
                   "Extract ALL visible text from this screenshot exactly as written, " +
-                  "line by line. Keep URLs, codes, numbers and names verbatim. " +
+                  "in ANY language and original script, line by line. Keep URLs, codes, " +
+                  "numbers and names verbatim. Do not translate. " +
                   "If there is no text, respond with exactly: NO_TEXT",
               },
               { inline_data: { mime_type: "image/jpeg", data } },
@@ -102,6 +103,110 @@ export async function ocrImageWithGemini(opts: {
     : "";
   if (/^NO_TEXT$/i.test(text)) return "";
   return text.slice(0, 2000);
+}
+
+// Scene/object labels from Gemini vision. Returns a short list of lowercase
+// labels; transport/API failures throw so the caller can retry later.
+export async function sceneTagsWithGemini(opts: {
+  apiKey: string;
+  model: string;
+  imageUri: string;
+}): Promise<string[]> {
+  const file = new File(opts.imageUri);
+  if (!file.exists) throw new Error("Tagging source image missing");
+  const data = await file.base64();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text:
+                  "List up to 6 short object/scene labels visible in this image. " +
+                  "Respond as a comma-separated list only, lowercase, no explanations. " +
+                  "Prefer concrete nouns (beach, dog, receipt, whiteboard, food).",
+              },
+              { inline_data: { mime_type: "image/jpeg", data } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0, maxOutputTokens: 60 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = json?.error?.message ?? `Gemini request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  const parts = json?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text ?? "").join(" ")
+    : "";
+  return text
+    .split(/[,;\n]/)
+    .map((s: string) => s.trim().toLowerCase())
+    .filter((s: string) => s.length >= 2 && s.length <= 40)
+    .slice(0, 6);
+}
+
+// Ask-your-photos: answer a question from a compact index of candidate rows.
+// IDs are cited as [id]; the screen maps them back to thumbnails.
+export async function askPhotos(opts: {
+  apiKey: string;
+  model: string;
+  question: string;
+  index: string;
+}): Promise<string> {
+  const instruction = [
+    "You are a photo-library assistant.",
+    "Answer the question using ONLY the provided photo index rows.",
+    "Cite every photo you rely on with its [id] exactly as given.",
+    "If the answer is not in the index, say you couldn't find it.",
+    "Be concise (max 120 words).",
+    "<photo-index>",
+    opts.index.slice(0, 12_000),
+    "</photo-index>",
+    "<question>",
+    opts.question.slice(0, 500),
+    "</question>",
+  ].join("\n");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  let res: Response;
+  try {
+    res = await fetch(`${GEMINI_BASE}/${opts.model}:generateContent?key=${opts.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: instruction }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 500 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = json?.error?.message ?? `Gemini request failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  const parts = json?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts)
+    ? parts.map((p: any) => p?.text ?? "").join(" ").trim()
+    : "";
+  if (!text) throw new Error("Gemini returned no answer");
+  return text;
 }
 
 export interface EmbedTextOptions {

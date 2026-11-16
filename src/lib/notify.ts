@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { AppState, Appearance } from "react-native";
 import { loadPrefs } from "./settings";
-import { accentHex, resolveThemeMode } from "./appearance";
+import { accentHex, isWithinWindow, resolveThemeMode } from "./appearance";
 
 const PROGRESS_ID = "pb-upload-progress";
 
@@ -43,6 +43,25 @@ function inBackground(): boolean {
   return AppState.currentState === "background";
 }
 
+type NotifyKind = "progress" | "complete" | "failed";
+
+async function allowed(kind: NotifyKind): Promise<boolean> {
+  try {
+    const prefs = await loadPrefs();
+    if (kind === "progress" && !prefs.notifyProgress) return false;
+    if (kind === "complete" && !prefs.notifyComplete) return false;
+    if (kind === "failed" && !prefs.notifyFailed) return false;
+    if (prefs.notifyQuiet) {
+      const now = new Date();
+      const minutes = now.getHours() * 60 + now.getMinutes();
+      if (isWithinWindow(minutes, prefs.notifyQuietStart, prefs.notifyQuietEnd)) return false;
+    }
+    return true;
+  } catch {
+    return true; // fail-open: a prefs read failure must not silence alerts
+  }
+}
+
 export async function requestNotificationPermission(): Promise<void> {
   try {
     ensureHandler();
@@ -55,7 +74,7 @@ export async function notifyUploadProgress(
   total: number,
   currentFile: string | null
 ): Promise<void> {
-  if (!inBackground()) return;
+  if (!inBackground() || !(await allowed("progress"))) return;
   try {
     ensureHandler();
     await Notifications.dismissNotificationAsync(PROGRESS_ID).catch(() => {});
@@ -72,7 +91,7 @@ export async function notifyUploadProgress(
 }
 
 export async function notifyUploadComplete(saved: number, failed: number): Promise<void> {
-  if (!inBackground()) return;
+  if (!inBackground() || !(await allowed("complete"))) return;
   try {
     ensureHandler();
     await Notifications.dismissNotificationAsync(PROGRESS_ID).catch(() => {});
@@ -94,6 +113,7 @@ export async function notifyUploadComplete(saved: number, failed: number): Promi
 // The `screen` data field is what App.tsx's response listener uses to open
 // the upload queue when the notification is tapped.
 export async function notifyUploadsFailed(failed: number, saved: number): Promise<void> {
+  if (!(await allowed("failed"))) return;
   try {
     ensureHandler();
     await Notifications.dismissNotificationAsync(PROGRESS_ID).catch(() => {});

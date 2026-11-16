@@ -1,9 +1,14 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, type StyleProp, type ViewStyle } from "react-native";
+import { useReducedMotion } from "../useReducedMotion";
 
 /**
- * Pulsing placeholder for thumbnails that are still downloading. Used by
- * TelegramImage when Appearance → Loading skeletons is on.
+ * Static placeholder for thumbnails that are still downloading.
+ *
+ * It used to pulse forever (700 ms loop). An infinite animation on a surface
+ * that can sit on screen for seconds reads as busy rather than alive, so this
+ * is now a single quiet fade-in that settles. Reduced-motion users get the
+ * settled wash immediately.
  */
 export function Skeleton({
   style,
@@ -12,16 +17,22 @@ export function Skeleton({
   style?: StyleProp<ViewStyle>;
   color?: string;
 }) {
-  const opacity = useRef(new Animated.Value(0.45)).current;
+  const reduce = useReducedMotion();
+  const opacity = useRef(new Animated.Value(reduce ? 0.7 : 0.45)).current;
+
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.9, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.35, duration: 700, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [opacity]);
+    if (reduce) {
+      opacity.setValue(0.7);
+      return;
+    }
+    const anim = Animated.timing(opacity, {
+      toValue: 0.7,
+      duration: 180,
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [opacity, reduce]);
+
   return <Animated.View style={[{ backgroundColor: color, opacity }, style]} />;
 }
