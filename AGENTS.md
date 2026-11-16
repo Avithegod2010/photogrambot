@@ -300,7 +300,7 @@ npx expo run:android
 >
 > **2026-11-02 addendum (Round 37):** the repo is now **PUBLIC** (`github.com/Avithegod2010/photogrambot`), the working tree is clean at the R37 commit, and the device round has produced its first real device findings (filter sheet, weekly digest, encrypted backup upload and photo-version history all verified on hardware; **share-target filters and the near-duplicate re-enqueue loop fixed**). Two things the next session must do first: (1) **rebuild the APK natively** — the share-target manifest fix only exists in the checked-in manifest and cannot take effect until `assembleDebug`/EAS rebuilds it; (2) **turn the weekly-digest toggle back OFF** on the device (it was left ON after the digest test). The remaining device work is listed in the checklist notes at the end of the Device Verification Checklist section.
 >
-> **2026-11-03 addendum (post-R37 close-out; no device work per owner instruction):** the near-duplicate toggle escape hatch, replace-restore queue/embedding cleanup, backup temp-file cleanup, README troubleshooting and CHANGELOG are committed and pushed (`main`, head `dd134aa`+). `android/version.properties` is now **versionCode 2 / versionName 1.0.0**. A fresh **EAS preview build was submitted** — id `355a69d1-2824-4b9d-92aa-ea803e596dd9`, snapshot commit `a56e08c` (docs-only delta from the code at `353eb88`), status **in queue** at the time of writing; it takes over an hour on the free tier (the previous build waited five days). **The only correct rebuild path this machine has is EAS** — local `assembleDebug`/`assembleRelease` thrashes an 8 GB box and hits the JVM-TLS `dl.google.com` failure, so do not retry Gradle. Publish the finished APK with `npm run release:publish -- --apk <file> --tag v1.0.0-preview.2 --title "PhotogramBot 1.0.0 preview 2" --notes-file <notes> --prerelease` (new `scripts/publish-release.mjs`; token from `GITHUB_TOKEN` or `gh auth token` — `gh` is NOT logged in on this box). `EAS_SKIP_AUTO_FINGERPRINT=1` is mandatory with a committed `android/` directory — the fingerprint step otherwise hangs for many minutes (see docs/RELEASE.md). The dev-box disk was saturated for part of this session by a stray `npm install` from another project; check `% Disk Time` before blaming the build.
+> **2026-11-03 addendum (post-R37 close-out; no device work per owner instruction):** the near-duplicate toggle escape hatch, replace-restore queue/embedding cleanup, backup temp-file cleanup, README troubleshooting and CHANGELOG are committed and pushed (`main`, head `dd134aa`+). `android/version.properties` is now **versionCode 2 / versionName 1.0.0**. A fresh **EAS preview build was submitted** — id `355a69d1-2824-4b9d-92aa-ea803e596dd9`, snapshot commit `a56e08c` (docs-only delta from the code at `353eb88`), status **in queue** at the time of writing; it takes over an hour on the free tier (the previous build waited five days). **The only correct rebuild path this machine has is EAS** — local `assembleDebug`/`assembleRelease` thrashes an 8 GB box and hits the JVM-TLS `dl.google.com` failure, so do not retry Gradle. **⚠️ CORRECTED 2026-11-16: this is stale and wrong — local release builds now work reliably in ~1 hour; see the 2026-11-16 addendum at the end of this box and `docs/RELEASE.md` §3.** Publish the finished APK with `npm run release:publish -- --apk <file> --tag v1.0.0-preview.2 --title "PhotogramBot 1.0.0 preview 2" --notes-file <notes> --prerelease` (new `scripts/publish-release.mjs`; token from `GITHUB_TOKEN` or `gh auth token` — `gh` is NOT logged in on this box). `EAS_SKIP_AUTO_FINGERPRINT=1` is mandatory with a committed `android/` directory — the fingerprint step otherwise hangs for many minutes (see docs/RELEASE.md). The dev-box disk was saturated for part of this session by a stray `npm install` from another project; check `% Disk Time` before blaming the build.
 > **Release-page finding (2026-11-03):** the release left behind by the old waiter script, `v1.0.0-preview.1` (id 415250220, APK `photogrambot-1.0.0-preview.apk`, built from pre-R37 `dc69ff6`), is a **DRAFT** — drafts are invisible to anonymous API callers, so the in-app updater has never seen it (this is exactly why the R35 device check reported "No release with an APK has been published yet"). It was left as-is (not published — the APK predates the R37 fixes; not deleted — it is not ours to destroy without the owner). `pickApkRelease` skips drafts by design; `scripts/publish-release.mjs` always publishes with `draft: false`. **Install caveat for any EAS-signed APK: it cannot install over the debug-signed dev client — the app must be uninstalled first, which wipes the local SQLite index (recoverable from the channel's pinned DB backup).**
 > **Dependency audit (2026-11-03):** `npm audit --omit=dev` now reports 18 advisories (2 low / 10 moderate / 6 high). Non-breaking fixes exist for `node-forge@1.4.0` (via `@expo/cli`), `zod@3.25.76` (via `@expo/cli`) and `decode-uri-component` (via `query-string` → `@react-navigation/core`, i.e. RUNTIME deep-link parsing — low real-world risk since the app only parses its own scheme) — but **`npm audit fix` cannot run on this box**: the first attempt crashed npm natively, the second died with tar write errors + `EPERM` on locked `node_modules` dirs (`xcode`, `@react-navigation/routers`) and left the lockfile untouched. `node_modules` verified healthy afterwards (`tsc --noEmit` clean, all 11 harnesses pass). The rest (`deepmerge`, `glob`, `zod` chain) only fix with `expo@58` — bundle them into a deliberate SDK 58 upgrade decision; do not force now.
 >
@@ -343,7 +343,87 @@ npx expo run:android
 >
 > **Ideas menu for the next session** (owner has not approved any of these yet — ask before building): see "Improvement ideas (post-R32)" below.
 >
-> **Cross-platform expansion** (owner asked; analysis delivered 2026-10-06 — no code started): see "iOS / Windows expansion analysis" below.
+> **Cross-platform expansion** (owner asked; analysis delivered 2026-10-06 - no code started): see "iOS / Windows expansion analysis" below.
+>
+> ---
+>
+> ### 🔴 2026-11-16 addendum (LOCAL BUILD BREAKTHROUGH — read this before the older addenda above)
+>
+> **The EAS cloud build quota is exhausted.** Local Gradle release builds are now
+> the working path and were proven end-to-end this session after 6 failed
+> attempts across earlier sessions.
+>
+> **Two real root causes, both fixed — neither was memory, despite appearances:**
+> 1. **`--offline` blocked a plugin.** `node_modules/expo-updates/expo-updates-gradle-plugin/build.gradle.kts:4`
+>    requires `org.jetbrains.kotlin.jvm:2.2.0`. `--offline` refuses to fetch it.
+>    The resulting `UnknownPluginException` is frequently **swallowed** — the client
+>    log shows a truncated task list and exit code 1 with no "What went wrong"
+>    block. When that happens, read
+>    `E:\Dev\.gradle\daemon\<gradle-version>\daemon-*.log` instead; that is where
+>    the real error lives. **Never pass `--offline` to this project's builds.**
+> 2. **Shared Gradle cache deadlock with the sibling project.** Both this repo and
+>    `..\photogram\android` use `E:\Dev\.gradle`. Concurrent builds starve each
+>    other: `Timeout waiting to lock file hash cache (E:\Dev\.gradle\caches\...\fileHashes)`.
+>    Both daemons die, which looks exactly like "something is killing Java".
+>    Check `Get-CimInstance Win32_Process -Filter "Name='java.exe'"` before starting;
+>    build when nothing else is running, or give this project its own
+>    `GRADLE_USER_HOME`.
+>
+> **Ruled out (do not re-investigate):** Java processes being killed (a canary JVM
+> ran 19+ min untouched); JVM TLS to Maven/Google (all four repos return 200 — the
+> old `dl.google.com` blocker is gone); Windows memory-exhaustion events (none);
+> JVM crash artifacts (`hs_err`/`replay` — none).
+>
+> **Proven command — completed in 1h 4m, 128+ tasks, BUILD SUCCESSFUL:**
+>
+> ```bat
+> set JAVA_HOME=E:\Dev\jdk\jdk-17.0.20+8
+> set ANDROID_HOME=E:\Dev\android-sdk
+> set GRADLE_OPTS=-Xmx1536m -XX:MaxMetaspaceSize=512m
+> cd android
+> gradlew.bat :app:assembleRelease ^
+>   -PreactNativeArchitectures=arm64-v8a ^
+>   -Pandroid.enableMinifyInReleaseBuilds=false ^
+>   -Pandroid.enableShrinkResourcesInReleaseBuilds=false ^
+>   -Pkotlin.compiler.execution.strategy=in-process ^
+>   -Dkotlin.compiler.execution.strategy=in-process ^
+>   -Dorg.gradle.internal.repository.max.tentatives=5 ^
+>   -Dorg.gradle.internal.http.connectionTimeout=120000 ^
+>   -Dorg.gradle.internal.http.socketTimeout=180000 ^
+>   --no-daemon --max-workers=2 --no-parallel
+> ```
+>
+> `docs/RELEASE.md` §3 carries the same recipe plus the artifact verification steps.
+> Progress is incremental — a killed run resumes from cached tasks, so retries are cheap.
+>
+> **Artifact produced and verified (NOT YET INSTALLED):**
+> `android/app/build/outputs/apk/release/app-release.apk` — 54.7 MB,
+> `com.photogrambot.app`, `versionName 1.4.0` / `versionCode 6`, signer SHA-256
+> `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`
+> (debug keystore → installs over the existing app with `adb install -r`,
+> data preserved). The phone was in use when the build finished, so installation
+> is the very first pending action.
+>
+> **State at handover:** working tree clean, `origin/main` at the commit that adds
+> this note. Last code wave was the UI overhaul (1.3.0 calm interface, 1.4.0
+> Material You motion + haptics); both are recorded in `docs/UI-PROGRESS.md` and
+> `CHANGELOG.md`. `npm run check` was green (typecheck + 33/33 test files) before
+> the build detour. **No source code was changed during the build sessions** —
+> only temporary build config (`metro.config.js` worker cap,
+> `pb-release-signing.properties` parking) which has been fully restored.
+>
+> **Immediate next actions for the new agent:**
+> 1. `adb install -r android/app/build/outputs/apk/release/app-release.apk` when the
+>    owner says the phone is free; then confirm `firstInstallTime` is still
+>    `2026-08-30 19:18:11` (proves the index and SecureStore survived).
+> 2. Verify the 1.4.0 UI on hardware: M3 tab indicator, haptics feel (the reason
+>    this native build exists), ripples, reduced-motion path, Arabic RTL,
+>    light/AMOLED themes, 200% font scale.
+> 3. Resume the long-standing device verification backlog — `docs/UI-PROGRESS.md`
+>    "Known remaining work" and the Device Verification Checklist below. Nothing
+>    from Rounds 15-33 has ever run on hardware.
+> 4. Only then consider new features. Do not start a feature wave without the
+>    owner explicitly asking.
 
 **Immediate next steps (in order)**:
 1. **Device verification round** — the big one. Everything in the Device Verification Checklist (Phases 3–9) is still owed, PLUS these newer checks:
@@ -375,7 +455,7 @@ npx expo run:android
 
 **Release kit status (updated 2026-11-03, after the R37 close-out)**:
 `android/` is COMMITTED (self-contained build for fresh clones — build outputs `.cxx`/`build`/`.gradle`, `local.properties`, and the release signing identity `pb-release.keystore` + `pb-release-signing.properties` are precisely gitignored; a release build falls back to the debug keystore when the signing files are absent — fine for testing, not for distribution). README.md + owner MIT LICENSE + CHANGELOG.md; version **1.0.0 / versionCode 2**; **`android/version.properties` is the versionCode source of truth** — bump per release artifact. `.gitignore` now also excludes `*.apk`/`*.aab` so a downloaded artifact can sit in the repo without ever being committed.
-**EAS cloud builds are the only working rebuild path** (the local dl.google.com JVM-TLS blocker plus an 8 GB RAM box that thrashes on native compilation): `eas.json` has `development` / `preview` (APK) / `production` (AAB) profiles; `appVersionSource: "local"`; projectId linked in `app.config.ts`. **Set `EAS_SKIP_AUTO_FINGERPRINT=1`** — with a committed `android/` the fingerprint step hangs for many minutes. Build `7ab6725f…` finished (artifact exists) but predates R37; build `355a69d1…` (commit `353eb88`, versionCode 2) was submitted 2026-11-03 and was **in queue** at handover. When it finishes: download the artifact and publish a prerelease `v1.0.0-preview.2` with the APK + `latest.json` (the updater does pick prereleases; it only skips drafts).
+**EAS cloud builds are the only working rebuild path** (the local dl.google.com JVM-TLS blocker plus an 8 GB RAM box that thrashes on native compilation) — **⚠️ CORRECTED 2026-11-16: stale. Local `assembleRelease` now completes in ~1 hour; the EAS quota is exhausted. See the 2026-11-16 addendum in "Next Up" and `docs/RELEASE.md` §3.** `eas.json` has `development` / `preview` (APK) / `production` (AAB) profiles; `appVersionSource: "local"`; projectId linked in `app.config.ts`. **Set `EAS_SKIP_AUTO_FINGERPRINT=1`** — with a committed `android/` the fingerprint step hangs for many minutes. Build `7ab6725f…` finished (artifact exists) but predates R37; build `355a69d1…` (commit `353eb88`, versionCode 2) was submitted 2026-11-03 and was **in queue** at handover. When it finishes: download the artifact and publish a prerelease `v1.0.0-preview.2` with the APK + `latest.json` (the updater does pick prereleases; it only skips drafts).
 **Signing caveat that must be resolved before a production release**: EAS generates its OWN keystore for cloud builds, so the preview APK is signed by an EAS-managed key — **not** by the local `pb-release.keystore`. A production release must either upload the local keystore (`eas credentials`) or adopt the EAS keystore permanently (and then back it up).
 Remaining release blockers: the queued APK, the keystore decision above, and the Play Store track (not started). The in-app updater exists and is wired to GitHub Releases.
 
@@ -404,7 +484,8 @@ Rounds 22–37 are committed and pushed to `origin/main`; the working tree was c
 | Node | Node 20+ (developed on v24) on PATH |
 | Test device | An Android phone over **wireless adb** — mDNS serials with spaces break `npx expo run:android` device detection; prefer `adb connect <ip>:<port>` + direct Gradle builds |
 | Build+install flow | `cd android && ./gradlew assembleDebug` (JDK 17 env), then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. First build took ~3 h; incremental ≈ 5 min |
-| Cloud build (preferred for release APKs) | `eas build -p android --profile preview` (EAS runs Gradle on Expo's servers — bypasses the local dl.google.com TLS failure). Needs the owner's Expo token (`EXPO_TOKEN` env or `eas login`). Project linked: `avithegod-team/photogrambot`. Builds take 15–60+ min including queue time; `eas build:list --json` for status, `--no-wait` to submit and return immediately |
+| Cloud build (EAS quota exhausted as of 2026-11-16) | `eas build -p android --profile preview` (EAS runs Gradle on Expo's servers). Needs the owner's Expo token (`EXPO_TOKEN` env or `eas login`). Project linked: `avithegod-team/photogrambot`. Builds take 15-60+ min including queue time; `eas build:list --json` for status, `--no-wait` to submit and return immediately. **When the quota is gone, use the local release build below instead.** |
+| Local release build (proven 2026-11-16) | `gradlew.bat :app:assembleRelease -PreactNativeArchitectures=arm64-v8a -Pandroid.enableMinifyInReleaseBuilds=false -Pandroid.enableShrinkResourcesInReleaseBuilds=false -Pkotlin.compiler.execution.strategy=in-process -Dkotlin.compiler.execution.strategy=in-process --no-daemon --max-workers=2 --no-parallel` with `GRADLE_OPTS=-Xmx1536m -XX:MaxMetaspaceSize=512m`. **Never add `--offline`** (blocks the Kotlin JVM plugin expo-updates needs) and **never run it while the sibling project is building** (shared `E:\Dev\.gradle` lock deadlock). ~1h 4m from warm caches; output `android/app/build/outputs/apk/release/app-release.apk`. Full recipe: `docs/RELEASE.md` §3 |
 | Metro | **Port 8081 = this project. Port 8083 = sibling TDLib project's Metro — loading our app from 8083 fails with "TdLibModule not linked".** Launch Metro detached (e.g. a launcher script via PowerShell `Start-Process -WindowStyle Hidden`). Run `adb reverse tcp:8081 tcp:8081` after every wireless-adb reconnect, then launch `photogrambot://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081` |
 | Metro pitfalls | A zombie process holding 8081 answers `/status` but serves **stale bundles** (`netstat -ano \| findstr :8081`, kill the PID). CI mode (`CI=1`) never re-reads changed files (metro-file-map persisted cache) — only fresh watch mode is correct. If watch mode dies with "Failed to start watch mode", delete `%TEMP%\metro-cache` and `%TEMP%\metro-file-map-expo-*` and restart (fresh crawl takes ~7 min behind Defender) |
 | Dev client | PhotogramBot debug build IS the dev client. If it shows "problem loading" / "crashed last time", check Metro first, then retry; the launcher's server list entry also works |

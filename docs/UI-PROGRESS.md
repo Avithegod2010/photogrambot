@@ -99,6 +99,15 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
   (firstInstallTime unchanged). GitHub prerelease `v1.4.0-preview.1` carries the
   APK + latest.json. On-device screenshot confirms the Material 3 tab indicator
   and the reserved gesture inset; haptics feel cannot be verified remotely.
+- **1.4.0 local release APK built (2026-11-16, EAS quota exhausted):**
+  `android/app/build/outputs/apk/release/app-release.apk`, 54.7 MB,
+  `versionName 1.4.0` / `versionCode 6`, signer
+  `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`
+  (debug keystore — installs over the existing app with `adb install -r`, data
+  preserved). Built in 1h 4m with `assembleRelease`, arm64-v8a only,
+  R8/shrinking off, 2 workers. **Not yet installed** — the phone was in use.
+  Recipe and the two pitfalls (never `--offline`; never build alongside the
+  sibling project's Gradle) are in `docs/RELEASE.md` §3.
 - **Not verified on device:** every other screen, TalkBack order, RTL, 200% font
   scale, accents/themes and the Maestro smoke remain owed.
 
