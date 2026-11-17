@@ -30,6 +30,39 @@ interface SetupState {
   finishMigration: () => void;
 }
 
+type SetupSet = (partial: Partial<SetupState>) => void;
+
+/**
+ * Bot/channel metadata refresh, deliberately off the startup path.
+ *
+ * `initialize()` must never await Telegram: a stalled connection used to hold
+ * the splash for the full JSON_TIMEOUT_MS (60 s) — measured as a 61 s cold
+ * start on hardware (2026-11-17). This runs after the app is already usable and
+ * fills in the username and channel title when the network answers.
+ */
+async function refreshBotMetadata(set: SetupSet, channelId: string): Promise<void> {
+  try {
+    const me: TgUser = await getMe();
+    if (me?.username) set({ botUsername: me.username });
+  } catch (e) {
+    if (e instanceof TelegramError && (e.code === 401 || e.code === 404)) {
+      // Token genuinely rejected — clear it and force re-setup.
+      set({ step: "unconfigured", token: null, channelId: null, busy: false });
+      await setBotToken(null);
+      return;
+    }
+    // Transient network failure — keep the saved config and degrade
+    // gracefully; uploads will surface errors with retry/backoff.
+  }
+  try {
+    const chat = await getChat(channelId);
+    const title = chat.title ?? chat.username ?? channelId;
+    if (title) set({ channelTitle: title });
+  } catch {
+    // Keep the provisional title (the channel id).
+  }
+}
+
 export const useSetupStore = create<SetupState>((set, get) => ({
   step: "loading",
   token: null,
@@ -47,41 +80,21 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       const token = await getBotToken();
       const channelId = await getChannelId();
       if (token && channelId) {
-        let botUsername: string | null = null;
-        let channelTitle: string | null = null;
-        try {
-          const me: TgUser = await getMe();
-          botUsername = me.username ?? null;
-        } catch (e) {
-          if (e instanceof TelegramError && (e.code === 401 || e.code === 404)) {
-            // Token genuinely rejected — clear it and force re-setup.
-            set({
-              step: "unconfigured",
-              token: null,
-              channelId: null,
-              busy: false,
-            });
-            await setBotToken(null);
-            return;
-          }
-          // Transient network failure — keep the saved config and degrade
-          // gracefully; uploads will surface errors with retry/backoff.
-          channelTitle = channelId;
-        }
-        try {
-          const chat = await getChat(channelId);
-          channelTitle = chat.title ?? chat.username ?? channelId;
-        } catch {
-          channelTitle = channelTitle ?? channelId;
-        }
+        // Never gate the splash on Telegram. The saved token + channel id are
+        // all the app needs to run; bot/channel metadata is cosmetic. Doing
+        // these round trips inline meant a stalled connection held the app on
+        // "Starting PhotogramBot…" until JSON_TIMEOUT_MS (60 s) elapsed — the
+        // 61 s cold start measured on hardware on 2026-11-17.
         set({
           step: "ready",
           token,
           channelId,
-          botUsername,
-          channelTitle,
+          // Provisional title (the same fallback the old code used when a
+          // lookup failed); replaced in place when the refresh lands.
+          channelTitle: channelId,
           busy: false,
         });
+        void refreshBotMetadata(set, channelId);
       } else {
         set({ step: "unconfigured", token, channelId, busy: false });
       }
