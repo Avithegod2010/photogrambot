@@ -3,6 +3,41 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [1.4.1] - startup fix from the first hardware UI round
+
+- **Cold start fixed (61 s → sub-second expected).** The app gated its splash on
+  two sequential Telegram API calls: `useSetupStore.initialize()` awaited
+  `getMe()` and `getChat()` before setting `step: "ready"`. With
+  `JSON_TIMEOUT_MS = 60_000`, one stalled request held "Starting
+  PhotogramBot…" for the full timeout — measured on device as
+  `61289 ms (app-module 212ms, settings 220ms, db 61240ms, nav 61289ms)`, where
+  the `db` label was misleading because that mark is stamped after
+  `initialize()` returns. Readiness now comes from local state only (saved token
+  + channel id); bot username and channel title refresh in the background. A
+  rejected token (401/404) still clears itself and forces re-setup.
+- **Per-phase DB timing** (`startup_db_steps`, surfaced as "DB init:" in
+  Settings → Maintenance → Diagnostics) so any future startup regression names
+  its own phase instead of being guessed at.
+- **Keystore secret leak closed.** `docs/RELEASE.md` tells you to park
+  `android/pb-release-signing.properties` as `.disabled` to force a
+  debug-keystore build; `.gitignore` matched only the exact filename, so the
+  parked copy (holding the store/key passwords) was untracked-but-not-ignored
+  and a `git add -A` would have committed it. Now ignored by wildcard.
+- **Dependencies:** merged six Dependabot PRs (`actions/checkout` v7,
+  `actions/setup-node` v7, `actions/setup-java` v5, `@react-navigation/core`
+  7.24.0 — which drops the vulnerable `query-string`/`decode-uri-component` —
+  `zustand` 5.0.16, `@types/node` 26.6.6). GitHub advisories 4 → 2; the
+  remainder are dev-only Expo CLI packages for the SDK 58 bump. See
+  `docs/DEPENDENCIES.md`.
+- **CI:** `android/gradlew` was committed without the executable bit, so the
+  Maestro smoke workflow could never build (`./gradlew: Permission denied`,
+  exit 126). Fixed to `100755`.
+
+**Verified on hardware this round:** M3 navigation-bar indicator and switches,
+Light/AMOLED/Dark themes, Extra-large text reflow, Arabic RTL mirroring, and the
+reduced-motion path. **Not yet verified:** this startup fix itself (needs the
+1.4.1 build), haptics feel, ripples.
+
 ## [1.4.0] - Material You motion & haptics
 
 - **Material 3 navigation bar** - animated 32 dp active indicator pill behind the

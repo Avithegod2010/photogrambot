@@ -113,14 +113,23 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
 >   starts and renders normally (no blank frame, no crash). Scales restored.
 >
 > **Issues found on hardware (all NEW, none previously known):**
-> 1. **Cold start takes ~61 s.** `Settings → Maintenance → Diagnostics` reports
+> 1. **Cold start took ~61 s. ROOT-CAUSED AND FIXED (commit `301c4f1`).**
+>    `Settings → Maintenance → Diagnostics` reported
 >    `Last cold start: 61289 ms (app-module 212ms, settings 220ms, db 61240ms,
->    nav 61289ms)` — i.e. **all of it is database init**. Reproduced on every
->    force-stop cold start. Per-step timing has now been added to `getDb()` /
->    `migrate()` (`startup_db_steps` in kv, shown in Diagnostics as "DB init:")
->    so the next build names the exact phase. Leading hypothesis is SQLite WAL
->    recovery after a force-stop during heavy upload writes, but an FTS/schema
->    rebuild running every launch is not yet excluded.
+>    nav 61289ms)`. The `db` label was misleading — App.tsx stamps that mark
+>    after `useSetupStore.initialize()`, which awaited **`getMe()` then
+>    `getChat()` before setting `step: "ready"`**. `JSON_TIMEOUT_MS` is
+>    `60_000`, and the observed stall was 61,240 ms: one round trip hung until
+>    its timeout, then the second succeeded. So the splash was gated on two
+>    sequential Telegram calls, not on SQLite at all.
+>    **Fix:** `initialize()` now decides readiness from local state alone (saved
+>    token + channel id from SecureStore) and calls a new `refreshBotMetadata()`
+>    without awaiting it; the username and channel title fill in when the
+>    network answers. A 401/404 still clears the token and forces re-setup.
+>    Per-phase DB timing (`startup_db_steps`, shown as "DB init:" in
+>    Diagnostics) was added at the same time and should now read in the low
+>    hundreds of ms, confirming SQLite was never the problem.
+>    **Not yet device-verified — needs the 1.4.1 rebuild.**
 > 2. **Status bar stays light-content in Light theme** — clock, battery and
 >    network icons render white-on-white (unreadable) on both the splash and
 >    every light-theme screen. Needs a status-bar style that follows the
