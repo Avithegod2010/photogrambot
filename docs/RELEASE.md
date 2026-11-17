@@ -137,6 +137,45 @@ project with its own `GRADLE_USER_HOME`.
 R8/minify and resource shrinking are disabled above for speed and memory; the
 APK is larger but behaviour is identical to the EAS build.
 
+### If the build exits `-1` after two lines (swallowed daemon death)
+
+Observed 2026-11-17 on this box: every Gradle invocation that needed a daemon
+died immediately, with the client printing only
+
+```
+To honour the JVM settings for this build a single-use Daemon process will be forked.
+Daemon will be stopped at the end of the build
+```
+
+and exiting `-1`. Even `gradlew help` failed. `gradlew --stop` worked (it needs
+no daemon), so the wrapper and JDK were fine; `java -Xmx1200m -version` ran
+fine; the Windows Application log showed **no** crash event; the daemon log
+(`E:\Dev\.gradle\daemon\9.3.1\daemon-*.log`) ended mid-sentence right after
+`Executing build`. Memory was not the cause (2.4 GB free, 5 GB commit
+available) and neither was `--offline`.
+
+Working theory: the singleton/single-use daemon fork is being terminated by the
+environment on this box, while a build that runs **inside the client JVM** does
+not. Two things to try, in order:
+
+1. Clear wedged daemons — the registry can report
+   `N busy and M incompatible Daemons could not be reused`:
+   ```powershell
+   Get-Process java -ErrorAction SilentlyContinue | Stop-Process -Force
+   .\gradlew.bat --stop
+   ```
+   Killing stale daemons also frees a surprising amount of RAM (they hold their
+   whole heap); free memory jumped from 0.3 GB to 2.4 GB in one sweep.
+2. Run the build in-process so no daemon is forked — make the client JVM's args
+   match `org.gradle.jvmargs` exactly:
+   ```powershell
+   $env:GRADLE_OPTS = "-Xmx1536m -XX:MaxMetaspaceSize=512m"
+   .\gradlew.bat :app:assembleRelease "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m" `
+     ... --no-daemon --console=plain --max-workers=2 --no-parallel
+   ```
+   Use `--console=plain` and write output straight to a file; piping through
+   `Select-Object -Last N` buffers everything and looks like a hang.
+
 Signing: when `android/pb-release-signing.properties` points at a missing
 keystore, park it as `.disabled` so the release config falls back to
 `android/app/debug.keystore`. That makes the APK installable over the existing
