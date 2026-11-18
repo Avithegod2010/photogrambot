@@ -464,6 +464,7 @@ export default function App() {
   const initialize = useSetupStore((s) => s.initialize);
   const step = useSetupStore((s) => s.step);
   const loadSettings = useSettingsStore((s) => s.load);
+  const theme = useTheme();
   const ensureDeviceId = useDeviceStore((s) => s.ensureDeviceId);
   const appLock = useSettingsStore((s) => s.prefs.appLock);
   const refreshTheme = useSettingsStore((s) => s.refreshTheme);
@@ -631,7 +632,10 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <StatusBar style="light" />
+        {/* Light-content icons only read on a dark background. Hardcoding
+            "light" left the clock, battery and network icons white-on-white in
+            the Light theme (found on hardware 2026-11-17). */}
+        <StatusBar style={theme.mode === "light" ? "dark" : "light"} />
         <ThemeFade>
           <ErrorBoundary>
             <Root locked={locked} initialized={initialized} />

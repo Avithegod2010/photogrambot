@@ -1583,6 +1583,31 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
     [photos.length, timeline, trackHeight]
   );
 
+  // Labels stack at their true position, so a busy library pushes two months
+  // within a few pixels of each other and they overprint ("Mar 2025" ran into
+  // "Jul 2024" on hardware, 2026-11-17). Keep only labels that fit without
+  // colliding; the dot for every month still draws.
+  const visibleMarkers = useMemo(() => {
+    if (trackHeight <= 0) {
+      // Height unknown on first paint: fall back to count-based thinning.
+      return timeline.filter(
+        (_, index) => timeline.length <= 8 || index % Math.ceil(timeline.length / 8) === 0
+      );
+    }
+    const span = Math.max(1, photos.length - 1);
+    const minGapPx = 24;
+    const kept: typeof timeline = [];
+    let lastY = Number.NEGATIVE_INFINITY;
+    for (const marker of timeline) {
+      const y = (marker.index / span) * trackHeight;
+      if (y - lastY >= minGapPx) {
+        kept.push(marker);
+        lastY = y;
+      }
+    }
+    return kept;
+  }, [timeline, photos.length, trackHeight]);
+
   const scrubResponder = useMemo(
     () =>
       PanResponder.create({
@@ -1723,20 +1748,22 @@ export function LibraryScreen({ route, navigation }: { route: any; navigation: a
           accessibilityLabel="Cloud timeline scrubber"
         >
           <View style={[styles.timelineRail, { backgroundColor: theme.colors.outlineVariant }]} />
-          {timeline
-            .filter((_, index) => timeline.length <= 8 || index % Math.ceil(timeline.length / 8) === 0)
-            .map((marker) => (
-              <View
-                key={`${marker.index}:${marker.label}`}
-                pointerEvents="none"
-                style={[styles.timelineMarker, { top: `${(marker.index / Math.max(1, photos.length - 1)) * 100}%` }]}
-              >
-                <View style={[styles.timelineDot, { backgroundColor: theme.colors.primary }]} />
-                <Text style={[styles.timelineText, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
+          {visibleMarkers.map((marker) => (
+            <View
+              key={`${marker.index}:${marker.label}`}
+              pointerEvents="none"
+              style={[styles.timelineMarker, { top: `${(marker.index / Math.max(1, photos.length - 1)) * 100}%` }]}
+            >
+              <View style={[styles.timelineDot, { backgroundColor: theme.colors.primary }]} />
+              {/* Opaque chip: dark or light, the label has to stay readable over
+                  whatever photo sits behind the scrubber. */}
+              <View style={[styles.timelineLabelChip, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.timelineText, { color: theme.colors.onSurface }]} numberOfLines={1}>
                   {marker.label}
                 </Text>
               </View>
-            ))}
+            </View>
+          ))}
           {scrubbing && scrubLabel ? (
             <View style={[styles.timelineBubble, { backgroundColor: theme.colors.primary }]} pointerEvents="none">
               <Text style={{ color: theme.colors.onPrimary, fontSize: 12, fontWeight: "700" }}>{scrubLabel}</Text>
@@ -1930,6 +1957,10 @@ const styles = StyleSheet.create({
   timelineText: {
     fontSize: 9,
     maxWidth: 45,
+  },
+  timelineLabelChip: {
+    paddingHorizontal: 3,
+    borderRadius: 4,
   },
   timelineBubble: {
     position: "absolute",
