@@ -35,8 +35,11 @@ All notable changes to PhotogramBot. Versions follow `android/version.properties
 
 **Verified on hardware this round:** M3 navigation-bar indicator and switches,
 Light/AMOLED/Dark themes, Extra-large text reflow, Arabic RTL mirroring, and the
-reduced-motion path. **Not yet verified:** this startup fix itself (needs the
-1.4.1 build), haptics feel, ripples.
+reduced-motion path. **Not yet verified:** haptics feel, ripples.
+
+**Cold start fixed and device-verified:** `61289 ms → 373 ms` on 1.4.1
+(versionCode 7), with the per-phase DB breakdown showing only 54 ms of actual
+database work.
 
 ## [1.4.0] - Material You motion & haptics
 

@@ -127,9 +127,18 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
 >    without awaiting it; the username and channel title fill in when the
 >    network answers. A 401/404 still clears the token and forces re-setup.
 >    Per-phase DB timing (`startup_db_steps`, shown as "DB init:" in
->    Diagnostics) was added at the same time and should now read in the low
->    hundreds of ms, confirming SQLite was never the problem.
->    **Not yet device-verified — needs the 1.4.1 rebuild.**
+>    Diagnostics) was added at the same time.
+>    **DEVICE-VERIFIED 2026-11-18 on 1.4.1 (versionCode 7).** Same Diagnostics
+>    row, after the fix:
+>    `Last cold start: 373 ms (app-module 189ms, settings 200ms, db 311ms,
+>    nav 373ms)` with `DB init: open 23ms, key 23ms, pragma 28ms, schema 29ms,
+>    photoColumns 32ms, ftsSchema 33ms, queueColumns 35ms, versionTables 35ms,
+>    albumColumns 36ms, ftsSchema2 37ms, hashCache 37ms, queueDedupe 54ms,
+>    rest 54ms, migrate 54ms` — **61,289 ms → 373 ms**, and the actual database
+>    work is 54 ms, proving SQLite was never involved. The Gallery is fully
+>    rendered under 8 s after `am force-stop` + relaunch. The header shows the
+>    real channel title ("Photogram-bot"), not the raw id, so the background
+>    metadata refresh lands correctly.
 > 2. **Status bar stays light-content in Light theme** — clock, battery and
 >    network icons render white-on-white (unreadable) on both the splash and
 >    every light-theme screen. Needs a status-bar style that follows the
