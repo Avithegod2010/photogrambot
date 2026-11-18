@@ -137,6 +137,28 @@ project with its own `GRADLE_USER_HOME`.
 R8/minify and resource shrinking are disabled above for speed and memory; the
 APK is larger but behaviour is identical to the EAS build.
 
+### If Gradle fails with "Several environment variables … contain different paths to the SDK"
+
+Observed 2026-11-18. This box has `ANDROID_SDK_ROOT=C:\Dev\android-sdk` in the
+user environment while the real SDK lives at `E:\Dev\android-sdk`. Setting only
+`ANDROID_HOME` makes React Native's `com.facebook.react.rootproject` plugin
+abort the whole build:
+
+```
+> Failed to apply plugin 'com.facebook.react.rootproject'.
+   > Several environment variables and/or system properties contain different
+     paths to the SDK.
+     ANDROID_HOME: E:\Dev\android-sdk
+     ANDROID_SDK_ROOT: C:\Dev\android-sdk
+```
+
+Set **both** to the same path in the build shell:
+
+```powershell
+$env:ANDROID_HOME = "E:\Dev\android-sdk"
+$env:ANDROID_SDK_ROOT = "E:\Dev\android-sdk"
+```
+
 ### If the build exits `-1` after two lines (swallowed daemon death)
 
 Observed 2026-11-17 on this box: every Gradle invocation that needed a daemon
@@ -175,6 +197,14 @@ not. Two things to try, in order:
    ```
    Use `--console=plain` and write output straight to a file; piping through
    `Select-Object -Last N` buffers everything and looks like a hang.
+3. Skip Android lint for verification builds: `-x lintVitalRelease`.
+   `lintVitalAnalyzeRelease` is by far the heaviest task in `assembleRelease`
+   and was what killed the daemon at task 1283 of ~1300 on this box. It adds
+   nothing when the build is only being installed for a UI/behaviour check.
+4. Quote every `-P` flag. In PowerShell, `-Pandroid.enableX=false` passed through
+   `&` can split into `-P` + `.enableX=false`, and Gradle then reports
+   `Task '.enableX=false' not found` **after** a full 42-minute configuration
+   pass. Prefer building an array of arguments and splatting it (`@args`).
 
 Signing: when `android/pb-release-signing.properties` points at a missing
 keystore, park it as `.disabled` so the release config falls back to
