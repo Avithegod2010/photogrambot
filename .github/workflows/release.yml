@@ -1,69 +1,136 @@
 name: Release APK
 
-# Builds a production APK with EAS, downloads it, and publishes a GitHub
-# Release (APK + latest.json) for the in-app updater.
+# Builds the APK on GitHub's runners with Gradle — no EAS quota, no Expo token.
 #
-# Required repository secret: EXPO_TOKEN (Expo account token).
-# Trigger: push a tag like v1.2.0, or run manually with a tag name.
+# Why this exists: the EAS cloud quota is exhausted and local builds on the
+# 8 GB dev box take ~1 h plus a long list of environment traps (see
+# docs/RELEASE.md §3). The runner has 7 GB RAM, a real Android SDK/NDK and is
+# not interrupted, so this is the reliable path.
+#
+# Signing: android/app/debug.keystore is committed, and
+# android/pb-release-signing.properties is gitignored, so a release build here
+# falls back to the debug key — the SAME identity the installed app already
+# uses. That means the artifact installs with `adb install -r` over an existing
+# install, preserving the SQLite index and SecureStore.
+#
+# Triggers:
+#   - manual dispatch: builds an APK artifact (and publishes a release if you
+#     supply a tag)
+#   - pushing a tag like v1.4.2: builds and publishes the GitHub Release
+#
+# Required secret: none. GITHUB_TOKEN is provided automatically.
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.2.0)"
-        required: true
+        description: "Publish as a GitHub release with this tag (leave empty to only build)"
+        required: false
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      EAS_SKIP_AUTO_FINGERPRINT: "1"
-    steps:
-      - uses: actions/checkout@v4
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
-      - uses: actions/setup-node@v4
+jobs:
+  build:
+    name: Build signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
 
-      - name: Install EAS CLI
-        run: npm install --global eas-cli
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Build production APK
-        id: build
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Read version
+        id: ver
         run: |
-          # The preview profile builds an APK; production builds an AAB for Play.
-          eas build --platform android --profile preview --non-interactive --wait --json > eas-build.json
-          node -e "
-            const data = require('./eas-build.json');
-            const build = Array.isArray(data) ? data[0] : data;
-            const url = build?.artifacts?.applicationArchiveUrl || build?.artifacts?.buildUrl;
-            if (!url) { console.error('No APK artifact URL in EAS output'); process.exit(1); }
-            console.log('artifact=' + url);
-            require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'artifact=' + url + '\n');
-          "
+          set -euo pipefail
+          name=$(grep -E '^versionName=' android/version.properties | cut -d= -f2)
+          code=$(grep -E '^versionCode=' android/version.properties | cut -d= -f2)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Building $name ($code)"
 
-      - name: Download APK
-        run: curl -L --fail --retry 3 -o photogrambot-release.apk "${{ steps.build.outputs.artifact }}"
+      - name: Build release APK
+        working-directory: android
+        # lintVital is the heaviest task in assembleRelease and adds nothing to a
+        # shippable APK here; R8/resource shrinking are off for build speed, which
+        # matches the local recipe in docs/RELEASE.md.
+        run: |
+          ./gradlew :app:assembleRelease \
+            -x lintVitalRelease \
+            -PreactNativeArchitectures=arm64-v8a \
+            -Pandroid.enableMinifyInReleaseBuilds=false \
+            -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
+            -Pkotlin.compiler.execution.strategy=in-process \
+            --no-daemon --max-workers=4 --console=plain
+
+      - name: Stage APK
+        run: |
+          set -euo pipefail
+          src=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$src" || { echo "APK not produced"; exit 1; }
+          cp "$src" "photogrambot-${{ steps.ver.outputs.name }}.apk"
+          ls -lh photogrambot-*.apk
+
+      - name: Verify signer and package
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs photogrambot-*.apk | grep -E "SHA-256|Signer #1 certificate DN"
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$AAPT" dump badging photogrambot-*.apk | head -1
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: photogrambot-${{ steps.ver.outputs.name }}
+          path: photogrambot-*.apk
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          APK_FILE: photogrambot-${{ steps.ver.outputs.name }}.apk
         run: |
+          set -euo pipefail
           node scripts/publish-release.mjs \
-            --apk photogrambot-release.apk \
+            --apk "$APK_FILE" \
             --tag "$TAG" \
-            --title "PhotogramBot $TAG" \
-            --notes-file CHANGELOG.md
+            --title "PhotogramBot ${{ steps.ver.outputs.name }}" \
+            --notes-file CHANGELOG.md \
+            --prerelease
