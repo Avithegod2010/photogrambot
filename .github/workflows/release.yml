@@ -87,15 +87,22 @@ jobs:
       - name: Build release APK
         working-directory: android
         # lintVital is the heaviest task in assembleRelease and adds nothing to a
-        # shippable APK here; R8/resource shrinking are off for build speed, which
-        # matches the local recipe in docs/RELEASE.md.
+        # shipped APK; R8/resource shrinking stay off for build speed, matching
+        # the local recipe in docs/RELEASE.md.
+        #
+        # Do NOT copy the local box's -Pkotlin.compiler.execution.strategy=
+        # in-process here: that exists to survive an 8 GB machine, and inside a
+        # 2 GB Gradle heap it makes the Kotlin compiler die with
+        # InvocationTargetException (react-native-gesture-handler failed that way
+        # on the first real run of this workflow). The runner has 7 GB, so give
+        # Gradle 4 GB and let Kotlin use its own daemon.
         run: |
           ./gradlew :app:assembleRelease \
             -x lintVitalRelease \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
             -PreactNativeArchitectures=arm64-v8a \
             -Pandroid.enableMinifyInReleaseBuilds=false \
             -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
-            -Pkotlin.compiler.execution.strategy=in-process \
             --no-daemon --max-workers=4 --console=plain
 
       - name: Stage APK
