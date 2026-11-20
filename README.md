@@ -1,33 +1,41 @@
 <div align="center">
 
-<img src="assets/icon.png" width="88" height="88" alt="" />
-
 <h1>PhotogramBot</h1>
 
-<strong>Back up your Android photos and videos to your own private Telegram channel.</strong>
+<p><strong>Use your own Telegram bot to back up photos and videos to a private channel.</strong></p>
 
-<p><strong><a href="https://github.com/Avithegod2010/photogrambot/releases/download/v1.4.0-preview.1/photogrambot-1.4.0-preview-resigned.apk">Download preview APK</a></strong> · <a href="#in-app-setup">Set up your bot</a> · <a href="https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1">Preview release notes</a></p>
+<p><strong><a href="https://github.com/Avithegod2010/photogrambot/releases/download/v1.4.0-preview.1/photogrambot-1.4.0-preview-resigned.apk">⬇️ Download preview APK</a></strong> · <a href="#in-app-setup">🤖 Set up your bot</a> · <a href="https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1">Preview release notes</a></p>
 
-<sub>Android · Your Telegram bot and private channel · v1.4.0-preview.1</sub>
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="readme-hero.png" />
+  <img src="readme-hero.gif" width="820" alt="An illustration of photos moving from a phone via a bot to a locked Telegram channel" />
+</picture>
+
+<p><sub>Android · v1.4.0-preview.1</sub></p>
 
 </div>
 
-## In-app setup
+<a name="in-app-setup"></a>
+
+## 🤖 In-app setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and create a **private Telegram channel** you control.
 2. Add the bot to the channel as an admin with permission to post messages.
 3. In PhotogramBot, paste the bot token and tap **Verify**. Choose the detected channel or enter its channel ID.
 4. Start a backup. Once an item appears in the archive, open it and use **Save** to try restoring the original.
 
-The preview APK uses a debug signing key. Check the [release notes](https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1) before installing over an existing build.
+> [!NOTE]
+> The preview APK uses a debug signing key. Check the [release notes](https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1) before installing over an existing build.
 
 <a name="highlights"></a>
 
-## Features
+<a name="features"></a>
 
-- **Back up originals.** For photos, the bot sends a lightweight preview and the full-quality original. The upload queue can wait for Wi-Fi or charging and retry individual items.
-- **Browse on your phone.** Use the local gallery, albums, favorites, trips and search. The gallery index stays on your device.
-- **Restore what you need.** Save one original, restore missing items in bulk or move the library to a new phone from an encrypted index backup.
+## 📷 Features
+
+| 📤 Back up originals | 📷 Browse your gallery | 📥 Restore files |
+| --- | --- | --- |
+| Send a preview and full-quality photo to your channel. Pause for Wi-Fi or charging and retry individual items. | Use albums, favorites, trips and search through the local gallery index. | Save individual originals, restore missing items or move the library with an encrypted index. |
 
 <details>
 <summary>More gallery and maintenance tools</summary>
@@ -41,7 +49,9 @@ The preview APK uses a debug signing key. Check the [release notes](https://gith
 
 <a name="how-it-works"></a>
 
-## Backup & restore explained
+<a name="backup--restore-explained"></a>
+
+## 📦 Backup & restore explained
 
 | What you want to recover | Where it lives | How to restore it |
 | --- | --- | --- |
@@ -49,7 +59,9 @@ The preview APK uses a debug signing key. Check the [release notes](https://gith
 | Missing originals | Your Telegram media archive | Use **Maintenance → Restore all originals**. |
 | Albums, favorites and the library index on a new phone | An encrypted index backup pinned in your channel | On your old phone, use **Maintenance → Backup to channel**. On the new phone, restore it with the passphrase when the setup wizard detects it. |
 
-## Privacy
+<a name="privacy"></a>
+
+## 🔒 Privacy
 
 The bot token is stored on-device in Android’s secure storage, and your media goes to the channel you choose. The optional Gemini features can send data to Google when enabled with your own key. [Security policy](SECURITY.md) · [AI processing details](docs/ON_DEVICE_AI.md)
 
@@ -58,7 +70,9 @@ The bot token is stored on-device in Android’s secure storage, and your media 
 - For originals larger than 20 MB that the hosted Bot API can’t return to the app, download the document directly in Telegram.
 - Video uploads in parts and multi-destination mirroring are experimental. Android is the supported platform.
 
-## Building
+<a name="building"></a>
+
+## 🛠️ Building
 
 <details>
 <summary>Build and test locally</summary>
