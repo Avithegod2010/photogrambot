@@ -139,6 +139,12 @@ Legend: ✅ migrated · 🟡 partially migrated (chrome done, body still legacy)
 >    rendered under 8 s after `am force-stop` + relaunch. The header shows the
 >    real channel title ("Photogram-bot"), not the raw id, so the background
 >    metadata refresh lands correctly.
+>    **Re-measured on 1.4.3 (2026-11-20):** the *first* cold start after an
+>    install reports `4140 ms (app-module 185ms, settings 4073ms, db 4091ms,
+>    nav 4140ms)` with `migrate 66ms` — i.e. the database is still ~66 ms and the
+>    4 s sits in `settings` (SecureStore/AsyncStorage warming up for the first
+>    time in the new process). Steady state stays at the 373 ms measured above.
+>    Both are three orders of magnitude better than the original 61,289 ms.
 > 2. **Status bar stays light-content in Light theme** — clock, battery and
 >    network icons render white-on-white (unreadable) on both the splash and
 >    every light-theme screen. Needs a status-bar style that follows the
