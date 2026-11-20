@@ -125,7 +125,7 @@ const SETTINGS_SECTIONS: { id: string; label: string; keywords: string }[] = [
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { botUsername, channelTitle, reset } = useSetupStore();
+  const { botUsername, channelTitle, token, reset, refreshMetadata } = useSetupStore();
   const { prefs, update } = useSettingsStore();
   const { stats, refreshMeta } = useLibraryStore();
   const { start, progress, subscribe } = useUploadStore();
@@ -224,6 +224,8 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     void getDecoyBotToken().then((v) => setDecoyTokenDraft(v ?? ""));
     void pendingCrashReportCount().then(setCrashPending);
     void getLastStartup().then(setStartupInfo);
+    // Self-heal a metadata lookup that failed on a cold start.
+    refreshMetadata();
     void kvGet("startup_db_steps")
       .then((raw) => setDbSteps(raw))
       .catch(() => {});
@@ -584,7 +586,11 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
           <View style={styles.configRow}>
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>Bot</Text>
             <Text style={{ color: theme.colors.onSurface, fontWeight: "600" }}>
-              {botUsername ? `@${botUsername}` : "Not configured"}
+              {/* A token can be stored while the username is still unknown (the
+                  metadata lookup is non-blocking and may have failed on a cold
+                  start). Saying "Not configured" there was wrong and alarming:
+                  uploads were running at the time. */}
+              {botUsername ? `@${botUsername}` : token ? "Connected" : "Not configured"}
             </Text>
           </View>
           <View style={styles.configRow}>

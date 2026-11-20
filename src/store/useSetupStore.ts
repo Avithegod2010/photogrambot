@@ -22,6 +22,8 @@ interface SetupState {
   error: string | null;
   migrationOffer: BackupOffer | null;
   initialize: () => Promise<void>;
+  /** Re-run the non-blocking bot/channel metadata lookup (Settings mount, foreground). */
+  refreshMetadata: () => void;
   verifyAndSave: (token: string) => Promise<boolean>;
   saveChannel: (channelId: string) => Promise<boolean>;
   detectChannel: () => Promise<{ id: string; title?: string } | null>;
@@ -101,6 +103,15 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     } catch (e: any) {
       set({ step: "error", error: e?.message ?? "Init failed", busy: false });
     }
+  },
+
+  refreshMetadata: () => {
+    const { token, channelId } = get();
+    // A cold start whose network was down leaves the username/title unknown
+    // forever otherwise: the old blocking code retried on every launch, this
+    // non-blocking path has to be re-invoked by whoever can observe the app
+    // becoming usable again (Settings mount / returning to the foreground).
+    if (token && channelId) void refreshBotMetadata(set, channelId);
   },
 
   verifyAndSave: async (token: string) => {
