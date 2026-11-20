@@ -1,10 +1,14 @@
-<div align="center">
-
-<img src="assets/icon.png" alt="PhotogramBot" width="120" height="120" />
-
 # PhotogramBot
 
-**Back up your phone's photos and videos to your own private Telegram channel — wrapped in a Google Photos–style app.**
+<img src="assets/icon.png" width="72" height="72" alt="photogrambot icon" />
+
+Back up photos and videos from your Android phone to a private Telegram channel using your own bot.
+
+**Uses a bot + private Telegram channel.**
+
+**[Download preview APK](https://github.com/Avithegod2010/photogrambot/releases/download/v1.4.0-preview.1/photogrambot-1.4.0-preview-resigned.apk)** · [Preview release notes](https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1) · [Set up your bot](#in-app-setup)
+
+![PhotogramBot workflow illustration showing bot setup, the local gallery and restoring backups](workflow-overview.png)
 
 [![Platform: Android](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)](#known-limitations)
 [![Expo SDK 57](https://img.shields.io/badge/Expo_SDK-57-000020?logo=expo&logoColor=white)](https://docs.expo.dev/versions/v57.0.0/)
@@ -12,10 +16,6 @@
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot_API-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml/badge.svg)](https://github.com/Avithegod2010/photogrambot/actions/workflows/ci.yml)
-
-</div>
-
----
 
 PhotogramBot turns a private Telegram channel into your personal, free photo archive. It uploads a compressed **preview** plus the **full-quality original** of every photo, indexes everything in a local SQLite library, and lets you browse, search, and restore it all from a native Android app.
 
