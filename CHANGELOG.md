@@ -3,6 +3,34 @@
 All notable changes to PhotogramBot. Versions follow `android/version.properties`
 (`versionName`), and every published artifact increments `versionCode`.
 
+## [1.4.3] - bot row tells the truth
+
+- **Settings → Bot configuration no longer says "Not configured" when a token
+  is stored.** Found on device straight after installing 1.4.2: the row read
+  "Not configured" while the app was actively uploading, because the
+  non-blocking metadata lookup had not filled in `botUsername` yet. It now shows
+  `@username` when known, **"Connected"** when a token exists but the username
+  is still unknown, and "Not configured" only when there really is no token.
+- **Metadata lookup self-heals.** A refresh that failed on a cold start used to
+  stay failed for the whole session (the old blocking code retried by
+  construction on every launch). `refreshMetadata()` is now called when Settings
+  opens.
+
+## [1.4.2] - status bar and cloud scrubber fixes
+
+- **Status bar follows the theme.** `App.tsx` hardcoded `<StatusBar
+  style="light" />`, so in the Light theme the clock, battery and network icons
+  were white-on-white — on the splash and every light screen.
+- **Cloud timeline labels stop colliding.** Labels are thinned by actual pixel
+  gap (24 dp, using the measured track height) instead of by count, so "Mar
+  2025" no longer overprints "Jul 2024", and each label sits on an opaque
+  theme chip instead of directly on the photo.
+- **Built on GitHub Actions from here on.** The EAS quota is exhausted and local
+  builds on the 8 GB box are ~1 h plus a long list of traps, so
+  `.github/workflows/release.yml` now compiles the APK with Gradle on a runner
+  (arm64-v8a, lint skipped, debug-keystore signing so it installs over an
+  existing app without wiping data).
+
 ## [1.4.1] - startup fix from the first hardware UI round
 
 - **Cold start fixed (61 s → sub-second expected).** The app gated its splash on
