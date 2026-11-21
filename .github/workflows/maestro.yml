@@ -54,22 +54,28 @@ jobs:
           curl -Ls "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
-      # A hosted runner occasionally comes up without /dev/kvm. The emulator
-      # then exits at once with "Software CPU emulation (-accel off) is not
-      # supported", and the action still polls for boot for the whole
-      # emulator-boot-timeout (15 min) before failing. Detect it here so the job
-      # fails in seconds with an actionable message: re-run the job.
-      - name: Check hardware acceleration (KVM)
+      # /dev/kvm on a hosted runner is often root:kvm 0660 with the runner user
+      # not in the kvm group. The emulator then falls back to `-accel off`,
+      # exits with "Software CPU emulation (-accel off) is not supported", and
+      # the action keeps polling sys.boot_completed for the full boot timeout
+      # before failing with a misleading "Timeout waiting for emulator to boot".
+      # Hosted runners have passwordless sudo, so grant access up front.
+      - name: Prepare KVM access
         run: |
+          set -euo pipefail
           if [ ! -e /dev/kvm ]; then
-            echo "::error::This runner has no /dev/kvm, so the emulator cannot start. Re-run the job to get a KVM-capable runner."
+            echo "::error::This runner has no /dev/kvm at all; the emulator cannot start. Re-run the job to get a KVM-capable runner."
             exit 1
+          fi
+          echo "before:"; ls -l /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            echo "after:"; ls -l /dev/kvm
           fi
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "::error::/dev/kvm exists but is not readable/writable by this user; add the runner user to the kvm group."
+            echo "::error::/dev/kvm is still not readable/writable; the emulator would fall back to software emulation."
             exit 1
           fi
-          ls -l /dev/kvm
 
       - name: Run smoke flow on emulator
         uses: reactivecircus/android-emulator-runner@v2
