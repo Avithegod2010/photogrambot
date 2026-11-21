@@ -2,7 +2,7 @@
 
 <h1>PhotogramBot</h1>
 
-<p><strong>Use your own Telegram bot to back up photos and videos to a private channel.</strong></p>
+<p><strong>Back up photos and videos to a private Telegram channel using your own bot.</strong></p>
 
 <p><strong><a href="https://github.com/Avithegod2010/photogrambot/releases/download/v1.4.0-preview.1/photogrambot-1.4.0-preview-resigned.apk">⬇️ Download preview APK</a></strong> · <a href="#in-app-setup">🤖 Set up your bot</a> · <a href="https://github.com/Avithegod2010/photogrambot/releases/tag/v1.4.0-preview.1">Preview release notes</a></p>
 
@@ -16,6 +16,8 @@
 </div>
 
 <a name="in-app-setup"></a>
+
+[Looking for account-based backups? See Photogram.](https://github.com/Avithegod2010/photogram)
 
 ## 🤖 In-app setup
 
