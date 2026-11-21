@@ -45,9 +45,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build debug APK (x86_64)
+      # A debug APK is useless here: expo-dev-client is installed, so a debug
+      # build boots into the dev launcher and waits for Metro - the app's own UI
+      # (and therefore the setup wizard) never appears. assembleRelease embeds
+      # the JS bundle and signs with the committed debug.keystore when
+      # pb-release-signing.properties is absent, so it installs with plain adb.
+      - name: Build release APK (x86_64, embedded JS bundle)
         working-directory: android
-        run: ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon
+        run: |
+          ./gradlew assembleRelease \
+            -PreactNativeArchitectures=x86_64 \
+            -Pandroid.enableMinifyInReleaseBuilds=false \
+            -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
+            --no-daemon
 
       - name: Install Maestro
         run: |
@@ -91,7 +101,7 @@ jobs:
             # Each line here runs as its own `sh -c`, so no multi-line loops.
             # Bounded (2 min): the package manager can lag boot-complete.
             for i in $(seq 1 60); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
             maestro test .maestro/smoke.yaml
 
       - name: Upload Maestro debug output
