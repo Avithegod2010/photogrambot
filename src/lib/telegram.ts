@@ -746,7 +746,9 @@ export async function detectChannelFromUpdates(): Promise<{ id: string; title?: 
     const u = updates[i];
     const msg = u.channel_post ?? u.message;
     if (!msg) continue;
-    if (msg.chat.type === "channel" || msg.chat.type === "supergroup" || msg.chat.type === "group") {
+    // Channels only: a group detected here would be offered as the destination
+    // and then rejected by saveChannel, and its members are not the owner.
+    if (msg.chat.type === "channel") {
       return { id: String(msg.chat.id), title: msg.chat.title };
     }
   }

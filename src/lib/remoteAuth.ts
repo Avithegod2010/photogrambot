@@ -82,3 +82,49 @@ export function findAdmin(
   if (!userId) return null;
   return admins.find((a) => a.id === userId) ?? null;
 }
+
+/**
+ * Who is speaking, as far as the bot can tell from one update.
+ *
+ * `chatType` is Telegram's `msg.chat.type`; `isDestinationChat` says whether
+ * that chat is the one configured in setup; `verifiedChatAdmin` is the result
+ * of `getChatAdministrators` for the destination chat (only meaningful when the
+ * update is a plain `message` in a channel — channel posts carry no `from`).
+ */
+export interface InboundIdentity {
+  chatType: string;
+  isChannelPost: boolean;
+  isDestinationChat: boolean;
+  fromId?: number | null;
+  admins: RemoteAdmin[];
+  verifiedChatAdmin: boolean;
+}
+
+/**
+ * Resolves the role an inbound message may act with.
+ *
+ * The destination chat used to be trusted unconditionally, on the argument that
+ * "only channel admins can post in the setup". That is true of a channel and
+ * false of a group or supergroup — setup accepts either — so every member of a
+ * group destination was silently granted `admin` and could `/wipe` the local
+ * library. Admin authority now requires a real channel:
+ *
+ *   - `channel_post` in the destination chat is admin (the Bot API only emits
+ *     that update for channels, and only channel admins can post there);
+ *   - a `message` in the destination channel is admin only when Telegram
+ *     confirms the sender is a chat administrator;
+ *   - a group, supergroup or unrelated chat grants nothing at all;
+ *   - private chats keep the explicit allowlist.
+ */
+export function resolveInboundRole(identity: InboundIdentity): RemoteRole | null {
+  const { chatType, isChannelPost, isDestinationChat, admins } = identity;
+  if (isDestinationChat && chatType === "channel") {
+    if (isChannelPost) return "admin";
+    if (identity.fromId != null && identity.verifiedChatAdmin) return "admin";
+    return null;
+  }
+  if (!isChannelPost && chatType === "private") {
+    return findAdmin(admins, identity.fromId)?.role ?? null;
+  }
+  return null;
+}

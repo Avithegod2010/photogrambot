@@ -10,7 +10,7 @@ import { fetchUpdates } from "./webhook";
 import { parseCaption } from "./caption";
 import { getChannelId, loadPrefs } from "./settings";
 import { handleCallbackQuery, handleRemoteCommand, isChannelAdmin } from "./remote";
-import { findAdmin, parseRemoteAdmins, type RemoteRole } from "./remoteAuth";
+import { findAdmin, parseRemoteAdmins, resolveInboundRole, type RemoteRole } from "./remoteAuth";
 import { logDiag } from "./diaglog";
 
 export interface UpdatesResult {
@@ -46,7 +46,9 @@ async function ingestUpdate(u: TgUpdate, channelId: string): Promise<IngestResul
     if (!chat || !fromId) return NOTHING;
     const cbChatId = String(chat.id);
     let role: RemoteRole | null = null;
-    if (cbChatId === channelId) {
+    // Same rule as the message path below: only a real channel can confer
+    // admin. A group admin is an admin of the group, not of this device.
+    if (cbChatId === channelId && chat.type === "channel") {
       role = (await isChannelAdmin(channelId, fromId)) ? "admin" : null;
     } else if (chat.type === "private") {
       role = findAdmin(admins, fromId)?.role ?? null;
@@ -60,14 +62,21 @@ async function ingestUpdate(u: TgUpdate, channelId: string): Promise<IngestResul
   if (!msg) return NOTHING;
   const chatId = String(msg.chat.id);
   const isChannel = chatId === channelId;
-  let actorRole: RemoteRole | null = null;
-  if (isChannel) {
-    // Channel posts are the owner/admin path (only channel admins can post in
-    // the usual private-channel setup).
-    actorRole = "admin";
-  } else if (!u.channel_post && msg.chat.type === "private") {
-    actorRole = findAdmin(admins, msg.from?.id)?.role ?? null;
-  }
+  // Admin authority is not implied by "posted in the destination": setup
+  // accepts any chat the bot can see, and a group's members are not admins.
+  // resolveInboundRole() only grants admin for a real channel, and asks
+  // Telegram for the sender's admin status when the update is a plain message.
+  // Channel posts carry no `from`, so the lookup only runs when it can matter.
+  const needsAdminLookup =
+    isChannel && msg.chat.type === "channel" && !u.channel_post && msg.from?.id != null;
+  const actorRole: RemoteRole | null = resolveInboundRole({
+    chatType: msg.chat.type,
+    isChannelPost: Boolean(u.channel_post),
+    isDestinationChat: isChannel,
+    fromId: msg.from?.id,
+    admins,
+    verifiedChatAdmin: needsAdminLookup ? await isChannelAdmin(channelId, msg.from!.id) : false,
+  });
   if (!actorRole) return NOTHING;
   if (msg.text && (await handleRemoteCommand(msg, isChannel ? channelId : chatId, actorRole))) {
     return { ...NOTHING, commands: 1 };
