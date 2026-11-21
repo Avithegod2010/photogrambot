@@ -151,7 +151,17 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig pbReleaseSigning != null ? signingConfigs.release : signingConfigs.debug
+            // Fail closed: a release signed with the debug key can be impersonated
+            // by anyone (the AOSP debug keystore is public). Refuse to build rather
+            // than silently shipping a forgeable APK.
+            if (pbReleaseSigning == null) {
+                throw new GradleException(
+                    "Release signing is not configured. Set PB_RELEASE_KEYSTORE_PATH, " +
+                    "PB_RELEASE_STORE_PASSWORD, PB_RELEASE_KEY_ALIAS and PB_RELEASE_KEY_PASSWORD " +
+                    "(CI: feed them from repository secrets). Refusing to sign a release with the debug key."
+                )
+            }
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
