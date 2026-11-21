@@ -1,11 +1,29 @@
 name: Maestro smoke
 
+# A CI install is always unconfigured: the bot token and channel live in
+# expo-secure-store, so the app opens the setup wizard rather than the gallery.
+# The flow asserts that first-run surface and then runs the read-only
+# navigation checks whenever a configured build is installed. See
+# .maestro/smoke.yaml for the two branches.
+
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - ".maestro/**"
       - ".github/workflows/maestro.yml"
+  # Also run on main so a regression in the flow is visible where it lands,
+  # instead of only on a dependabot branch nobody merges.
+  push:
+    branches:
+      - main
+    paths:
+      - ".maestro/**"
+      - ".github/workflows/maestro.yml"
+
+env:
+  # No network chatter from the CLI, and no analytics ping on a CI runner.
+  MAESTRO_CLI_NO_ANALYTICS: "true"
 
 jobs:
   smoke:
@@ -27,14 +45,60 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build debug APK (x86_64)
+      # Same key scheme as release.yml on purpose: the smoke job then restores
+      # the Gradle caches that the release builds already populated, which is
+      # the difference between a ~10 minute build and an uncached 40+ minute one.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # A debug APK is useless here: expo-dev-client is installed, so a debug
+      # build boots into the dev launcher and waits for Metro - the app's own UI
+      # (and therefore the setup wizard) never appears. assembleRelease embeds
+      # the JS bundle and signs with the committed debug.keystore when
+      # pb-release-signing.properties is absent, so it installs with plain adb.
+      - name: Build release APK (x86_64, embedded JS bundle)
         working-directory: android
-        run: ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon
+        run: |
+          ./gradlew assembleRelease \
+            -PreactNativeArchitectures=x86_64 \
+            -Pandroid.enableMinifyInReleaseBuilds=false \
+            -Pandroid.enableShrinkResourcesInReleaseBuilds=false \
+            --no-daemon
 
       - name: Install Maestro
         run: |
           curl -Ls "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # /dev/kvm on a hosted runner is often root:kvm 0660 with the runner user
+      # not in the kvm group. The emulator then falls back to `-accel off`,
+      # exits with "Software CPU emulation (-accel off) is not supported", and
+      # the action keeps polling sys.boot_completed for the full boot timeout
+      # before failing with a misleading "Timeout waiting for emulator to boot".
+      # Hosted runners have passwordless sudo, so grant access up front.
+      - name: Prepare KVM access
+        run: |
+          set -euo pipefail
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::This runner has no /dev/kvm at all; the emulator cannot start. Re-run the job to get a KVM-capable runner."
+            exit 1
+          fi
+          echo "before:"; ls -l /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            echo "after:"; ls -l /dev/kvm
+          fi
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::/dev/kvm is still not readable/writable; the emulator would fall back to software emulation."
+            exit 1
+          fi
 
       - name: Run smoke flow on emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -42,7 +106,24 @@ jobs:
           api-level: 34
           arch: x86_64
           profile: pixel_6
+          cores: 4
           disable-animations: true
+          emulator-boot-timeout: 900
           script: |
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb wait-for-device
+            # Each line here runs as its own `sh -c`, so no multi-line loops.
+            # Bounded (2 min): the package manager can lag boot-complete.
+            for i in $(seq 1 60); do adb shell pm path android >/dev/null 2>&1 && break; sleep 2; done
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
             maestro test .maestro/smoke.yaml
+
+      - name: Upload Maestro debug output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-debug
+          # Maestro writes logs, screenshots and the UI hierarchy here; without
+          # this a failed assertion is undiagnosable from the run log alone.
+          path: /home/runner/.maestro/tests
+          if-no-files-found: ignore
+          retention-days: 7
