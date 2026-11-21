@@ -1,11 +1,29 @@
 name: Maestro smoke
 
+# A CI install is always unconfigured: the bot token and channel live in
+# expo-secure-store, so the app opens the setup wizard rather than the gallery.
+# The flow asserts that first-run surface and then runs the read-only
+# navigation checks whenever a configured build is installed. See
+# .maestro/smoke.yaml for the two branches.
+
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - ".maestro/**"
       - ".github/workflows/maestro.yml"
+  # Also run on main so a regression in the flow is visible where it lands,
+  # instead of only on a dependabot branch nobody merges.
+  push:
+    branches:
+      - main
+    paths:
+      - ".maestro/**"
+      - ".github/workflows/maestro.yml"
+
+env:
+  # No network chatter from the CLI, and no analytics ping on a CI runner.
+  MAESTRO_CLI_NO_ANALYTICS: "true"
 
 jobs:
   smoke:
@@ -43,6 +61,27 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          emulator-boot-timeout: 900
           script: |
+            set -e
+            adb wait-for-device
+            # The package manager can lag the boot-complete broadcast on a cold
+            # AVD; installing too early fails with "device offline"/"closed".
+            # Bounded to 2 minutes so a genuinely dead emulator still fails fast.
+            for i in $(seq 1 60); do
+              if adb shell pm path android >/dev/null 2>&1; then break; fi
+              sleep 2
+            done
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             maestro test .maestro/smoke.yaml
+
+      - name: Upload Maestro debug output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-debug
+          # Maestro writes logs, screenshots and the UI hierarchy here; without
+          # this a failed assertion is undiagnosable from the run log alone.
+          path: /home/runner/.maestro/tests
+          if-no-files-found: ignore
+          retention-days: 7

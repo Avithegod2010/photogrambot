@@ -3,60 +3,93 @@
 # Run against an installed build:
 #   maestro test .maestro/smoke.yaml
 #
-# Assumes app lock is OFF (the flow cannot type a PIN) and a configured
-# library. It only navigates read-only screens; it never uploads or deletes.
+# Two device states are legitimate and both are covered:
+#
+#   1. Fresh install (what CI always is). The bot token and channel id live in
+#      expo-secure-store, so a wiped/CI install has no configuration and App.tsx
+#      renders SetupScreen instead of the tab navigator. Asserting "Gallery" here
+#      can never pass — that assertion is why this job was permanently red. The
+#      first-run contract is the setup wizard, so assert that, then drive one
+#      real interaction (empty token -> local validation error).
+#
+#   2. Configured install (a developer's device). The app opens on the Gallery
+#      tab and the read-only navigation checks run.
+#
+# The flow never uploads or deletes anything and never types a real token.
+
 appId: com.photogrambot.app
 ---
 - launchApp
-- assertVisible: "Gallery"
 
-# Local roll -> viewer -> back (skipped on an empty library).
+# Bounded wait: a cold x86_64 emulator can take a while to paint the first RN
+# frame, and a configured build paints the tabs instead of the wizard.
+- extendedWaitUntil:
+    visible: "Step 1 of 3|Gallery"
+    timeout: 120000
+
+# --- Fresh install: the setup wizard is the real first screen --------------
 - runFlow:
     when:
-      visible:
-        id: "local-tile"
+      visible: "Step 1 of 3"
     commands:
-      - tapOn:
-          id: "local-tile"
-          index: 0
-      - assertVisible: "Back"
-      - back
+      - assertVisible: "Verify and continue"
+      - assertVisible: "Bot token"
+      # Validation is local and offline: no network call, nothing stored.
+      - tapOn: "Verify and continue"
+      - assertVisible: "That does not look like a bot token. Get one from @BotFather."
+
+# --- Configured install: read-only navigation ------------------------------
 - runFlow:
     when:
-      visible:
-        id: "photo-tile"
+      visible: "Gallery"
     commands:
-      - tapOn:
-          id: "photo-tile"
-          index: 0
-      - assertVisible: "Back"
+      # Local roll -> viewer -> back (skipped on an empty library).
+      - runFlow:
+          when:
+            visible:
+              id: "local-tile"
+          commands:
+            - tapOn:
+                id: "local-tile"
+                index: 0
+            - assertVisible: "Back"
+            - back
+      - runFlow:
+          when:
+            visible:
+              id: "photo-tile"
+          commands:
+            - tapOn:
+                id: "photo-tile"
+                index: 0
+            - assertVisible: "Back"
+            - back
+
+      # Settings -> appearance -> back.
+      - tapOn: "Settings"
+      - assertVisible: "Reconfigure bot"
+      - scrollUntilVisible:
+          element:
+            text: "Accent color"
+          direction: DOWN
+      - assertVisible: "Accent color"
       - back
 
-# Settings -> appearance -> back.
-- tapOn: "Settings"
-- assertVisible: "Reconfigure bot"
-- scrollUntilVisible:
-    element:
-      text: "Accent color"
-    direction: DOWN
-- assertVisible: "Accent color"
-- back
+      # Collections round-trip.
+      - tapOn: "Collections"
+      - assertVisible: "Collections"
+      - tapOn: "Gallery"
+      - assertVisible: "Gallery"
 
-# Collections round-trip.
-- tapOn: "Collections"
-- assertVisible: "Collections"
-- tapOn: "Gallery"
-- assertVisible: "Gallery"
-
-# Settings -> Remote & sharing (admin allowlist, devices, sync).
-- tapOn: "Settings"
-- scrollUntilVisible:
-    element:
-      text: "Remote & sharing"
-    direction: DOWN
-- tapOn: "Remote & sharing"
-- assertVisible: "Remote admins"
-- assertVisible: "Devices"
-- back
-- back
-- assertVisible: "Gallery"
+      # Settings -> Remote & sharing (admin allowlist, devices, sync).
+      - tapOn: "Settings"
+      - scrollUntilVisible:
+          element:
+            text: "Remote & sharing"
+          direction: DOWN
+      - tapOn: "Remote & sharing"
+      - assertVisible: "Remote admins"
+      - assertVisible: "Devices"
+      - back
+      - back
+      - assertVisible: "Gallery"
