@@ -1,7 +1,7 @@
 {
   "name": "photogrambot",
   "version": "1.4.3",
-  "description": "Back up your phone's photos and videos to your own Telegram channel via the Bot API — Google Photos-style app built with Expo + React Native.",
+  "description": "Back up your phone's photos and videos to your own Telegram channel via the Bot API \u2014 Google Photos-style app built with Expo + React Native.",
   "license": "MIT",
   "main": "index.ts",
   "dependencies": {
@@ -74,7 +74,11 @@
   "overrides": {
     "shell-quote": "^1.12.0",
     "brace-expansion": "^5.0.12",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "minimatch": "^11.0.4",
+    "@expo/fingerprint": {
+      "glob": "^14.0.3"
+    }
   },
   "private": true
 }
