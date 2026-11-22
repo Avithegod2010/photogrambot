@@ -243,7 +243,8 @@ against the installed version (exactly, via `latest.json`). To publish:
 1. Bump `android/version.properties` (`versionCode` + `versionName`).
 
 2. Run the publish script — it generates `latest.json` from
-   `android/version.properties`, creates the release and uploads both files:
+   `android/version.properties`, hashes the APK, creates the release and
+   uploads both files:
 
    ```bash
    npm run release:publish -- --apk photogrambot-1.1.0.apk --tag v1.1.0 \
@@ -255,16 +256,22 @@ against the installed version (exactly, via `latest.json`). To publish:
    written to disk. On a failed asset upload the half-published release and
    its tag are removed, so a retry is clean.
 
+   `latest.json` carries the APK's `sha256`. The updater only accepts an APK
+   whose download URL is HTTPS on `github.com` (or `*.githubusercontent.com`)
+   and whose bytes match that digest; a release without a digest is refused,
+   so releases published before this field existed must be republished.
+
 3. The updater fetches `/releases?per_page=30`, finds the newest release with
-   an APK, compares `versionCode` (falling back to semver), then downloads and
-   installs the APK. Installing an APK requires the **Install unknown apps**
-   permission for PhotogramBot — the Settings "Check for updates" flow detects
-   a missing permission and offers to open that screen.
+   an APK, compares `versionCode` (falling back to semver), then downloads,
+   verifies the SHA-256 and installs the APK. Installing an APK requires the
+   **Install unknown apps** permission for PhotogramBot — the Settings
+   "Check for updates" flow detects a missing permission and offers to open
+   that screen.
 
 `latest.json` is gitignored; it is a build artifact. If you prefer doing it by
-hand: `npm run release:manifest -- --apk <file> --notes "..."`, then attach the
-APK and `latest.json` to a release created in the GitHub UI (or `gh release
-create`).
+hand: `npm run release:manifest -- --apk <path-to-apk> --notes "..."` (or
+`--sha256 <hex>` when the APK is not on this machine), then attach the APK and
+`latest.json` to a release created in the GitHub UI (or `gh release create`).
 
 `latest.json` is gitignored; it is a build artifact.
 

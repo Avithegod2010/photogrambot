@@ -79,7 +79,7 @@ import { setPin, setDecoyPin, getPinExists, getDecoyExists } from "../lib/apploc
 import { exportMonthZip } from "../lib/zipexport";
 import { getUploadedPhotosInMonth } from "../lib/db";
 import { exportIndexCsv } from "../lib/csvexport";
-import { checkForUpdate, downloadAndInstallUpdate, openInstallSettings, CURRENT_VERSION } from "../lib/updater";
+import { checkForUpdate, downloadAndInstallUpdate, openInstallSettings, CURRENT_VERSION, UpdateRejectedError } from "../lib/updater";
 import { listProfiles, type DestProfile } from "../lib/destinations";
 import {
   getBreakInLog,
@@ -355,6 +355,15 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
                   );
                 } catch (e: any) {
                   setUpdateNote(e?.message ?? "Update failed");
+                  if (e instanceof UpdateRejectedError) {
+                    // A refused update is not an installer-permission problem:
+                    // say why and install nothing.
+                    Alert.alert(
+                      "Update not installed",
+                      `${e.message}\n\nYou can still download the APK yourself from the GitHub releases page.`
+                    );
+                    return;
+                  }
                   Alert.alert(
                     "Couldn't open the installer",
                     "Android needs your permission to install apps from PhotogramBot. Open the setting and allow it, then tap Check again. If the installer opens but Android says the app can't be installed, uninstall the current preview build first — your library restores from the channel backup.",

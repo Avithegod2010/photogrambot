@@ -8,7 +8,9 @@
 //
 // What it does:
 //   1. Reads the version from android/version.properties (the single source of
-//      truth) and writes latest.json next to the APK's name.
+//      truth), hashes the APK (SHA-256) and writes latest.json carrying that
+//      digest next to the APK's name. The in-app updater refuses a release
+//      whose latest.json has no sha256, so this is not optional.
 //   2. Creates a GitHub Release for --tag.
 //   3. Uploads the APK and latest.json as assets.
 //
@@ -20,6 +22,7 @@
 // fine - the updater only skips drafts.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,7 +78,8 @@ if (!versionName || !Number.isFinite(versionCode)) {
 }
 
 const apkName = basename(apkPath);
-const manifest = { versionCode, versionName, apk: apkName };
+const apkSha256 = createHash("sha256").update(readFileSync(apkPath)).digest("hex");
+const manifest = { versionCode, versionName, apk: apkName, sha256: apkSha256 };
 if (notes.trim()) manifest.notes = notes.trim();
 const manifestPath = resolve(join(root, "latest.json"));
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
