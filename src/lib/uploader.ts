@@ -147,9 +147,6 @@ function setProgress(patch: Partial<UploadProgress>): void {
   listeners.forEach((l) => l(progress));
 }
 
-export function getUploadProgress(): UploadProgress {
-  return progress;
-}
 
 export function requestCancelUpload(): void {
   cancelRequested = true;
@@ -901,10 +898,6 @@ async function uploadQueueItem(item: QueueRow): Promise<UploadOutcome> {
   }
 }
 
-export async function getResumeOffset(): Promise<number> {
-  const v = await kvGet("updates_offset");
-  return v ? parseInt(v, 10) : 0;
-}
 
 /**
  * Upload an edited copy of a backed-up photo as a version: the preview and
@@ -1096,9 +1089,6 @@ async function uploadVersionItem(
   }
 }
 
-export async function setResumeOffset(offset: number): Promise<void> {
-  await kvSet("updates_offset", String(offset));
-}
 
 async function uploadVideoItem(
   item: QueueRow,

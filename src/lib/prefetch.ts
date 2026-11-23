@@ -37,7 +37,3 @@ export async function prefetchThumbs(
     })();
   }
 }
-
-export function clearPrefetchQueue(): void {
-  queued.clear();
-}

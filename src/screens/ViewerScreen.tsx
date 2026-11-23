@@ -214,10 +214,6 @@ export function ViewerScreen({ route, navigation }: { route: any; navigation: an
 
   const { width, height } = useResponsive();
 
-  const resolved = useMemo(
-    () => (photo ? resolvePhotoFull(photo) : { fileId: null, localUri: null }),
-    [photo]
-  );
 
   if (!photo) {
     return <View style={[styles.container, { backgroundColor: overlay.mediaCanvas }]} />;

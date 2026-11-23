@@ -72,9 +72,6 @@ function usePressScale(disabled?: boolean) {
   };
 }
 
-function isDynamicColor(value: ColorValue | undefined): boolean {
-  return value != null && typeof value !== "string";
-}
 /**
  * Material ripple on every pressable, in every theme. The ripple colour is a
  * neutral string because Android's ripple layer does not accept the dynamic

@@ -68,9 +68,6 @@ export function hapticSuccess(): void {
   run((m) => m.notificationAsync(m.NotificationFeedbackType.Success));
 }
 
-export function hapticWarning(): void {
-  run((m) => m.notificationAsync(m.NotificationFeedbackType.Warning));
-}
 
 export function hapticError(): void {
   run((m) => m.notificationAsync(m.NotificationFeedbackType.Error));

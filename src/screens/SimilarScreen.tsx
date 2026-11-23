@@ -17,7 +17,6 @@ const SIMILAR_THRESHOLD = 12;
 
 export function SimilarScreen({ route, navigation }: { route: any; navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const photo: PhotoRow | null = route.params?.photo ?? null;
   const [similar, setSimilar] = useState<PhotoRow[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);

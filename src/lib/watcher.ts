@@ -17,9 +17,6 @@ let scanning = false;
 // 2-minute rescan overlap (a long first scan can easily outlive that window).
 let rescanQueued = false;
 
-export function isCameraWatchActive(): boolean {
-  return mediaSub !== null;
-}
 
 export async function startCameraWatch(): Promise<void> {
   if (mediaSub) return;

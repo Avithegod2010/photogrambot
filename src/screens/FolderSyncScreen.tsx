@@ -16,7 +16,6 @@ import { AppBar } from "../components/ui";
 
 export function FolderSyncScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { prefs, update } = useSettingsStore();
   const [folders, setFolders] = useState<DeviceFolder[]>([]);
   const [loading, setLoading] = useState(true);

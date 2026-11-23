@@ -4,13 +4,6 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { downloadFile } from "./telegram";
 import { classifyAutoTags } from "./autotags";
 
-function cacheDir(): Directory {
-  const dir = new Directory(Paths.cache, "photogram");
-  // intermediates: on a fresh install cache/ has no photogram/ yet — a plain
-  // create() throws and every thumbnail download fails silently.
-  if (!dir.exists) dir.create({ intermediates: true });
-  return dir;
-}
 
 function thumbDir(): Directory {
   const dir = new Directory(Paths.cache, "photogram/thumbs");
@@ -51,10 +44,6 @@ export async function getCachedTelegramFile(
   return p;
 }
 
-export async function clearPhotoCache(): Promise<void> {
-  const dir = new Directory(Paths.cache, "photogram");
-  if (dir.exists) dir.delete();
-}
 
 export async function generatePreview(
   assetUri: string,

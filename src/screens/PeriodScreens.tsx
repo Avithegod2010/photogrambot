@@ -11,10 +11,6 @@ import { AppBar, EmptyState } from "../components/ui";
 import { useResponsive } from "../lib/responsive";
 import { spacing } from "../theme";
 
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 export function MonthsOfYearScreen({
   route,
