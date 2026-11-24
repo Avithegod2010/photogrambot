@@ -99,7 +99,6 @@ export function UploadQueueScreen({ navigation }: { navigation: any }) {
   const pending = counts.pending ?? 0;
   const failed = counts.failed ?? 0;
   const capped = running + pending + failed > items.length;
-  const total = running + pending;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>

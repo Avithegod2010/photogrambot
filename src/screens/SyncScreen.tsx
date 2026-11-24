@@ -23,7 +23,6 @@ function describe(c: SyncConflict): string {
 
 export function SyncScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);

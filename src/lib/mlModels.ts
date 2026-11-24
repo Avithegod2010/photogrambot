@@ -172,7 +172,3 @@ export async function readLabels(): Promise<string[]> {
     .map((line) => line.trim())
     .filter(Boolean);
 }
-
-export function clearModelCache(): void {
-  modelCache.clear();
-}

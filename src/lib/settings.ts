@@ -16,7 +16,6 @@ const BACKUP_PASS_KEY = "pb_backup_pass";
 const DECOY_TOKEN_KEY = "pb_decoy_bot_token";
 const DECOY_CHANNEL_KEY = "pb_decoy_channel_id";
 
-export type UploadQuality = "document" | "photo";
 export type ThemeMode = "dark" | "amoled" | "light" | "system";
 export type DateFormat = "locale" | "dmy" | "mdy" | "iso";
 export type TileAspect = "square" | "original";

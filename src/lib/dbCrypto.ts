@@ -32,14 +32,6 @@ export async function getOrCreateDbKey(): Promise<string> {
   return key;
 }
 
-export async function hasDbKey(): Promise<boolean> {
-  try {
-    const key = await SecureStore.getItemAsync(DB_KEY);
-    return !!key && /^[0-9a-f]{64}$/.test(key);
-  } catch {
-    return false;
-  }
-}
 
 /** True when the native SQLite was compiled with SQLCipher. */
 export async function sqlCipherAvailable(db: SQLiteDatabase): Promise<boolean> {

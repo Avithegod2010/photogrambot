@@ -22,7 +22,6 @@ const ROLE_OPTIONS: RemoteRole[] = ["read", "write", "admin"];
 
 export function RemoteScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { prefs, update } = useSettingsStore();
   const admins = parseRemoteAdmins(prefs.remoteAdmins);
 

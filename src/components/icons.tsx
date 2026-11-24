@@ -293,13 +293,6 @@ export function MapPinIcon({ color, size = 24 }: { color: ColorValue; size?: num
   );
 }
 
-export function FilterIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M4 7h16M7 12h10M10 17h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
-    </Svg>
-  );
-}
 
 export function MoreVerticalIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
@@ -311,19 +304,6 @@ export function MoreVerticalIcon({ color, size = 24 }: { color: ColorValue; size
   );
 }
 
-export function PersonIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="12" cy="8" r="3.6" stroke={color} strokeWidth="2" />
-      <Path
-        d="M4.8 20c.6-3.4 3.5-5.6 7.2-5.6s6.6 2.2 7.2 5.6"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
 
 export function LockIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (
@@ -355,19 +335,6 @@ export function WarningIcon({ color, size = 24 }: { color: ColorValue; size?: nu
   );
 }
 
-export function OfflineIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M6.6 18.5a4.1 4.1 0 0 1-.5-8.17 5.9 5.9 0 0 1 11.5-1.16A4.35 4.35 0 0 1 16.9 18.5H6.6z"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <Path d="M4 4l16 16" stroke={color} strokeWidth="2" strokeLinecap="round" />
-    </Svg>
-  );
-}
 
 export function StackIcon({ color, size = 24 }: { color: ColorValue; size?: number }) {
   return (

@@ -85,7 +85,3 @@ export async function ingestSyncDocument(msg: TgMessage): Promise<number> {
     } catch {}
   }
 }
-
-export async function openConflictCount(): Promise<number> {
-  return (await getSyncConflicts(200)).length;
-}

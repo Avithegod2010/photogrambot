@@ -576,23 +576,6 @@ function parseTgResult<T>(body: string, status: number): T {
   return json.result as T;
 }
 
-async function uploadForm(
-  method: string,
-  form: FormData,
-  tokenOverride?: string
-): Promise<TgMessage> {
-  const token = tokenOverride ?? (await getBotToken());
-  if (!token) throw new TelegramError(401, "Bot token not configured");
-  const res = await fetchWithTimeout(
-    `${API_BASE}/bot${token}/${method}`,
-    {
-      method: "POST",
-      body: form,
-    },
-    UPLOAD_TIMEOUT_MS
-  );
-  return parseTgResult<TgMessage>(await res.text(), res.status);
-}
 
 export async function createForumTopic(
   chatId: string | number,

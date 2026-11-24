@@ -21,10 +21,6 @@ export async function ensurePermissions(): Promise<boolean> {
   return status === "granted";
 }
 
-export async function hasPermissions(): Promise<boolean> {
-  const { status } = await MediaLibrary.getPermissionsAsync();
-  return status === "granted";
-}
 
 function isWantedMedia(
   meta: MediaLibrary.AssetMetadata,

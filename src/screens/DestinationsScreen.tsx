@@ -26,7 +26,6 @@ import { getChat } from "../lib/telegram";
 
 export function DestinationsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { channelTitle } = useSetupStore();
 
   const [profiles, setProfiles] = useState<DestProfile[]>([]);

@@ -25,10 +25,6 @@ export function isVideoMime(mime: string | null | undefined): boolean {
   return !!mime && mime.startsWith("video/");
 }
 
-export interface DateGroup {
-  label: string;
-  startMs: number;
-}
 
 // Imported as a type only — erased at runtime, so this module stays dependency-free.
 import type { DateFormat } from "./settings";

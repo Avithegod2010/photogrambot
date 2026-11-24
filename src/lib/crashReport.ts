@@ -65,9 +65,6 @@ export async function pendingCrashReportCount(): Promise<number> {
   return (await readQueue()).length;
 }
 
-export async function clearCrashReports(): Promise<void> {
-  await kvSet(QUEUE_KEY, "[]").catch(() => {});
-}
 
 let installed = false;
 let watchdog: ReturnType<typeof setInterval> | null = null;

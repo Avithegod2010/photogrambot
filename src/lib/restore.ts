@@ -113,9 +113,6 @@ export interface RestoreProgress {
 let restoring = false;
 let cancelRequested = false;
 
-export function isRestoring(): boolean {
-  return restoring;
-}
 
 export function requestCancelRestore(): void {
   cancelRequested = true;

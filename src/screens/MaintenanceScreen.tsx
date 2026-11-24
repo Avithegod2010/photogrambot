@@ -50,7 +50,6 @@ import type { EmbedBackfillProgress } from "../lib/semsearch";
 
 export function MaintenanceScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { stats, refreshMeta, trashPhotos } = useLibraryStore();
 
   const [dupes, setDupes] = useState<DuplicateGroup[]>([]);

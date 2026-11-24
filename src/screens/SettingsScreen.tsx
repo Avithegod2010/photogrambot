@@ -124,7 +124,6 @@ const SETTINGS_SECTIONS: { id: string; label: string; keywords: string }[] = [
 
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { botUsername, channelTitle, token, reset, refreshMetadata } = useSetupStore();
   const { prefs, update } = useSettingsStore();
   const { stats, refreshMeta } = useLibraryStore();

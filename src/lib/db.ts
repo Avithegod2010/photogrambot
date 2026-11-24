@@ -69,11 +69,6 @@ export interface AlbumRow {
   cover_photo_id?: string | null;
 }
 
-export interface TrashRow {
-  photo_id: string;
-  trashed_at: number;
-  remote_deleted: number;
-}
 
 export interface QueueRow {
   id: number;
@@ -440,18 +435,6 @@ export async function getPhotosMissingMotion(limit = 200): Promise<PhotoRow[]> {
 
 // OCR source image for a row: the preview (65 KB) or channel thumbnail —
 // screenshot text stays legible at preview resolution.
-export async function getScreenshotOcrCount(): Promise<number> {
-  const d = await getDb();
-  const row = await d.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) as n FROM photos
-     WHERE status = 'uploaded' AND ocr_text IS NULL
-       AND ((' ' || COALESCE(tags, '') || ' ') LIKE '% screenshot %'
-            OR (' ' || COALESCE(tags, '') || ' ') LIKE '% screenshots %')
-       AND id NOT IN (SELECT photo_id FROM trash)
-      AND id NOT IN (SELECT ap.photo_id FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE a.locked = 1)`
-  );
-  return row?.n ?? 0;
-}
 
 async function addColumnsIfMissing(
   db: SQLite.SQLiteDatabase,
@@ -1076,10 +1059,6 @@ export async function getEmbeddingCoverage(): Promise<{ embedded: number; missin
   return { embedded: row?.embedded ?? 0, missing: row?.missing ?? 0 };
 }
 
-export async function clearEmbeddings(): Promise<void> {
-  const d = await getDb();
-  await d.runAsync("DELETE FROM photo_embeddings");
-}
 
 export interface SemanticCorpusItem {
   id: string;
@@ -1549,14 +1528,6 @@ export async function purgeExpiredTrash(days: number): Promise<string[]> {
   return ids;
 }
 
-export async function getTrashPendingRemoteDelete(): Promise<{ photo_id: string; message_id: number | null }[]> {
-  const d = await getDb();
-  return d.getAllAsync<{ photo_id: string; message_id: number | null }>(
-    `SELECT t.photo_id, p.message_id FROM trash t
-     JOIN photos p ON p.id = t.photo_id
-     WHERE t.remote_deleted = 0 AND p.message_id IS NOT NULL`
-  );
-}
 
 export async function createAlbum(name: string): Promise<number> {
   const d = await getDb();
@@ -1650,13 +1621,6 @@ export async function getPersonPhotos(personId: number): Promise<PhotoRow[]> {
   );
 }
 
-export async function getFaceEmbeddingCount(): Promise<number> {
-  const d = await getDb();
-  const row = await d.getFirstAsync<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM face_embeddings"
-  );
-  return row?.n ?? 0;
-}
 
 /** Appends new auto-tags and refreshes the FTS row. */
 export async function addPhotoTags(photoId: string, newTags: string[]): Promise<void> {
@@ -1795,11 +1759,6 @@ export async function savePeopleClusters(
   });
 }
 
-export async function renameAlbum(id: number, name: string): Promise<void> {
-  const d = await getDb();
-  await d.runAsync("UPDATE albums SET name = ? WHERE id = ?", [name, id]);
-  await recordSyncOp("album", String(id), "album_name", name);
-}
 
 export interface AlbumWithCover extends AlbumRow {
   count: number;
@@ -2086,20 +2045,6 @@ export async function removeFromAlbum(albumId: number, photoIds: string[]): Prom
   }
 }
 
-export async function getPhotoAlbums(photoId: string): Promise<AlbumRow[]> {
-  const d = await getDb();
-  const rows = await d.getAllAsync<any>(
-    "SELECT a.* FROM album_photos ap JOIN albums a ON a.id = ap.album_id WHERE ap.photo_id = ?",
-    [photoId]
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    created_at: r.created_at,
-    locked: r.locked,
-    query: r.query ?? null,
-  }));
-}
 
 export async function setAlbumLocked(id: number, locked: boolean): Promise<void> {
   const d = await getDb();
@@ -2358,10 +2303,6 @@ export async function removeQueueItem(id: number): Promise<boolean> {
   return (res.changes ?? 0) > 0;
 }
 
-export async function clearFinishedQueue(): Promise<void> {
-  const d = await getDb();
-  await d.runAsync("DELETE FROM upload_queue WHERE state IN ('done','skipped','duplicate')");
-}
 
 // Channel-dedupe audit: groups of rows sharing one content_hash where every
 // member has its own channel post — identical uploads posted twice (re-syncs,
@@ -2547,17 +2488,6 @@ export async function clearLocalUris(ids: string[]): Promise<void> {
   });
 }
 
-export async function getLibraryCounts(): Promise<{ local: number; cloud: number }> {
-  const d = await getDb();
-  const row = await d.getFirstAsync<any>(`
-    SELECT
-      SUM(CASE WHEN status != 'uploaded' THEN 1 ELSE 0 END) AS local,
-      SUM(CASE WHEN status = 'uploaded' THEN 1 ELSE 0 END) AS cloud
-    FROM photos
-    WHERE id NOT IN (SELECT photo_id FROM trash)
-  `);
-  return { local: row?.local ?? 0, cloud: row?.cloud ?? 0 };
-}
 
 export interface StorageSummary {
   cloudBytes: number;
@@ -2903,10 +2833,6 @@ export async function setHashCache(
   );
 }
 
-export async function clearHashCache(): Promise<void> {
-  const d = await getDb();
-  await d.runAsync("DELETE FROM hash_cache");
-}
 
 // --- Near-duplicate finder (perceptual hash) persistence ---
 

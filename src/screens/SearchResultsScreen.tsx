@@ -16,7 +16,6 @@ import type { PhotoRow } from "../lib/db";
 // current with new uploads — no materialized copies.
 export function SearchResultsScreen({ route, navigation }: { route: any; navigation: any }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const title: string = route.params?.title ?? "Search";
   const query: string = route.params?.query ?? "";
   const filtersJson: string = route.params?.filtersJson ?? "null";

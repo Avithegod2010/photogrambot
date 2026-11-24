@@ -78,7 +78,6 @@ type LocalItem = {
   asset: MediaLibrary.AssetMetadata;
 };
 
-const ABS_FILL: any = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
 
 const COLUMNS = 3;
 const clampColumns = (n: number) => Math.max(2, Math.min(6, Math.round(n || COLUMNS)));
