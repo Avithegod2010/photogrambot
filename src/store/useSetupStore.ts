@@ -134,6 +134,18 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const chat = await getChat(channelId.trim());
+      // A group/supergroup must never be accepted as the destination. Remote
+      // control treats the destination chat as the trusted admin surface, and
+      // in a group every member can post — the bot would have to grant them all
+      // admin (it did, before the authorization fix in updates.ts) or reject
+      // every command. Refuse up front with an explanation instead.
+      if (chat.type !== "channel") {
+        throw new Error(
+          "That chat is a " +
+            (chat.type === "private" ? "private chat" : String(chat.type)) +
+            ", not a channel. Create a private channel and add the bot as an admin — group members would otherwise inherit remote control of this device."
+        );
+      }
       await setChannelId(channelId.trim());
       // Fresh-install migration: an empty library plus a pinned channel
       // backup means this is a new phone that can restore instead of
